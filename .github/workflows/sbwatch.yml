@@ -36,6 +36,10 @@ env:
   # make the run red when the update carries security fixes (nice with a status badge)
   FAIL_ON_SECURITY: "false"
 
+concurrency:
+  group: sbwatch-${{ inputs.image || 'secureblue/silverblue-main-hardened' }}-${{ inputs.arch || 'amd64' }}
+  cancel-in-progress: false
+
 jobs:
   watch:
     name: Update watch
@@ -46,6 +50,16 @@ jobs:
         uses: actions/checkout@v5
         with:
           persist-credentials: false
+
+      - name: Install cosign (optional, for --cosign-pub verification)
+        uses: sigstore/cosign-installer@v3.8.1 # pin: 7e3a2104f2d99210007d200c5a6296c1e5cc7ada
+        with:
+          cosign-release: 'v2.4.1'
+
+      - name: Download secureblue cosign.pub
+        run: |
+          curl -fsSL -o cosign.pub https://raw.githubusercontent.com/secureblue/secureblue/live/cosign.pub
+          ls -l cosign.pub
 
       - name: Restore sbwatch cache (package lists per image, Bodhi answers, last digest)
         uses: actions/cache@v4
@@ -63,6 +77,10 @@ jobs:
           args=(--image "$SB_IMAGE" --arch "$SB_ARCH" --max-bodhi 80 --report report.md)
           [ -n "${SB_FROM:-}" ] && args+=(--a "$SB_FROM")
           [ "${{ inputs.force }}" = "true" ] && args+=(--force)
+          if [ -f cosign.pub ]; then
+            args+=(--cosign-pub cosign.pub)
+            # args+=(--require-cosign) # uncomment to enforce signature
+          fi
           rc=0
           python3 sbwatch.py check "${args[@]}" || rc=$?
           # 0 = ok, 10 = "fail-on security" tripped: neither is an error here
@@ -94,6 +112,7 @@ jobs:
             report.md
             report.md.json
           if-no-files-found: ignore
+          retention-days: 7
 
       - name: Should we notify?
         id: notify
@@ -137,18 +156,21 @@ jobs:
           SUMMARY: ${{ steps.check.outputs.summary }}
         run: |
           python3 - <<'PY'
-          import json, os, urllib.request
+          import json, os, urllib.request, sys
           try:
               body = open("report.md").read()[:3500]
           except FileNotFoundError:
               body = "(no report)"
           text = (os.environ.get("SUMMARY") or "secureblue update") + "\n\n" + body
-          req = urllib.request.Request(
-              "https://api.telegram.org/bot{}/sendMessage".format(os.environ["TELEGRAM_BOT_TOKEN"]),
-              data=json.dumps({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text,
-                               "disable_web_page_preview": True}).encode(),
-              headers={"Content-Type": "application/json"})
-          print(urllib.request.urlopen(req, timeout=30).read()[:150].decode())
+          try:
+              req = urllib.request.Request(
+                  "https://api.telegram.org/bot{}/sendMessage".format(os.environ["TELEGRAM_BOT_TOKEN"]),
+                  data=json.dumps({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text,
+                                   "disable_web_page_preview": True}).encode(),
+                  headers={"Content-Type": "application/json"})
+              print(urllib.request.urlopen(req, timeout=30).read()[:150].decode())
+          except Exception as e:
+              print(f"Telegram push failed (non-fatal): {e}", file=sys.stderr)
           PY
 
       - name: Red run when security fixes are waiting
