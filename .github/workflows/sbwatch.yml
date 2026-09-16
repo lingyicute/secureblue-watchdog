@@ -1,0 +1,154 @@
+name: secureblue update watch
+
+on:
+  schedule:
+    - cron: "20 10 * * *"      # 10:20 UTC: secureblue builds 06:00, its trivy scan 08:00
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "ghcr repo (namespace/name)"
+        default: "secureblue/silverblue-main-hardened"
+        required: false
+      arch:
+        description: "architecture"
+        default: "amd64"
+        type: choice
+        options: [amd64, arm64]
+      from_tag:
+        description: "compare against this tag instead of the last seen image (e.g. 20260910)"
+        required: false
+        default: ""
+      force:
+        description: "re-analyse even if the digest did not change"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  SB_IMAGE: ${{ inputs.image || 'secureblue/silverblue-main-hardened' }}
+  SB_ARCH: ${{ inputs.arch || 'amd64' }}
+  SB_FROM: ${{ inputs.from_tag }}
+  # "skip" verdicts are the boring majority: keep them in the log, don't notify
+  POST_SKIP_VERDICT: "false"
+  # make the run red when the update carries security fixes (nice with a status badge)
+  FAIL_ON_SECURITY: "false"
+
+jobs:
+  watch:
+    name: Update watch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Restore sbwatch cache (package lists per image, Bodhi answers, last digest)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/sbwatch
+          key: sbwatch-${{ env.SB_ARCH }}-${{ github.run_id }}
+          restore-keys: |
+            sbwatch-${{ env.SB_ARCH }}-
+            sbwatch-
+
+      - name: Analyse the newest build
+        id: check
+        run: |
+          set -uo pipefail
+          args=(--image "$SB_IMAGE" --arch "$SB_ARCH" --max-bodhi 80 --report report.md)
+          [ -n "${SB_FROM:-}" ] && args+=(--a "$SB_FROM")
+          [ "${{ inputs.force }}" = "true" ] && args+=(--force)
+          rc=0
+          python3 sbwatch.py check "${args[@]}" || rc=$?
+          # 0 = ok, 10 = "fail-on security" tripped: neither is an error here
+          if [ "$rc" != 0 ] && [ "$rc" != 10 ]; then
+            echo "sbwatch exited $rc"
+            exit "$rc"
+          fi
+          echo 'sbwatch exit code: '"$rc"
+          [ -f report.md ] && cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Append build history (several pushes a day share one version string)
+        if: steps.check.outputs.verdict != 'no-update'
+        run: |
+          {
+            echo ""
+            echo "## Builds in this repo, newest last"
+            echo '```'
+            python3 sbwatch.py history --image "$SB_IMAGE" --arch "$SB_ARCH" \
+              --scan 10 --days 7 2>&1 || echo "(history scan failed)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: update-watch-${{ github.run_number }}
+          path: |
+            report.md
+            report.md.json
+          if-no-files-found: warn
+
+      - name: Should we notify?
+        id: notify
+        run: |
+          verdict="${{ steps.check.outputs.verdict }}"
+          post=true
+          if [ "$verdict" = "no-update" ]; then post=false; fi
+          if [ "$verdict" = "skip" ] && [ "$POST_SKIP_VERDICT" != "true" ]; then post=false; fi
+          {
+            echo "post=$post"
+            echo "verdict=$verdict"
+          } >> "$GITHUB_OUTPUT"
+          echo "verdict=$verdict post=$post"
+
+      - name: Comment on (or open) a sticky issue
+        if: steps.notify.outputs.post == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          title="secureblue update watch"
+          {
+            printf '> 🤖 update-watch · %s · verdict: **%s**\n\n' "$(date -u +%F)" "${{ steps.notify.outputs.verdict }}"
+            cat report.md
+          } > body.md
+          num=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+                  --search "in:title $title" --json number --jq '.[0].number // empty')
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --repo "$GITHUB_REPOSITORY" --body-file body.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file body.md \
+              --label update-watch 2>/dev/null ||
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file body.md
+          fi
+
+      - name: Push to Telegram
+        if: steps.notify.outputs.post == 'true' && env.TELEGRAM_BOT_TOKEN != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SUMMARY: ${{ steps.check.outputs.summary }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          text = (os.environ.get("SUMMARY") or "secureblue update") + "\n\n" \
+                 + open("report.md").read()[:3500]
+          req = urllib.request.Request(
+              "https://api.telegram.org/bot{}/sendMessage".format(os.environ["TELEGRAM_BOT_TOKEN"]),
+              data=json.dumps({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text,
+                               "disable_web_page_preview": True}).encode(),
+              headers={"Content-Type": "application/json"})
+          print(urllib.request.urlopen(req, timeout=30).read()[:150].decode())
+          PY
+
+      - name: Red run when security fixes are waiting
+        if: env.FAIL_ON_SECURITY == 'true' && steps.notify.outputs.verdict == 'update-now'
+        run: |
+          echo "::error::new image has security fixes -> rpm-ostree upgrade && systemctl reboot"
+          exit 10
