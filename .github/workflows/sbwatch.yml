@@ -2,7 +2,7 @@ name: secureblue update watch
 
 on:
   schedule:
-    - cron: "20 10 * * *"      # 10:20 UTC: secureblue builds 06:00, its trivy scan 08:00
+    - cron: '20 * * * *'
   workflow_dispatch:
     inputs:
       image:
