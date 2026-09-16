@@ -74,7 +74,7 @@ jobs:
           [ -f report.md ] && cat report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Append build history (several pushes a day share one version string)
-        if: steps.check.outputs.verdict != 'no-update'
+        if: steps.check.outputs.verdict != 'no-update' && steps.check.outputs.verdict != 'no-change' && steps.check.outputs.verdict != '' && steps.check.outputs.verdict != 'unknown'
         run: |
           {
             echo ""
@@ -87,20 +87,21 @@ jobs:
 
       - name: Upload report
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.check.outputs.verdict != 'no-update' && steps.check.outputs.verdict != '' && steps.check.outputs.verdict != 'unknown'
         with:
           name: update-watch-${{ github.run_number }}
           path: |
             report.md
             report.md.json
-          if-no-files-found: warn
+          if-no-files-found: ignore
 
       - name: Should we notify?
         id: notify
         run: |
           verdict="${{ steps.check.outputs.verdict }}"
           post=true
-          if [ "$verdict" = "no-update" ]; then post=false; fi
+          # silent when nothing changed: no-update, no-change, unknown, empty
+          if [ "$verdict" = "no-update" ] || [ "$verdict" = "no-change" ] || [ "$verdict" = "unknown" ] || [ -z "$verdict" ]; then post=false; fi
           if [ "$verdict" = "skip" ] && [ "$POST_SKIP_VERDICT" != "true" ]; then post=false; fi
           {
             echo "post=$post"
@@ -116,7 +117,7 @@ jobs:
           title="secureblue update watch"
           {
             printf '> 🤖 update-watch · %s · verdict: **%s**\n\n' "$(date -u +%F)" "${{ steps.notify.outputs.verdict }}"
-            cat report.md
+            if [ -f report.md ]; then cat report.md; else echo "_no report_"; fi
           } > body.md
           num=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
                   --search "in:title $title" --json number --jq '.[0].number // empty')
@@ -137,8 +138,11 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, urllib.request
-          text = (os.environ.get("SUMMARY") or "secureblue update") + "\n\n" \
-                 + open("report.md").read()[:3500]
+          try:
+              body = open("report.md").read()[:3500]
+          except FileNotFoundError:
+              body = "(no report)"
+          text = (os.environ.get("SUMMARY") or "secureblue update") + "\n\n" + body
           req = urllib.request.Request(
               "https://api.telegram.org/bot{}/sendMessage".format(os.environ["TELEGRAM_BOT_TOKEN"]),
               data=json.dumps({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text,
