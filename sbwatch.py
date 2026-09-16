@@ -1389,9 +1389,20 @@ def cmd_check(args):
     if state.get("digest") == cur["digest"] and not args.force:
         msg = (f"no new build for {args.image}:{args.to} - still {ver} "
                f"({cur['digest'][:19]}...), nothing to download")
-        print(msg)
+        log(msg)
+        # silent exit: no report needed, but keep GITHUB_OUTPUT for the workflow
+        # to skip notify/upload. Create a minimal report only if caller asked for one,
+        # so that upload-artifact with if-no-files-found: warn doesn't warn.
+        report = args.report or "report.md"
+        try:
+            # write a tiny placeholder if the workflow expects a file; otherwise skip
+            if os.environ.get("GITHUB_ACTIONS"):
+                with open(report, "w") as fh:
+                    fh.write(f"# No new build\n\n{msg}\n")
+        except Exception:
+            pass
         gh_outputs({"verdict": "no-update", "digest": cur["digest"], "summary": msg,
-                    "download_bytes": 0, "report": "", "version": ver,
+                    "download_bytes": 0, "report": report, "version": ver,
                     "inputhash": cur["annotations"].get("rpmostree.inputhash") or ""})
         return 0
 
@@ -1426,11 +1437,24 @@ def cmd_check(args):
                 break
     if not ref_a:
         msg = f"new build ({ver}) but no earlier image available to diff against"
-        print(msg)
+        log(msg)
+        # first run / no baseline: don't fail the workflow, just report unknown
+        # and let the workflow decide whether to notify. This used to return 1
+        # which made the GitHub Action red.
+        report = args.report or "report.md"
+        try:
+            if os.environ.get("GITHUB_ACTIONS"):
+                with open(report, "w") as fh:
+                    fh.write(f"# {msg}\n\nNo baseline image found to diff against. "
+                             f"Current: {ver} {cur['digest'][:19]}...\n")
+                json.dump({"verdict": {"level": "unknown"}, "version": ver,
+                           "digest": cur["digest"]}, open(report + ".json", "w"), indent=1)
+        except Exception:
+            pass
         gh_outputs({"verdict": "unknown", "digest": cur["digest"], "summary": msg,
-                    "download_bytes": 0, "report": "", "version": ver})
+                    "download_bytes": 0, "report": report, "version": ver})
         save_state()
-        return 1
+        return 0
 
     # rebuild-only fast path: if rpm-ostree's resolved inputs are byte-identical, no
     # package can have changed - skip the 33 MB rpmdb fetch entirely.
