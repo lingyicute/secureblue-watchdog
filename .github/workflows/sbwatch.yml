@@ -79,7 +79,7 @@ jobs:
           [ "${{ inputs.force }}" = "true" ] && args+=(--force)
           if [ -f cosign.pub ]; then
             args+=(--cosign-pub cosign.pub)
-            # args+=(--require-cosign) # uncomment to enforce signature
+            args+=(--require-cosign) 
           fi
           rc=0
           python3 sbwatch.py check "${args[@]}" || rc=$?
