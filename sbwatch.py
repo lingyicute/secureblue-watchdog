@@ -50,8 +50,10 @@ import io
 import json
 import os
 import re
+import shutil
 import sqlite3
 import struct
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -61,6 +63,11 @@ import urllib.parse
 import urllib.request
 
 DEFAULT_IMAGE = "secureblue/silverblue-main-hardened"
+# P0 hardening limits (anti zip-bomb / DoS)
+MAX_BLOB_BYTES = 200 * 1024 * 1024          # 200 MiB compressed
+MAX_DECOMPRESSED_BYTES = 200 * 1024 * 1024  # 200 MiB decompressed
+MAX_TAR_MEMBERS = 10_000
+MAX_TAR_FILE_SIZE = 100 * 1024 * 1024       # 100 MiB single file inside tar
 MANIFEST_ACCEPT = ",".join([
     "application/vnd.oci.image.index.v1+json",
     "application/vnd.oci.image.manifest.v1+json",
@@ -95,6 +102,92 @@ def human(nbytes) -> str:
             return f"{n:.1f} {unit}"
         n /= 1024.0
     return f"{n:.1f} TiB"
+
+
+def _safe_read_limited(resp, limit: int) -> bytes:
+    """Read from HTTPResponse with hard limit to avoid OOM / zip-bomb."""
+    cl = resp.headers.get("Content-Length")
+    if cl and cl.isdigit() and int(cl) > limit:
+        raise SystemExit(f"blob Content-Length {cl} > {human(limit)} limit - aborting")
+    chunks = []
+    total = 0
+    while True:
+        chunk = resp.read(1 << 20)  # 1 MiB
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise SystemExit(f"blob exceeds {human(limit)} limit during download - possible bomb")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def verify_cosign_image(full_ref: str, pubkey_path: str, require: bool = False) -> bool:
+    """
+    P0: optional cosign signature verification.
+    full_ref = host/repo@sha256:digest or host/repo:tag
+    Returns True if verified, False if skipped/failed (and not required).
+    Raises SystemExit if require=True and verification fails.
+    """
+    if not pubkey_path:
+        return False
+    if not os.path.exists(pubkey_path):
+        msg = f"cosign pubkey not found: {pubkey_path}"
+        if require:
+            raise SystemExit(msg)
+        log(f"  ! {msg} - skipping verification")
+        return False
+    cosign_bin = shutil.which("cosign")
+    if not cosign_bin:
+        msg = "cosign binary not found in PATH - install sigstore/cosign to enable verification"
+        if require:
+            raise SystemExit(msg)
+        log(f"  ! {msg} - skipping")
+        return False
+    # secureblue publishes cosign.pub at https://github.com/secureblue/secureblue/blob/live/cosign.pub
+    cmd = [cosign_bin, "verify", "--key", pubkey_path, full_ref]
+    log(f"  verifying {full_ref} with cosign...")
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+        if res.returncode == 0:
+            log(f"  cosign verify OK for {full_ref}")
+            return True
+        else:
+            err = (res.stderr or res.stdout)[:500]
+            msg = f"cosign verify FAILED for {full_ref}: {err}"
+            if require:
+                raise SystemExit(msg)
+            log(f"  ! {msg}")
+            return False
+    except subprocess.TimeoutExpired:
+        msg = f"cosign verify timeout for {full_ref}"
+        if require:
+            raise SystemExit(msg)
+        log(f"  ! {msg}")
+        return False
+    except Exception as e:
+        msg = f"cosign verify error: {e}"
+        if require:
+            raise SystemExit(msg)
+        log(f"  ! {msg}")
+        return False
+
+
+def maybe_verify_resolved(reg: Registry, resolved: dict, args) -> None:
+    """If --cosign-pub is set, verify the resolved digest."""
+    pub = getattr(args, "cosign_pub", None)
+    if not pub:
+        return
+    req = getattr(args, "require_cosign", False)
+    # build full ref: host/repo@digest (digest is the image digest, not index digest if possible)
+    digest = resolved.get("digest") or resolved.get("index_digest")
+    if not digest:
+        log("  ! cannot verify: no digest in resolved image")
+        if req:
+            raise SystemExit("no digest for cosign verification")
+        return
+    full_ref = f"{reg.host}/{reg.repo}@{digest}"
+    verify_cosign_image(full_ref, pub, require=req)
 
 
 # --------------------------------------------------------------------------- #
@@ -219,7 +312,8 @@ class Registry:
 
     def get(self, path: str, accept: str) -> bytes:
         with self._open(path, accept) as r:
-            return r.read()
+            # manifest is small, blobs can be large - enforce same limit for safety
+            return _safe_read_limited(r, MAX_BLOB_BYTES)
 
     def resolve(self, ref: str | None = None, light: bool = False) -> dict:
         """manifest + config for one architecture, plus a normalized chunk list."""
@@ -271,11 +365,41 @@ class Registry:
     def extract_member(self, layer: dict, match: str) -> str:
         """Download one layer blob, return a local path to the file inside it named *match*."""
         data = self.get(f"blobs/{layer['digest']}", "application/octet-stream")
+        # --- safe decompress with size cap ---
         if data[:2] == b"\x1f\x8b":
-            data = gzip.decompress(data)
+            out_buf = io.BytesIO()
+            total = 0
+            try:
+                with gzip.GzipFile(fileobj=io.BytesIO(data)) as gz:
+                    while True:
+                        chunk = gz.read(1 << 20)  # 1 MiB
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > MAX_DECOMPRESSED_BYTES:
+                            raise SystemExit(
+                                f"decompressed layer > {human(MAX_DECOMPRESSED_BYTES)} "
+                                f"limit - possible zip bomb (layer {layer['digest'][:19]})"
+                            )
+                        out_buf.write(chunk)
+            except (OSError, gzip.BadGzipFile, EOFError) as e:
+                raise SystemExit(f"gzip decompress failed for {layer['digest'][:19]}: {e}")
+            data = out_buf.getvalue()
+        else:
+            if len(data) > MAX_DECOMPRESSED_BYTES:
+                raise SystemExit(
+                    f"uncompressed layer > {human(MAX_DECOMPRESSED_BYTES)} limit "
+                    f"(layer {layer['digest'][:19]})"
+                )
         dest = os.path.join(self._tmp, re.sub(r"\W+", "_", match) + ".extracted")
+        # --- tar hardening ---
         with tarfile.open(fileobj=io.BytesIO(data)) as tf:
             members = tf.getmembers()
+            if len(members) > MAX_TAR_MEMBERS:
+                raise SystemExit(
+                    f"tar has {len(members)} members > {MAX_TAR_MEMBERS} limit "
+                    f"(layer {layer['digest'][:19]})"
+                )
             by_name = {m.name.lstrip("./"): m for m in members}
             chosen = None
             for m in members:
@@ -290,11 +414,25 @@ class Registry:
                         break
             if chosen is None:
                 raise SystemExit(f"'{match}' not found in layer {layer['digest'][:19]}")
+            if chosen.size > MAX_TAR_FILE_SIZE:
+                raise SystemExit(
+                    f"tar member {chosen.name} size {human(chosen.size)} > "
+                    f"{human(MAX_TAR_FILE_SIZE)} limit"
+                )
             f = tf.extractfile(chosen)
             if f is None:
                 raise SystemExit("unreachable member")
+            # stream out with size check
+            total_written = 0
             with open(dest, "wb") as o:
-                o.write(f.read())
+                while True:
+                    chunk = f.read(1 << 20)
+                    if not chunk:
+                        break
+                    total_written += len(chunk)
+                    if total_written > MAX_TAR_FILE_SIZE:
+                        raise SystemExit(f"extracted file > {human(MAX_TAR_FILE_SIZE)} limit")
+                    o.write(chunk)
         del data
         return dest
 
@@ -453,7 +591,7 @@ class Bodhi:
                 log(f"  ! bodhi lookup failed for {src}: {ex}")
             # never cache a failed query: an empty answer would blind later runs
             if cf and ok:
-                json.dump(res, open(cf, "w"))
+                _atomic_write_json(cf, res)
             time.sleep(self.sleep)
         self._mem[key] = res
         return res
@@ -1008,6 +1146,7 @@ def cmd_backlog(args):
     reg = Registry(args.image, arch=args.arch)
     tks = [reg._token()]
     img = resolve(reg, args.ref, tks)
+    maybe_verify_resolved(reg, img, args)
     cache_dir = args.cache_dir or os.path.expanduser("~/.cache/sbwatch")
     notes: list = []
     pkgs = load_pkglist(reg, img, args.ref, cache_dir, notes)
@@ -1197,6 +1336,7 @@ def cmd_tags(args):
     reg = Registry(args.image, arch=args.arch)
     tks = [reg._token()]
     cur = resolve(reg, args.to, tks)
+    maybe_verify_resolved(reg, cur, args)
     print(f"{args.to} -> {cur['digest']}")
     print(f"  version: {cur['annotations'].get('org.opencontainers.image.version')}")
     print(f"  created: {cur.get('created')}   kernel: {cur['annotations'].get('ostree.linux')}")
@@ -1217,6 +1357,8 @@ def cmd_layers(args):
     reg = Registry(args.image, arch=args.arch)
     tks = [reg._token()]
     a, b = resolve(reg, args.a, tks), resolve(reg, args.b, tks)
+    maybe_verify_resolved(reg, a, args)
+    maybe_verify_resolved(reg, b, args)
     ld = layer_diff(a, b)
     if args.json:
         json.dump(ld, open(args.json, "w"), indent=1)
@@ -1242,6 +1384,7 @@ def cmd_pkgs(args):
     reg = Registry(args.image, arch=args.arch)
     tks = [reg._token()]
     r = resolve(reg, args.ref, tks)
+    maybe_verify_resolved(reg, r, args)
     pkgs = package_list(reg, r)
     if args.json:
         slim = {k: {a: b for a, b in v.items() if a != "changelog"} for k, v in pkgs.items()}
@@ -1255,15 +1398,34 @@ def cmd_pkgs(args):
     return 0
 
 
+def _atomic_write_json(path: str, data) -> None:
+    """ atomic write to avoid cache corruption on concurrent runs."""
+    tmp = path + f".tmp.{os.getpid()}"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
 def load_pkglist(reg, img, ref, cache_dir, notes):
     os.makedirs(cache_dir, exist_ok=True)
     cf = os.path.join(cache_dir, f"pkglist-{img['digest'].replace(':', '')}.json")
     if os.path.exists(cf) and os.path.getsize(cf) > 10_000:
-        notes.append(f"package list of `{ref}` served from `{cf}` (no download)")
-        return json.load(open(cf))
+        try:
+            notes.append(f"package list of `{ref}` served from `{cf}` (no download)")
+            return json.load(open(cf))
+        except Exception:
+            log(f"  ! cache {cf} corrupted, refetching")
     log(f"  fetching rpmdb chunk of {ref} ({img['digest'][:19]}…)")
     pk = package_list(reg, img)
-    json.dump(pk, open(cf, "w"))
+    _atomic_write_json(cf, pk)
     notes.append(f"package list of `{ref}` came from that image's `rpmdb.sqlite` chunk "
                  f"(~33 MB fetched, ~3.7 GiB avoided)")
     return pk
@@ -1273,6 +1435,8 @@ def do_diff(args, ref_a: str, ref_b: str) -> dict:
     reg = Registry(args.image, arch=args.arch)
     tks = [reg._token()]
     a, b = resolve(reg, ref_a, tks), resolve(reg, ref_b, tks)
+    maybe_verify_resolved(reg, a, args)
+    maybe_verify_resolved(reg, b, args)
     ld = layer_diff(a, b)
     notes: list = []
     meta = {"kernel_a": a["annotations"].get("ostree.linux"),
@@ -1375,6 +1539,7 @@ def cmd_check(args):
     reg = Registry(args.image, arch=args.arch)
     tks = [reg._token()]
     cur = resolve(reg, args.to, tks)
+    maybe_verify_resolved(reg, cur, args)
     ver = cur["annotations"].get("org.opencontainers.image.version", "?")
 
     def save_state(extra=None):
@@ -1538,6 +1703,12 @@ def add_common(p):
     p.add_argument("--cache-dir", default=None,
                    help="where to cache parsed package lists / Bodhi answers "
                         "(default ~/.cache/sbwatch)")
+    # optional cosign verification
+    p.add_argument("--cosign-pub", default=None,
+                   help="path to cosign public key to verify image signature "
+                        "(e.g. https://github.com/secureblue/secureblue/raw/live/cosign.pub)")
+    p.add_argument("--require-cosign", action="store_true",
+                   help="fail if cosign verification fails or cosign binary missing")
 
 
 def main(argv=None):
