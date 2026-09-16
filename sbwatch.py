@@ -1466,7 +1466,7 @@ def cmd_check(args):
                   "the newest build of a day, so the comparison below is by digest: your last "
                   "image -> current image, i.e. the full delta of skipping them all.")
     md = render_markdown(
-        f"secureblue update intel - {args.image}  {shortref(label_a)} -> {args.to} ({ver})",
+        f"secureblue update watch - {args.image}  {shortref(label_a)} -> {args.to} ({ver})",
                          res["a"], res["b"], res["diff"], res["layers"], v, res["notes"],
                          res.get("xc"), res.get("backlog"))
     report = args.report or "report.md"
