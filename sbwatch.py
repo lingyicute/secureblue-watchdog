@@ -445,7 +445,7 @@ RPMTAG = {
     1011: "license", 1022: "arch", 1044: "sourcerpm", 1080: "changelogtime",
     1081: "changelogname", 1082: "changelogtext",
 }
-STR_TYPES = {6, 7, 9, 10}
+STR_TYPES = {6, 8, 9}   # 6=STRING, 8=STRING_ARRAY, 9=I18NSTRING
 INT_TAGS = {"changelogtime", "epoch", "size"}
 CHUNK_MATCH = "rpmdb.sqlite"
 
@@ -453,9 +453,13 @@ CHUNK_MATCH = "rpmdb.sqlite"
 def read_header(blob: bytes) -> dict:
     """Parse the rpm header stored in the sqlite/ndb `Packages` table."""
     if blob[:3] == b"\x8e\xad\xe8":          # legacy header w/ magic + reserved
+        if len(blob) < 20:
+            return {}
         nindex, hlen = struct.unpack(">II", blob[12:20])
         base = 20
     else:                                    # rpm>=4.16 ndb blob: nindex, hlen, ...
+        if len(blob) < 8:
+            return {}
         nindex, hlen = struct.unpack(">II", blob[:8])
         base = 8
     if 8 + 16 * nindex + hlen > len(blob) + 40:
