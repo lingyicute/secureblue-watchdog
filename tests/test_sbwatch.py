@@ -9,18 +9,26 @@ behaviour of the shipped code with in-memory fixtures. Run with:
 Each group is named after the finding it locks down, so a failure points straight
 at the regression it guards:
   A1/A3  classify_change: errata for the OLD build, and unpushed errata
-  A2     build_history rows must carry the platform digest
+  A2     build_history rows must carry the platform digest (list_tags is stubbed -
+         this suite makes NO network calls at all)
   A4     crosscheck_chunks must not invent "same version" claims
   A5     orient(): A must be the older build
   A6     rpmvercmp against rpm's own 91 upstream test vectors
+  A7     nvr_candidates: source-name spellings (shim/webkitgtk/krb5/...) and the
+         stripped .secureblue.N marker must both be offered to Bodhi matching
   B1     Bodhi cache poisoning / CVEs that only live in bugs[].title
-  D      dead code must stay dead
+  C1     backlog coverage must be reported; pool entries must be real source names
+  C2     backlog matching: source-NVR builds, epoch blindness, release marker
+  D      dead code must stay dead (incl. Bodhi._read_cache, Registry.__enter__)
   E3     state writes are atomic
+  E6     pkg_diff: epoch-only changes must be visible
+  E7     pick_tar_member: largest match wins, tar order must not matter
 """
 import io
 import json
 import os
 import sys
+import tarfile
 import tempfile
 import unittest
 
@@ -139,10 +147,38 @@ class TestEvrCmp(unittest.TestCase):
         # rpmvercmp itself only accepts str)
         self.assertGreater(S.evr_cmp(dict(NSS_OLD, epoch=2), NSS_NEW), 0)
 
-    def test_226_live_epoch_packages_compare(self):
-        # sanity: the current image has 226 packages with a non-zero epoch
+    def test_epoch_string_and_int_forms_both_compare(self):
+        # sanity on the comparison itself (the "226 live epoch packages" figure
+        # from the image audit is context, not something this fixture can test -
+        # the old name claimed otherwise): epoch dominates version, and a
+        # hand-built int epoch must not crash the string-based rpmvercmp
         self.assertGreater(S.evr_cmp(pkg("a", "1-2.fc44", epoch="1"),
                                      pkg("a", "9-9.fc44", epoch="0")), 0)
+
+
+# --------------------------------------------------------------------------- #
+# pkg_diff - an epoch-only change must be visible
+# --------------------------------------------------------------------------- #
+class TestPkgDiffEpoch(unittest.TestCase):
+    def test_epoch_only_change_is_not_skipped(self):
+        # nvr AND evr both exclude the epoch, so the old `x["nvr"] == y["nvr"]`
+        # skip made an epoch introduction (0:1.2-3 -> 1:1.2-3) invisible
+        pa = {"foo": pkg("foo", "1.2-3.fc44", epoch="0")}
+        pb = {"foo": pkg("foo", "1.2-3.fc44", epoch="1")}
+        d = S.pkg_diff(pa, pb)
+        self.assertEqual([c["name"] for c in d["changed"]], ["foo"])
+        self.assertEqual(d["changed"][0]["dir"], "upgrade")
+
+    def test_identical_evr_triple_is_skipped(self):
+        pa = {"foo": pkg("foo", "1.2-3.fc44", epoch="1")}
+        pb = {"foo": pkg("foo", "1.2-3.fc44", epoch="1")}
+        self.assertEqual(S.pkg_diff(pa, pb)["changed"], [])
+
+    def test_epoch_downgrade_is_flagged(self):
+        pa = {"foo": pkg("foo", "1.2-3.fc44", epoch="2")}
+        pb = {"foo": pkg("foo", "1.2-3.fc44", epoch="1")}
+        d = S.pkg_diff(pa, pb)
+        self.assertEqual(d["changed"][0]["dir"], "downgrade")
 
 
 # --------------------------------------------------------------------------- #
@@ -195,11 +231,48 @@ class TestClassifyChange(unittest.TestCase):
         self.assertIn("CVE-2026-2673", info["cves"])
 
     def test_secureblue_local_release_is_matched(self):
-        # secureblue rebuilds carry no Fedora dist tag at all
+        # secureblue's own rebuilds carry no Fedora dist tag at all: the raw NVR
+        # is the only candidate and there is nothing to strip
         cands = set(S.nvr_candidates(pkg("trivalent", "153.0.8010.47-447379")))
-        self.assertIn("trivalent-153.0.8010.47-447379", cands)
+        self.assertEqual(cands, {"trivalent-153.0.8010.47-447379"})
+        # the kernel rebuild's release marker must be stripped to the Fedora
+        # spelling - THIS is the candidate that actually matches the erratum
+        # (FEDORA-2026-9ce2715225 ships kernel-7.2.5-200.fc44). The old test
+        # only asserted the raw NVR, which nvr_candidates returns by
+        # construction - a tautology that could never fail.
         cands = set(S.nvr_candidates(pkg("kernel", "7.2.5-200.secureblue.1.fc44")))
+        self.assertIn("kernel-7.2.5-200.fc44", cands)
         self.assertIn("kernel-7.2.5-200.secureblue.1.fc44", cands)
+
+    def test_src_level_candidate_for_renamed_binaries(self):
+        # Bodhi lists errata builds by SOURCE NVR. 246 of the live image's 1107
+        # sources have no same-named binary (shim -> shim-x64/shim-ia32,
+        # webkitgtk -> webkit2gtk4.1/webkitgtk6.0, krb5 -> krb5-libs, ...), so
+        # binary-only candidates silently missed their errata. The source-name
+        # spelling must also be offered.
+        cands = set(S.nvr_candidates(pkg("shim-x64", "16.1-5", src="shim")))
+        self.assertIn("shim-16.1-5", cands)         # what Bodhi actually lists
+        self.assertIn("shim-x64-16.1-5", cands)     # binary spelling kept
+        cands = set(S.nvr_candidates(pkg("webkitgtk6.0", "2.50.1-1.fc44", src="webkitgtk")))
+        self.assertIn("webkitgtk-2.50.1-1.fc44", cands)
+        # ... and the source spelling also gets the secureblue marker stripped
+        cands = set(S.nvr_candidates(
+            pkg("kernel-core", "7.2.5-200.secureblue.1.fc44", src="kernel")))
+        self.assertIn("kernel-7.2.5-200.fc44", cands)
+        self.assertIn("kernel-core-7.2.5-200.secureblue.1.fc44", cands)
+
+    def test_shim_erratum_is_classified_security(self):
+        # end-to-end through classify_change with the live shim data: Fedora
+        # publishes `shim-16.2-1`, the image has shim-x64-16.1-5 (src shim)
+        upd = {"shim": [{"alias": "FEDORA-2026-shimshimsh", "type": "security",
+                         "severity": "important", "status": "stable",
+                         "nvrs": ["shim-16.1-5"], "notes": "", "bugs": [],
+                         "title": "", "cves": []}]}
+        info = S.classify_change(None, pkg("shim-x64", "16.1-5", src="shim"),
+                                 "F44", FakeBodhi(upd))
+        self.assertTrue(info["security"],
+                        "shim's erratum matches via the source-name candidate")
+        self.assertEqual(info["aliases"], ["FEDORA-2026-shimshimsh"])
 
 
 # --------------------------------------------------------------------------- #
@@ -289,13 +362,24 @@ class TestBuildHistoryDigestSpace(unittest.TestCase):
                     "ref": ref}
 
         orig = S.resolve
+        orig_tags = S.list_tags
         S.resolve = fake_resolve
+        # build_history walks the repo's tag list; without this stub the test
+        # made four real HTTP requests to ghcr.io (with a fake bearer token) and
+        # spent ~9 s in retry backoff - "passing" only because the registry
+        # rejected the token. The suite promises to be offline; keep it that way.
+        S.list_tags = lambda reg, max_pages=12: [
+            "sha256-" + self.INDEX.split(":")[1] + ".sig",
+            "sha256-" + "c" * 64 + ".sig",        # dangling sig: resolves to INDEX too
+            "20260917", "latest-uki",             # non-sig tags must be ignored
+        ]
         try:
             # .sig tags resolve to the signed image; a distinct index digest is what
             # makes the row appear at all
             rows = S.build_history(reg, scan=0, days=0, to="latest")
         finally:
             S.resolve = orig
+            S.list_tags = orig_tags
         return rows
 
     def test_rows_carry_both_digests_and_never_collide(self):
@@ -362,7 +446,7 @@ class TestBodhiCache(unittest.TestCase):
             with open(cf, "w") as fh:
                 fh.write("{ this is not json")
             # the guard must notice, unlink and report None - not raise
-            self.assertIsNone(b._read_cache(cf))
+            self.assertIsNone(b._read_cache_entry(cf))
             self.assertFalse(os.path.exists(cf), "corrupt cache file was not removed")
 
     def test_cache_holding_the_wrong_json_shape_is_ignored(self):
@@ -371,7 +455,7 @@ class TestBodhiCache(unittest.TestCase):
             cf = b._cf("glibc-F44")
             with open(cf, "w") as fh:
                 json.dump({"not": "a list"}, fh)   # valid JSON, wrong type
-            self.assertIsNone(b._read_cache(cf))
+            self.assertIsNone(b._read_cache_entry(cf))
 
     def test_legacy_list_cache_still_readable(self):
         # caches written before pagination existed are a bare list
@@ -387,28 +471,7 @@ class TestBodhiCache(unittest.TestCase):
             self.assertEqual(ent["updates"], payload)
             self.assertFalse(ent["truncated"])
             self.assertIsNone(ent["total"])
-            self.assertEqual(b._read_cache(cf), payload)   # list contract preserved
             self.assertEqual(b.updates_for_src("rpm", "F44"), payload)
-
-    def test_read_cache_returns_the_updates_list(self):
-        """_read_cache returns the bare updates list - its original contract.
-
-        Adding pagination changed the on-disk shape; the first attempt also changed
-        what this method returns, which broke every caller written against the old
-        contract (that is exactly what failed in CI). Pin it here.
-        """
-        with tempfile.TemporaryDirectory() as d:
-            b = S.Bodhi(cache_dir=d, max_calls=3)
-            cf = b._cf("rpm-F44")
-            payload = [{"alias": "FEDORA-2026-1", "type": "bugfix", "status": "stable",
-                        "severity": "unspecified", "nvrs": ["rpm-4.20-1.fc44"],
-                        "notes": "", "bugs": [], "title": "", "cves": []}]
-            with open(cf, "w") as fh:
-                json.dump(payload, fh)                    # legacy bare-list shape
-            self.assertEqual(b._read_cache(cf), payload)
-            with open(cf, "w") as fh:
-                json.dump({"total": 1, "truncated": False, "updates": payload}, fh)
-            self.assertEqual(b._read_cache(cf), payload)  # and from the new shape
 
     def test_new_cache_shape_roundtrips(self):
         with tempfile.TemporaryDirectory() as d:
@@ -490,14 +553,12 @@ class TestBodhiPagination(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 class TestBacklogCoverage(unittest.TestCase):
     def test_coverage_reports_truncation_and_pool_gaps(self):
-        pkgs = {n: pkg(n, "1-1.fc44", n) for n in ("kernel", "glibc", "openssl")}
         cov_line = S.coverage_line({"candidates": 9, "checked": 3, "skipped": 6,
                                     "skipped_names": ["a", "b", "c", "d", "e", "f"],
                                     "pool_missing": ["nginx", "bind"]})
         self.assertIn("3 of 9", cov_line)
         self.assertIn("6 were cut off", cov_line)
         self.assertIn("2 BACKLOG_POOL entries", cov_line)
-        self.assertEqual(len(pkgs), 3)
 
     def test_backlog_returns_rows_and_coverage(self):
         pkgs = {"kernel": pkg("kernel", "7.2.4-100.fc44", "kernel")}
@@ -509,6 +570,79 @@ class TestBacklogCoverage(unittest.TestCase):
         self.assertEqual([r["name"] for r in rows], ["kernel"])
         self.assertEqual(cov["checked"], 1)
         self.assertIn("nginx", cov["pool_missing"])
+        # fixed pool entries must now BE in the pool (typos silently shrank the
+        # audit before: wireless-regdog, giolang-github, veritysetup, ...)
+        for good in ("wireless-regdb", "cryptsetup", "linux-firmware", "python3",
+                     "xorg-x11-server-Xwayland", "polkit-qt6-1"):
+            self.assertIn(good, S.BACKLOG_POOL)
+        for bad in ("wireless-regdog", "giolang-github", "veritysetup",
+                    "amd-gpu-firmware", "trivalent-native",
+                    "trivalent-binary-packaging", "polkit-qt"):
+            self.assertNotIn(bad, S.BACKLOG_POOL)
+            self.assertNotIn(bad, S.IMPORTANT_SRC)
+
+
+class TestBacklogMatching(unittest.TestCase):
+    """Errata builds are SOURCE NVRs without epoch; the image side has binary
+    names, sometimes an epoch, and sometimes secureblue's release marker. All
+    three mismatches used to make 'behind' undetectable."""
+
+    @staticmethod
+    def _upd(nvr, alias="FEDORA-2026-backlog01"):
+        return [{"alias": alias, "type": "security", "severity": "important",
+                 "status": "stable", "nvrs": [nvr], "notes": "", "bugs": [],
+                 "title": "", "cves": []}]
+
+    def test_src_name_binary_matches(self):
+        # shim ships as shim-x64/shim-ia32; Bodhi lists `shim-16.2-1`
+        pkgs = {"shim-x64": pkg("shim-x64", "16.1-5", src="shim")}
+        rows, _ = S.security_backlog(pkgs, "F44",
+                                     FakeBodhi({"shim": self._upd("shim-16.2-1")}),
+                                     limit=10)
+        self.assertEqual([r["name"] for r in rows], ["shim-x64"])
+        self.assertEqual(rows[0]["want"], "16.2-1")
+
+    def test_epoch_package_can_be_behind(self):
+        # live example: cups has epoch 1 in the image; Bodhi NVRs carry no epoch,
+        # so the old evr_cmp made cups permanently "newer" than every update
+        pkgs = {"cups": pkg("cups", "2.4.19-3.fc44", src="cups", epoch="1")}
+        rows, _ = S.security_backlog(
+            pkgs, "F44",
+            FakeBodhi({"cups": self._upd("cups-2.4.20-1.fc44")}), limit=10)
+        self.assertEqual([r["name"] for r in rows], ["cups"])
+
+    def test_secureblue_release_marker_ignored(self):
+        # the image's kernel-7.2.5-200.secureblue.1.fc44 IS secureblue's rebuild
+        # of Fedora's kernel-7.2.5-200.fc44: with the marker stripped the two are
+        # equal -> not behind. A genuinely newer Fedora build is still behind.
+        pkgs = {"kernel": pkg("kernel", "7.2.5-200.secureblue.1.fc44", src="kernel")}
+        rows, _ = S.security_backlog(
+            pkgs, "F44",
+            FakeBodhi({"kernel": self._upd("kernel-7.2.5-200.fc44")}), limit=10)
+        self.assertEqual(rows, [], "a rebuild of the same Fedora build is not 'behind'")
+        self.assertTrue(S._is_behind(pkgs["kernel"], "7.2.5", "201.fc44"))
+        self.assertFalse(S._is_behind(pkgs["kernel"], "7.2.5", "200.fc44"))
+        self.assertFalse(S._is_behind(pkgs["kernel"], "7.2.4", "300.fc44"))
+
+    def test_not_behind_stays_out(self):
+        pkgs = {"kernel": pkg("kernel", "7.2.6-200.secureblue.1.fc44", src="kernel")}
+        rows, _ = S.security_backlog(
+            pkgs, "F44",
+            FakeBodhi({"kernel": self._upd("kernel-7.2.5-200.fc44")}), limit=10)
+        self.assertEqual(rows, [])
+
+    def test_python_versioned_src_is_pool_member(self):
+        # F44's interpreter source is python3.14; the pool lists the stable stem
+        pkgs = {"python3-libs": pkg("python3-libs", "3.14.7-1.fc44", src="python3.14")}
+        rows, cov = S.security_backlog(
+            pkgs, "F44",
+            FakeBodhi({"python3.14": self._upd("python3.14-3.14.8-1.fc44")}), limit=10)
+        self.assertEqual([r["name"] for r in rows], ["python3-libs"])
+        self.assertNotIn("python3", cov["pool_missing"],
+                         "python3.14 must satisfy the pool's `python3` entry")
+        self.assertTrue(S._src_matches_pool("python3.14", S.BACKLOG_POOL))
+        self.assertTrue(S._src_matches_pool("python3.14", S.IMPORTANT_SRC))
+        self.assertFalse(S._src_matches_pool("python3x", S.BACKLOG_POOL))
 
 
 # --------------------------------------------------------------------------- #
@@ -541,6 +675,17 @@ class TestDeadCodeRemoved(unittest.TestCase):
         for name in ("chunk_map", "SHATAG_RE", "BUILD_NOISE", "INT_TAGS",
                      "_ver_split"):
             self.assertFalse(hasattr(S, name), f"{name} came back")
+
+    def test_read_cache_is_gone(self):
+        # Bodhi._read_cache had no production caller left (only tests used it);
+        # its docstring claimed a contract for callers that no longer existed.
+        self.assertFalse(hasattr(S.Bodhi, "_read_cache"))
+
+    def test_registry_context_manager_is_gone(self):
+        # nothing ever used `with Registry(...)` - cleanup runs via atexit in
+        # _registry(); the dead __enter__/__exit__ pair only suggested otherwise
+        self.assertFalse(hasattr(S.Registry, "__enter__"))
+        self.assertFalse(hasattr(S.Registry, "__exit__"))
 
     def test_rpmtag_1006_is_not_buildhost(self):
         # RPMTAG_BUILDTIME is 1006; calling it "buildhost" silently mislabels data
@@ -585,6 +730,64 @@ class TestCaps(unittest.TestCase):
         cr = S._CappedReader(R(b"\x1f\x8bhello"), 1000, "test")
         self.assertEqual(cr.peek(2), b"\x1f\x8b")
         self.assertEqual(cr.read(7), b"\x1f\x8bhello")
+
+
+# --------------------------------------------------------------------------- #
+# pick_tar_member - the live rpmdb chunk carries TWO `rpmdb.sqlite` entries
+# (the real ~92 MiB db under usr/lib/sysimage/rpm-ostree-base-db/ and a 0-byte
+# placeholder at usr/share/rpm/rpmdb.sqlite); selection must not depend on the
+# order the tar happens to list them in.
+# --------------------------------------------------------------------------- #
+class TestPickTarMember(unittest.TestCase):
+    def _tar(self, members):
+        """members = [(name, bytes|None-for-symlink-target)] in write order."""
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tf:
+            for name, payload in members:
+                ti = tarfile.TarInfo(name)
+                if payload is None:
+                    ti.type = tarfile.SYMTYPE
+                    ti.linkname = "usr/lib/sysimage/rpm-ostree-base-db/rpmdb.sqlite"
+                    tf.addfile(ti)
+                else:
+                    ti.size = len(payload)
+                    tf.addfile(ti, io.BytesIO(payload))
+        buf.seek(0)
+        return tarfile.open(fileobj=buf)
+
+    def test_prefers_largest_match_regardless_of_order(self):
+        real = b"SQLite format 3\0" + b"x" * 512
+        real_path = "usr/lib/sysimage/rpm-ostree-base-db/rpmdb.sqlite"
+        stub = ("usr/share/rpm/rpmdb.sqlite", b"")
+        for real_first in (True, False):
+            with self.subTest(real_first=real_first):
+                members = ([(real_path, real), stub] if real_first
+                           else [stub, (real_path, real)])
+                tf = self._tar(members)
+                m, sym = S.pick_tar_member(tf, "rpmdb.sqlite")
+                tf.close()
+                self.assertIsNotNone(m)
+                self.assertEqual(m.size, len(real))
+                self.assertEqual(m.name, real_path)
+                self.assertIsNone(sym)
+
+    def test_symlink_target_reported_when_no_regular_file_matches(self):
+        tf = self._tar([("usr/share/rpm/rpmdb.sqlite", None)])
+        m, sym = S.pick_tar_member(tf, "rpmdb.sqlite")
+        tf.close()
+        self.assertIsNone(m)
+        self.assertEqual(sym, "usr/lib/sysimage/rpm-ostree-base-db/rpmdb.sqlite")
+
+    def test_member_cap_is_enforced_while_scanning(self):
+        tf = self._tar([(f"f{i}", b"x") for i in range(5)])
+        orig = S.MAX_TAR_MEMBERS
+        S.MAX_TAR_MEMBERS = 3
+        try:
+            with self.assertRaises(SystemExit):
+                S.pick_tar_member(tf, "f")
+        finally:
+            S.MAX_TAR_MEMBERS = orig
+            tf.close()
 
 
 if __name__ == "__main__":
