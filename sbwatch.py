@@ -28,17 +28,18 @@ registry login (the anonymous ghcr pull token is enough).
 
 CLI
 ---
-  sbwatch tags                  recent dated tags of an image
-  sbwatch history               every recent build (several per day included)
-  sbwatch layers A B            chunk-level diff + predicted download size
-  sbwatch pkgs A                exact package list (NEVRA) of one image
-  sbwatch diff A B              exact package diff + CVE classification
-  sbwatch backlog [ref]         security updates this image is still missing
-  sbwatch check                 stateful digest watch for CI/cron
+  sbwatch tags                  recent dated tags of an image / 近期按日期的标签
+  sbwatch history               every recent build (several per day included) / 近期全部构建（含一天多次）
+  sbwatch layers A B            chunk-level diff + predicted download size / chunk 级差异 + 预计下载量
+  sbwatch pkgs A                exact package list (NEVRA) of one image / 单个镜像的精确软件包列表（NEVRA）
+  sbwatch diff A B              exact package diff + CVE classification / 精确软件包差异 + CVE 分类
+  sbwatch backlog [ref]         security updates this image is still missing / 此镜像仍缺少的安全更新
+  sbwatch check                 stateful digest watch for CI/cron / 有状态 digest 监控（用于 CI/cron）
                                 -> report.md + verdict + $GITHUB_OUTPUT
 
+  All human-readable output is bilingual: English + 中文（所有输出均为中英双语）
   A / B / ref  = latest | 44 | 20260915 | 9ec80ca-44 | sha256:<digest>
-  (digests are the only immutable way to name one specific build)
+  (digests are the only immutable way to name one specific build / digest 是命名某次构建的唯一不可变方式)
 """
 
 from __future__ import annotations
@@ -61,6 +62,13 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+# make bilingual (CJK) output safe even under a C/POSIX locale
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    except Exception:
+        pass
 
 DEFAULT_IMAGE = "secureblue/silverblue-main-hardened"
 # P0 hardening limits (anti zip-bomb / DoS)
@@ -95,6 +103,11 @@ def log(*a):
     print(*a, file=sys.stderr, flush=True)
 
 
+def T(en: str, zh: str) -> str:
+    """Bilingual user-facing message: English first, then Chinese（中英双语输出）."""
+    return f"{en} / {zh}"
+
+
 def human(nbytes) -> str:
     n = float(nbytes)
     for unit in ("B", "KiB", "MiB", "GiB"):
@@ -108,7 +121,8 @@ def _safe_read_limited(resp, limit: int) -> bytes:
     """Read from HTTPResponse with hard limit to avoid OOM / zip-bomb."""
     cl = resp.headers.get("Content-Length")
     if cl and cl.isdigit() and int(cl) > limit:
-        raise SystemExit(f"blob Content-Length {cl} > {human(limit)} limit - aborting")
+        raise SystemExit(T(f"blob Content-Length {cl} > {human(limit)} limit - aborting",
+                           f"blob Content-Length {cl} 超过 {human(limit)} 限制——中止"))
     chunks = []
     total = 0
     while True:
@@ -117,7 +131,8 @@ def _safe_read_limited(resp, limit: int) -> bytes:
             break
         total += len(chunk)
         if total > limit:
-            raise SystemExit(f"blob exceeds {human(limit)} limit during download - possible bomb")
+            raise SystemExit(T(f"blob exceeds {human(limit)} limit during download - possible bomb",
+                               f"下载过程中 blob 超过 {human(limit)} 限制——疑似 zip 炸弹"))
         chunks.append(chunk)
     return b"".join(chunks)
 
@@ -132,41 +147,48 @@ def verify_cosign_image(full_ref: str, pubkey_path: str, require: bool = False) 
     if not pubkey_path:
         return False
     if not os.path.exists(pubkey_path):
-        msg = f"cosign pubkey not found: {pubkey_path}"
+        msg = T(f"cosign pubkey not found: {pubkey_path}",
+                f"找不到 cosign 公钥：{pubkey_path}")
         if require:
             raise SystemExit(msg)
-        log(f"  ! {msg} - skipping verification")
+        log(f"  ! {msg} - skipping verification / 跳过校验")
         return False
     cosign_bin = shutil.which("cosign")
     if not cosign_bin:
-        msg = "cosign binary not found in PATH - install sigstore/cosign to enable verification"
+        msg = T("cosign binary not found in PATH - install sigstore/cosign to enable verification",
+                "PATH 中找不到 cosign 可执行文件——请安装 sigstore/cosign 以启用校验")
         if require:
             raise SystemExit(msg)
-        log(f"  ! {msg} - skipping")
+        log(f"  ! {msg} - skipping / 跳过")
         return False
     # secureblue publishes cosign.pub at https://github.com/secureblue/secureblue/blob/live/cosign.pub
     cmd = [cosign_bin, "verify", "--key", pubkey_path, full_ref]
-    log(f"  verifying {full_ref} with cosign...")
+    log(T(f"  verifying {full_ref} with cosign...",
+          f"  正在使用 cosign 校验 {full_ref}…"))
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
         if res.returncode == 0:
-            log(f"  cosign verify OK for {full_ref}")
+            log(T(f"  cosign verify OK for {full_ref}",
+                  f"  cosign 校验成功：{full_ref}"))
             return True
         else:
             err = (res.stderr or res.stdout)[:500]
-            msg = f"cosign verify FAILED for {full_ref}: {err}"
+            msg = T(f"cosign verify FAILED for {full_ref}: {err}",
+                    f"cosign 校验失败：{full_ref}：{err}")
             if require:
                 raise SystemExit(msg)
             log(f"  ! {msg}")
             return False
     except subprocess.TimeoutExpired:
-        msg = f"cosign verify timeout for {full_ref}"
+        msg = T(f"cosign verify timeout for {full_ref}",
+                f"cosign 校验超时：{full_ref}")
         if require:
             raise SystemExit(msg)
         log(f"  ! {msg}")
         return False
     except Exception as e:
-        msg = f"cosign verify error: {e}"
+        msg = T(f"cosign verify error: {e}",
+                f"cosign 校验出错：{e}")
         if require:
             raise SystemExit(msg)
         log(f"  ! {msg}")
@@ -182,9 +204,11 @@ def maybe_verify_resolved(reg: Registry, resolved: dict, args) -> None:
     # build full ref: host/repo@digest (digest is the image digest, not index digest if possible)
     digest = resolved.get("digest") or resolved.get("index_digest")
     if not digest:
-        log("  ! cannot verify: no digest in resolved image")
+        log(T("  ! cannot verify: no digest in resolved image",
+              "  ！无法校验：解析到的镜像中没有 digest"))
         if req:
-            raise SystemExit("no digest for cosign verification")
+            raise SystemExit(T("no digest for cosign verification",
+                           "没有可用于 cosign 校验的 digest"))
         return
     full_ref = f"{reg.host}/{reg.repo}@{digest}"
     verify_cosign_image(full_ref, pub, require=req)
@@ -262,7 +286,8 @@ class Registry:
     def _split(ref: str):
         ref = (ref or "").removeprefix("docker://").strip().removeprefix("oci:")
         if ref.count("/") < 1:
-            raise SystemExit(f"need a reference like host/ns/name:tag, got: {ref}")
+            raise SystemExit(T(f"need a reference like host/ns/name:tag, got: {ref}",
+                               f"需要形如 host/ns/name:tag 的引用，实际收到：{ref}"))
         first, _, rest_all = ref.partition("/")
         if "." not in first and ":" not in first and first != "localhost":
             host, rest = "ghcr.io", ref          # bare ns/name -> ghcr.io (secureblue's home)
@@ -298,7 +323,8 @@ class Registry:
                     with urllib.request.urlopen(url, timeout=self.timeout) as r:
                         tok = json.load(r).get("token", "")
                 except Exception as e2:
-                    log(f"  ! token fetch failed: {e2}")
+                    log(T(f"  ! token fetch failed: {e2}",
+                          f"  ！获取 token 失败：{e2}"))
         self._tok = tok or ""
         return tok or None
 
@@ -335,7 +361,8 @@ class Registry:
                     pick = m
                     break
             if pick is None:
-                raise SystemExit(f"no {self.arch} manifest in {self.repo}:{what}")
+                raise SystemExit(T(f"no {self.arch} manifest in {self.repo}:{what}",
+                                   f"{self.repo}:{what} 中没有 {self.arch} 架构的 manifest"))
             man = json.loads(self.get(f"manifests/{pick['digest']}", MANIFEST_ACCEPT))
             out["digest"] = pick["digest"]
         else:
@@ -377,29 +404,33 @@ class Registry:
                             break
                         total += len(chunk)
                         if total > MAX_DECOMPRESSED_BYTES:
-                            raise SystemExit(
+                            raise SystemExit(T(
                                 f"decompressed layer > {human(MAX_DECOMPRESSED_BYTES)} "
-                                f"limit - possible zip bomb (layer {layer['digest'][:19]})"
-                            )
+                                f"limit - possible zip bomb (layer {layer['digest'][:19]})",
+                                f"层解压后超过 {human(MAX_DECOMPRESSED_BYTES)} 限制——"
+                                f"疑似 zip 炸弹（层 {layer['digest'][:19]}）"))
                         out_buf.write(chunk)
             except (OSError, gzip.BadGzipFile, EOFError) as e:
-                raise SystemExit(f"gzip decompress failed for {layer['digest'][:19]}: {e}")
+                raise SystemExit(T(f"gzip decompress failed for {layer['digest'][:19]}: {e}",
+                                   f"gzip 解压失败：{layer['digest'][:19]}：{e}"))
             data = out_buf.getvalue()
         else:
             if len(data) > MAX_DECOMPRESSED_BYTES:
-                raise SystemExit(
+                raise SystemExit(T(
                     f"uncompressed layer > {human(MAX_DECOMPRESSED_BYTES)} limit "
-                    f"(layer {layer['digest'][:19]})"
-                )
+                    f"(layer {layer['digest'][:19]})",
+                    f"未压缩层超过 {human(MAX_DECOMPRESSED_BYTES)} 限制"
+                    f"（层 {layer['digest'][:19]}）"))
         dest = os.path.join(self._tmp, re.sub(r"\W+", "_", match) + ".extracted")
         # --- tar hardening ---
         with tarfile.open(fileobj=io.BytesIO(data)) as tf:
             members = tf.getmembers()
             if len(members) > MAX_TAR_MEMBERS:
-                raise SystemExit(
+                raise SystemExit(T(
                     f"tar has {len(members)} members > {MAX_TAR_MEMBERS} limit "
-                    f"(layer {layer['digest'][:19]})"
-                )
+                    f"(layer {layer['digest'][:19]})",
+                    f"tar 包含 {len(members)} 个成员，超过 {MAX_TAR_MEMBERS} 限制"
+                    f"（层 {layer['digest'][:19]}）"))
             by_name = {m.name.lstrip("./"): m for m in members}
             chosen = None
             for m in members:
@@ -413,15 +444,17 @@ class Registry:
                         chosen = by_name[tgt]
                         break
             if chosen is None:
-                raise SystemExit(f"'{match}' not found in layer {layer['digest'][:19]}")
+                raise SystemExit(T(f"'{match}' not found in layer {layer['digest'][:19]}",
+                                   f"在层 {layer['digest'][:19]} 中找不到 '{match}'"))
             if chosen.size > MAX_TAR_FILE_SIZE:
-                raise SystemExit(
+                raise SystemExit(T(
                     f"tar member {chosen.name} size {human(chosen.size)} > "
-                    f"{human(MAX_TAR_FILE_SIZE)} limit"
-                )
+                    f"{human(MAX_TAR_FILE_SIZE)} limit",
+                    f"tar 成员 {chosen.name} 大小 {human(chosen.size)} 超过 "
+                    f"{human(MAX_TAR_FILE_SIZE)} 限制"))
             f = tf.extractfile(chosen)
             if f is None:
-                raise SystemExit("unreachable member")
+                raise SystemExit(T("unreachable member", "无法读取的 tar 成员"))
             # stream out with size check
             total_written = 0
             with open(dest, "wb") as o:
@@ -431,7 +464,8 @@ class Registry:
                         break
                     total_written += len(chunk)
                     if total_written > MAX_TAR_FILE_SIZE:
-                        raise SystemExit(f"extracted file > {human(MAX_TAR_FILE_SIZE)} limit")
+                        raise SystemExit(T(f"extracted file > {human(MAX_TAR_FILE_SIZE)} limit",
+                                           f"解出的文件超过 {human(MAX_TAR_FILE_SIZE)} 限制"))
                     o.write(chunk)
         del data
         return dest
@@ -498,16 +532,19 @@ def package_list(reg: Registry, resolved: dict) -> dict:
     """{binary name: {evr, srpm, src, changelog[]}} for a single image."""
     cands = [l for l in resolved["layers"] if any(CHUNK_MATCH in c for c in l["components"])]
     if not cands:
-        raise SystemExit(
+        raise SystemExit(T(
             "no standalone rpmdb chunk in this image (needs chunkah 'bigfiles' layout); "
-            "use `layers` or --exact 0 instead")
+            "use `layers` or --exact 0 instead",
+            "此镜像中没有独立的 rpmdb chunk（需要 chunkah 'bigfiles' 布局）；"
+            "请改用 `layers` 或 --exact 0"))
     cands.sort(key=lambda l: l["size"])
     path = reg.extract_member(cands[0], CHUNK_MATCH)
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
         rows = con.execute("select blob from Packages").fetchall()
     except sqlite3.OperationalError:
-        raise SystemExit("unexpected rpmdb schema (no Packages table)")
+        raise SystemExit(T("unexpected rpmdb schema (no Packages table)",
+                           "rpmdb 结构不符合预期（没有 Packages 表）"))
     con.close()
     try:
         os.unlink(path)
@@ -592,7 +629,8 @@ class Bodhi:
                     })
             except Exception as ex:
                 self.failed += 1
-                log(f"  ! bodhi lookup failed for {src}: {ex}")
+                log(T(f"  ! bodhi lookup failed for {src}: {ex}",
+                      f"  ！查询 Bodhi 失败：{src}：{ex}"))
             # never cache a failed query: an empty answer would blind later runs
             if cf and ok:
                 _atomic_write_json(cf, res)
@@ -631,16 +669,16 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
         add_cves(c["text"])
         if SEC_WORDS_RE.search(c["text"] or ""):
             first = (c["text"] or "").strip().splitlines()
-            info["why"].append("changelog: " + (first[0][:90] if first else ""))
+            info["why"].append("changelog/更新日志: " + (first[0][:90] if first else ""))
     # fixes that the new image *loses* (downgrade / rebuild without the patch)
     new_times = {c["time"] for c in new_log}
     for c in [x for x in old_log if x["time"] not in new_times][:20]:
         add_cves(c["text"], info["cves_dropped"])
     if info["cves"]:
         info["security"] = True
-        info["why"].insert(0, "changelog CVEs: " + ", ".join(sorted(info["cves"])[:8]))
+        info["why"].insert(0, "changelog CVEs/更新日志中的 CVE: " + ", ".join(sorted(info["cves"])[:8]))
     if info["cves_dropped"]:
-        info["why"].insert(0, "DROPS fixes: " + ", ".join(sorted(info["cves_dropped"])[:8]))
+        info["why"].insert(0, "DROPS fixes/丢失的修复: " + ", ".join(sorted(info["cves_dropped"])[:8]))
 
     # (b) the Fedora erratum that shipped the new build
     my_nvr = set(nvr_candidates(new))
@@ -665,7 +703,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                 if u["type"] == "security":
                     info["security"] = True
                     info["why"].append(
-                        f"erratum {u['alias']}: type=security severity={u.get('severity')} "
+                        f"erratum/勘误 {u['alias']}: type=security severity={u.get('severity')} "
                         f"status={u.get('status')}")
     info["cves"] = sorted(info["cves"])
     info["cves_dropped"] = sorted(info["cves_dropped"])
@@ -764,7 +802,8 @@ def fedora_release(pkgs: dict) -> str:
 def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                backlog: list | None = None, bodhi_state: dict | None = None) -> dict:
     """Turn the raw diff into a recommendation. Grouped by *source* package so that a
-    21-subpackage linux-firmware bump is not counted as 21 separate events."""
+    21-subpackage linux-firmware bump is not counted as 21 separate events.
+    Bilingual: sets headline (English) and headline_zh (中文)."""
     xc = xc or {}
     groups = group_by_src(diff["changed"])
     sec = [g for g in groups if g["security"] and not g["downgrade"]]
@@ -777,7 +816,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     silent = xc.get("silent_rebuilds") or []
     silent_key = [n for n, _ in silent[:60] if n.startswith("kernel") or n in IMPORTANT_SRC]
     n_bin = len(diff["changed"])
-    v = {"level": "skip", "headline": "", "changed_src_count": len(groups),
+    v = {"level": "skip", "headline": "", "headline_zh": "", "changed_src_count": len(groups),
          "changed_pkg_count": n_bin, "security_src": [g["src"] for g in sec],
          "security_pkgs": sorted({p["name"] for g in sec for p in g["pkgs"]}),
          "important_pkgs": sorted({p["name"] for g in imp for p in g["pkgs"]}),
@@ -797,62 +836,89 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                          f"{len(xc.get('silent_rebuilds') or [])} chunk(s) were merely "
                          f"re-emitted. Updating would cost {v['download_human']} and change "
                          "nothing observable")
+        v["headline_zh"] = (f"rpm-ostree inputhash 完全相同（{str(meta['inputhash_a'])[:12]}）——"
+                            "此镜像与上一版由完全相同的软件包输入构成；"
+                            f"{len(xc.get('silent_rebuilds') or [])} 个 chunk 只是被重新发出。"
+                            f"更新需花费 {v['download_human']} 下载量，却不会带来任何可观察的变化")
         return v
     if sec:
         v["level"] = "update-now"
-        top = ", ".join(f"{g['src']} ({', '.join(g['cves'][:2]) or 'security erratum'})"
+        top = ", ".join(f"{g['src']} ({', '.join(g['cves'][:2]) or 'security erratum 安全勘误'})"
                         for g in sec[:4])
         v["headline"] = (f"{plural(len(sec), 'source package')} "
                          f"{'gains' if len(sec) == 1 else 'gain'} security fixes: {top}"
                          + (f" — {len(cves)} CVE(s) total" if cves else "")
                          + (". Kernel version also changed" if kernel_moved else ""))
+        v["headline_zh"] = (f"{len(sec)} 个源码包获得安全修复：{top}"
+                            + (f" —— 共 {len(cves)} 个 CVE" if cves else "")
+                            + ("；内核版本也已变化" if kernel_moved else ""))
         if sev >= 3:
             v["headline"] = "HIGH/CRITICAL severity fix present. " + v["headline"]
+            v["headline_zh"] = "存在 HIGH/CRITICAL（高/严重）级别修复。" + v["headline_zh"]
     elif kernel_moved or imp or silent_key:
         v["level"] = "consider"
-        bits = []
+        bits, bits_zh = [], []
         if kernel_moved:
             bits.append(f"kernel {meta['kernel_a']} → {meta['kernel_b']}")
+            bits_zh.append(f"内核 kernel {meta['kernel_a']} → {meta['kernel_b']}")
         if imp:
             bits.append("version bump in security-sensitive packages: "
                         + ", ".join(g["src"] for g in imp[:5]))
+            bits_zh.append("安全敏感软件包版本升级：" + ", ".join(g["src"] for g in imp[:5]))
         if silent_key:
             bits.append("rebuilt (identical version): " + ", ".join(silent_key[:5]))
+            bits_zh.append("重建（版本相同）：" + ", ".join(silent_key[:5]))
         v["headline"] = ("no CVE/erratum found for this delta, but " + "; ".join(bits)
                          + ". Reasonable to skip if the download matters to you")
+        v["headline_zh"] = ("此差异未发现 CVE/勘误，但涉及：" + "；".join(bits_zh)
+                            + "。如果下载量对你很重要，可以合理地跳过")
     else:
-        tail = ""
+        tail = tail_zh = ""
         if v["non_package_bytes"]:
             tail = (f"; {human(v['non_package_bytes'])} of the download is non-package churn "
                     f"(initramfs / ostree metadata)")
+            tail_zh = (f"；下载中有 {human(v['non_package_bytes'])} 属于非软件包内容"
+                       f"（initramfs / ostree 元数据）")
         v["level"] = "skip"
         v["headline"] = (f"routine churn: {plural(len(groups), 'source package')} "
                          f"({n_bin} binary) bumped, {len(diff['added'])} added / "
                          f"{len(diff['removed'])} removed, no CVE and no security erratum"
                          + (f", {len(silent)} chunk(s) rebuilt with identical versions" if silent else "")
                          + tail)
+        v["headline_zh"] = (f"常规更新：{len(groups)} 个源码包（{n_bin} 个二进制包）升级，"
+                            f"新增 {len(diff['added'])} 个 / 移除 {len(diff['removed'])} 个，"
+                            "无 CVE、无安全勘误"
+                            + (f"，{len(silent)} 个 chunk 以相同版本重建" if silent else "")
+                            + tail_zh)
     if down:
-        v["headline"] += (" | WARNING: this update downgrades "
-                          + ", ".join(f"{g['src']} ({g['old_evr']} → {g['new_evr']})"
-                                      for g in down[:3]))
+        dl_txt = ", ".join(f"{g['src']} ({g['old_evr']} → {g['new_evr']})"
+                           for g in down[:3])
+        v["headline"] += (" | WARNING: this update downgrades " + dl_txt)
+        v["headline_zh"] += (" ｜ 警告：此次更新会降级 " + dl_txt)
     if bodhi_state:
         bad, miss = bodhi_state.get("failed", 0), bodhi_state.get("skipped", 0)
         off = bodhi_state.get("disabled", 0)
         if bad or miss or off:
-            why = []
+            why, why_zh = [], []
             if off:
                 why.append("Bodhi lookups were disabled (--no-bodhi)")
+                why_zh.append("Bodhi 查询已被禁用 (--no-bodhi)")
             if bad:
                 why.append(f"{bad} Bodhi query(ies) failed")
+                why_zh.append(f"{bad} 次 Bodhi 查询失败")
             if miss:
                 why.append(f"{miss} package(s) were not queried (--max-bodhi)")
+                why_zh.append(f"{miss} 个软件包未被查询 (--max-bodhi)")
             v["headline"] += " | CAUTION: errata coverage incomplete - " + "; ".join(why) \
                              + ", so 'no security fixes' is not proven"
+            v["headline_zh"] += " ｜ 注意：勘误覆盖不完整 —— " + "；".join(why_zh) \
+                                + "，因此“无安全修复”并未被证实"
             if v["level"] == "skip":
                 v["level"] = "consider"
     if v["cves_dropped"]:
-        v["headline"] += (" | WARNING: fixes that disappear: "
-                          + ", ".join(v["cves_dropped"][:6]))
+        drop_txt = ", ".join(v["cves_dropped"][:6])
+        v["headline"] += (" | WARNING: fixes that disappear: " + drop_txt)
+        v["headline_zh"] += (" ｜ 警告：会消失的修复：" + drop_txt)
         if v["level"] == "skip":
             v["level"] = "consider"
     if backlog:
@@ -862,15 +928,20 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             v["level"] = "consider"
         v["headline"] += (f" | note: the image still misses {len(backlog)} published stable "
                           f"security update(s){' (' + str(len(hi)) + ' important+)' if hi else ''}")
+        v["headline_zh"] += (f" ｜ 提示：该镜像仍缺少 {len(backlog)} 个已发布的 stable 安全更新"
+                             f"{'（其中 ' + str(len(hi)) + ' 个为重要及以上级别）' if hi else ''}")
     return v
 
 
 # --------------------------------------------------------------------------- #
 # report
 # --------------------------------------------------------------------------- #
-ICON = {"update-now": "[!] UPDATE NOW", "consider": "[~] OPTIONAL", "skip": "[ok] SKIP OK",
-        "no-change": "[ok] REBUILD ONLY - SKIP", "no-update": "[ok] NO NEW BUILD",
-        "unknown": "[?] UNKNOWN"}
+ICON = {"update-now": "[!] UPDATE NOW / [!] 立即更新",
+        "consider": "[~] OPTIONAL / [~] 可选更新",
+        "skip": "[ok] SKIP OK / [ok] 可跳过",
+        "no-change": "[ok] REBUILD ONLY - SKIP / [ok] 仅重建——可跳过",
+        "no-update": "[ok] NO NEW BUILD / [ok] 无新构建",
+        "unknown": "[?] UNKNOWN / [?] 未知"}
 
 
 def group_by_src(changed: list) -> list:
@@ -925,7 +996,7 @@ def fmt_pkgs(g: dict) -> str:
     if len(names) == 1:
         return f"`{names[0]}`"
     head = ", ".join(f"`{x}`" for x in names[:3])
-    return f"{head} +{len(names)-3} subpackages" if len(names) > 3 else head
+    return f"{head} +{len(names)-3} subpackages/子包" if len(names) > 3 else head
 
 
 def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog=None) -> str:
@@ -935,31 +1006,39 @@ def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog
     sec_n = len(verdict["security_pkgs"])
     W(f"# {subject}")
     W("")
-    W(f"## Verdict: {ICON.get(verdict['level'], verdict['level'])}")
+    W(f"## Verdict 结论: {ICON.get(verdict['level'], verdict['level'])}")
     W("")
     W(verdict["headline"])
+    if verdict.get("headline_zh"):
+        W(verdict["headline_zh"])
     W("")
     W(f"**If you update, you download {human(ldiff['download_bytes'])}** — "
       f"{ldiff['chunks_changed']} of {ldiff['chunks_b']} chunks changed, "
       f"{ldiff['chunks_reused']} are already on disk and get reused. "
       f"(full image: {human(ldiff['total_size_b'])}, so this update = {ldiff['download_pct']}%)")
+    W(f"**如果现在更新，需要下载 {human(ldiff['download_bytes'])}** —— "
+      f"{ldiff['chunks_b']} 个 chunk 中有 {ldiff['chunks_changed']} 个发生变化，"
+      f"{ldiff['chunks_reused']} 个已在本地、会被复用。"
+      f"（完整镜像为 {human(ldiff['total_size_b'])}，本次更新约占 {ldiff['download_pct']}%）")
     W("")
-    W("| | previous | new |")
+    W("| | previous 上一版 | new 新版 |")
     W("|---|---|---|")
-    W(f"| compared refs | `{shortref(a['ref'])}` | `{shortref(b['ref'])}` |")
-    W(f"| image version | {a['annotations'].get('org.opencontainers.image.version', '?')} "
+    W(f"| compared refs 对比引用 | `{shortref(a['ref'])}` | `{shortref(b['ref'])}` |")
+    W(f"| image version 镜像版本 | {a['annotations'].get('org.opencontainers.image.version', '?')} "
       f"| {b['annotations'].get('org.opencontainers.image.version', '?')} |")
-    W(f"| built (UTC) | {a.get('created') or '?'} | {b.get('created') or '?'} |")
-    W(f"| kernel | {a['annotations'].get('ostree.linux', '?')} | {b['annotations'].get('ostree.linux', '?')} |")
-    W(f"| rpm-ostree inputhash | `{(a['annotations'].get('rpmostree.inputhash') or '')[:12]}` "
+    W(f"| built (UTC) 构建时间 | {a.get('created') or '?'} | {b.get('created') or '?'} |")
+    W(f"| kernel 内核 | {a['annotations'].get('ostree.linux', '?')} | {b['annotations'].get('ostree.linux', '?')} |")
+    W(f"| rpm-ostree inputhash 输入哈希 | `{(a['annotations'].get('rpmostree.inputhash') or '')[:12]}` "
       f"| `{(b['annotations'].get('rpmostree.inputhash') or '')[:12]}` |")
-    W(f"| manifest digest | `{a['digest'][:19]}…` | `{b['digest'][:19]}…` |")
-    W(f"| packages in image | {diff.get('count_a', '?')} | {diff.get('count_b', '?')} |")
+    W(f"| manifest digest 摘要 | `{a['digest'][:19]}…` | `{b['digest'][:19]}…` |")
+    W(f"| packages in image 镜像内软件包数 | {diff.get('count_a', '?')} | {diff.get('count_b', '?')} |")
     W("")
     if (a["annotations"].get("rpmostree.inputhash") and a["annotations"].get("rpmostree.inputhash")
             == b["annotations"].get("rpmostree.inputhash")):
         W("> **Both images were composed from identical package inputs (same")
         W("> `rpmostree.inputhash`)** - byte differences here are rebuild noise, not changes.")
+        W("> **两个镜像由完全相同的软件包输入构成（`rpmostree.inputhash` 相同）**——")
+        W("> 这里的字节差异只是重建噪声，并非真实变化。")
         W("")
     notes = list(dict.fromkeys(notes))
     for n in notes:
@@ -977,26 +1056,30 @@ def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog
                and g not in g_down and g not in g_lost]
 
     if g_down:
-        W(f"## Downgrades in this update ({len(g_down)}) — read first")
+        W(f"## Downgrades in this update ({len(g_down)}) — read first"
+          f" / 本次更新中的降级（{len(g_down)}）——请先阅读")
         W("")
         for g in g_down:
             W(f"- **{g['src']}**: {g['old_evr']} → {g['new_evr']} "
-              f"({len(g['pkgs'])} package(s))"
-              + (" — this *reverts* a published erratum: " + ", ".join(g["aliases"][:2])
+              f"({len(g['pkgs'])} package(s)/包)"
+              + (" — this *reverts* a published erratum / 这会*回退*已发布的勘误: "
+                 + ", ".join(g["aliases"][:2])
                  if g["security"] else ""))
         W("")
     if g_lost:
-        W(f"## Fixes that this update REMOVES ({len(g_lost)})")
+        W(f"## Fixes that this update REMOVES ({len(g_lost)})"
+          f" / 本次更新会移除的修复（{len(g_lost)}）")
         W("")
         for g in g_lost:
-            W(f"- `{g['src']}`: no longer mentions {', '.join(g['dropped'][:8])}")
+            W(f"- `{g['src']}`: no longer mentions / 不再提及 {', '.join(g['dropped'][:8])}")
         W("")
 
     if g_sec:
         W(f"## Security-relevant changes ({len(g_sec)} source package(s), "
-          f"{sec_n} binary package(s))")
+          f"{sec_n} binary package(s))"
+          f" / 安全相关变更（{len(g_sec)} 个源码包，{sec_n} 个二进制包）")
         W("")
-        W("| source package | old → new | CVEs | errata / evidence |")
+        W("| source package 源码包 | old → new 旧 → 新 | CVEs | errata / evidence 勘误/依据 |")
         W("|---|---|---|---|")
         for g in g_sec:
             ev = "; ".join(g["why"])[:190] or ", ".join(g["aliases"]) or "—"
@@ -1004,65 +1087,76 @@ def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog
               f"{', '.join(g['cves'][:6]) or '—'} | {ev} |")
         W("")
     if g_imp:
-        W(f"## Bumps in security-sensitive packages, no CVE mentioned ({len(g_imp)})")
+        W(f"## Bumps in security-sensitive packages, no CVE mentioned ({len(g_imp)})"
+          f" / 安全敏感包版本升级、未提及 CVE（{len(g_imp)}）")
         W("")
         for g in g_imp:
-            extra = f" (errata: {', '.join(g['aliases'][:2])})" if g["aliases"] else ""
-            W(f"- `{g['src']}` {g['old_evr']} → {g['new_evr']} — {len(g['pkgs'])} pkg(s)"
-              f"{extra}; {'; '.join(g['why'])[:120] or 'no security changelog entry'}")
+            extra = f" (errata 勘误: {', '.join(g['aliases'][:2])})" if g["aliases"] else ""
+            W(f"- `{g['src']}` {g['old_evr']} → {g['new_evr']} — {len(g['pkgs'])} pkg(s)/包"
+              f"{extra}; {'; '.join(g['why'])[:160] or 'no security changelog entry / 无安全相关更新日志'}")
         W("")
     if g_other:
-        W(f"## Routine bumps ({len(g_other)} source package(s), {len(g_other) and sum(len(g['pkgs']) for g in g_other)} binary)")
+        W(f"## Routine bumps ({len(g_other)} source package(s), "
+          f"{len(g_other) and sum(len(g['pkgs']) for g in g_other)} binary)"
+          f" / 常规版本升级（{len(g_other)} 个源码包，{sum(len(g['pkgs']) for g in g_other)} 个二进制包）")
         W("")
-        W("| source package | binary packages | old → new |")
+        W("| source package 源码包 | binary packages 二进制包 | old → new 旧 → 新 |")
         W("|---|---|---|")
         for g in g_other:
             W(f"| {g['src']} | {fmt_pkgs(g)} | {g['old_evr']} → {g['new_evr']} |")
         W("")
     if not changed and isinstance(diff.get("count_a"), int):
-        W("## No package version changed at all")
+        W("## No package version changed at all / 没有任何软件包版本发生变化")
         W("")
         W("Every package in both images has the same NEVRA — the delta is entirely "
-          "rebuilt content / metadata churn.")
+          "rebuilt content / metadata churn. / "
+          "两个镜像中所有软件包的 NEVRA 完全一致——差异全部来自重建内容 / 元数据变动。")
         W("")
 
     if diff["added"] or diff["removed"]:
-        W("## Package set")
+        W("## Package set / 软件包集合")
         if diff["added"]:
-            W(f"added ({len(diff['added'])}): " + ", ".join(f"`{x}`" for x in diff["added"][:40]))
+            W(f"added 新增 ({len(diff['added'])}): "
+              + ", ".join(f"`{x}`" for x in diff["added"][:40]))
         if diff["removed"]:
-            W(f"removed ({len(diff['removed'])}): "
+            W(f"removed 移除 ({len(diff['removed'])}): "
               + ", ".join(f"`{x}`" for x in diff["removed"][:40]))
         W("")
 
     silent = xc.get("silent_rebuilds") or []
     if silent:
-        W(f"## Rebuilt with the *same* version ({len(silent)})")
+        W(f"## Rebuilt with the *same* version ({len(silent)})"
+          f" / 版本相同但被重建（{len(silent)}）")
         W("")
         W("These chunks changed byte-for-byte while the package version did not. That is "
           "usually a secureblue rebuild, a toolchain/macro change, or file re-ordering — "
-          "it costs download bytes but carries no upstream changelog entry.")
+          "it costs download bytes but carries no upstream changelog entry. / "
+          "这些 chunk 的字节变了，但软件包版本没变。通常是一次 secureblue 重建、工具链/macro 变化"
+          "或文件重排——会消耗下载量，却没有对应的上游更新日志。")
         W("")
         for n, s in silent[:20]:
             W(f"- `{n}` — {human(s)}")
         if len(silent) > 20:
-            W(f"- … and {len(silent)-20} more")
+            W(f"- … and {len(silent)-20} more / ……另有 {len(silent)-20} 个")
         W("")
     if xc.get("non_package_chunks"):
-        W("## Changes that are not packages")
+        W("## Changes that are not packages / 非软件包的变更")
         W("")
         for ch in xc["non_package_chunks"]:
             W(f"- {human(ch['size'])} — {', '.join(c.replace('bigfiles/', '') for c in ch['components'])[:120]}")
         W("")
 
     if backlog:
-        W(f"## What your (current or new) image is still missing ({len(backlog)})")
+        W(f"## What your (current or new) image is still missing ({len(backlog)})"
+          f" / 你的（当前或新）镜像仍缺少的更新（{len(backlog)}）")
         W("")
         W("Published **stable** Fedora security updates whose build is newer than the one in "
           "the image — i.e. exposure that skipping this update does not change, but that you "
-          "may want to know about.")
+          "may want to know about. / "
+          "已发布的 **stable** Fedora 安全更新，其构建比镜像内的更新——"
+          "即无论是否跳过本次更新都存在的暴露面，但你应当知情。")
         W("")
-        W("| package | in image | newer stable build | severity | erratum |")
+        W("| package 软件包 | in image 镜像内 | newer stable build 新 stable 构建 | severity 严重度 | erratum 勘误 |")
         W("|---|---|---|---|---|")
         for r in backlog[:25]:
             W(f"| `{r['name']}` | {r['have']} | **{r['want']}** | {r['severity'] or '?'} "
@@ -1070,18 +1164,23 @@ def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog
         W("")
 
     if ldiff["changed_chunks"]:
-        W(f"## Chunks you would re-download ({len(ldiff['changed_chunks'])})")
+        W(f"## Chunks you would re-download ({len(ldiff['changed_chunks'])})"
+          f" / 需要重新下载的 chunk（{len(ldiff['changed_chunks'])}）")
         W("")
         for ch in ldiff["changed_chunks"][:15]:
             comps = [c.replace("rpm/", "").replace("bigfiles/", "≈") for c in ch["components"]][:5]
             more = len(ch["components"]) - len(comps)
-            W(f"- {human(ch['size'])} — {', '.join(comps)}" + (f" +{more} pkgs" if more > 0 else ""))
+            W(f"- {human(ch['size'])} — {', '.join(comps)}"
+              + (f" +{more} pkgs/包" if more > 0 else ""))
         if len(ldiff["changed_chunks"]) > 15:
-            W(f"- … {len(ldiff['changed_chunks'])-15} smaller chunks")
+            W(f"- … {len(ldiff['changed_chunks'])-15} smaller chunks"
+              f" / ……另有 {len(ldiff['changed_chunks'])-15} 个更小的 chunk")
         W("")
     W("---")
     W("Generated by `sbwatch`: registry manifests + the image's `rpmdb.sqlite` chunk only. "
-      "Nothing was pulled, and no credentials were used.")
+      "Nothing was pulled, and no credentials were used. / "
+      "由 `sbwatch` 生成：仅使用了 registry manifest 与镜像的 `rpmdb.sqlite` chunk。"
+      "未拉取完整镜像，也未使用任何凭据。")
     return "\n".join(L) + "\n"
 
 
@@ -1158,8 +1257,9 @@ def cmd_backlog(args):
     bodhi = Bodhi(cache_dir=cache_dir, max_calls=args.max_bodhi)
     rows = security_backlog(pkgs, rel, bodhi, limit=args.max_bodhi)
     ver = img["annotations"].get("org.opencontainers.image.version", "?")
-    print(f"{args.image}:{args.ref}  version {ver}  ({rel})")
-    print(f"{len(rows)} package(s) in this image are behind a published STABLE security update\n")
+    print(f"{args.image}:{args.ref}  version 版本 {ver}  ({rel})")
+    print(T(f"{len(rows)} package(s) in this image are behind a published STABLE security update",
+            f"此镜像中有 {len(rows)} 个软件包落后于已发布的 STABLE 安全更新") + "\n")
     for r in rows:
         print(f"  {r['name']:28} {r['have']:>26}  ->  {r['want']:<26} "
               f"{(r['severity'] or '?'):9} {r['alias']}")
@@ -1167,7 +1267,8 @@ def cmd_backlog(args):
             print(f"  {'':28}{'':26}     {r['notes'].splitlines()[0][:110]}")
     if not rows:
         print("  none — as far as Fedora's stable repo is concerned this image is current "
-              "(for the packages we checked)")
+              "(for the packages we checked) / 无 —— 就 Fedora stable 仓库而言，"
+              "该镜像（在我们检查的软件包范围内）已是最新")
     if args.json_out:
         json.dump({"ref": args.ref, "digest": img["digest"], "version": ver,
                    "behind": rows}, open(args.json_out, "w"), indent=1)
@@ -1280,12 +1381,18 @@ def cmd_history(args):
     reg = Registry(args.image, arch=args.arch)
     tks = [reg._token()]
     rows = build_history(reg, tks, scan=args.scan, days=args.days, to=args.to)
-    print(f"{args.image} ({args.arch}) — {len(rows)} most recent builds, oldest first.")
+    print(T(f"{args.image} ({args.arch}) — {len(rows)} most recent builds, oldest first.",
+            f"{args.image} ({args.arch}) —— 最近 {len(rows)} 次构建，从旧到新显示。"))
     print("(named tags are mutable: several builds/day share one version string and the")
     print(" dated tag only points at the newest one, so compare by digest)")
-    print("cost = bytes a client on the row above would download to reach this row\n")
+    print("（命名标签是可变的：一天内多次构建共用同一个版本字符串，")
+    print(" 日期标签只指向最新一次构建，因此请用 digest 来对比）")
+    print("cost = bytes a client on the row above would download to reach this row / "
+          "cost 下载量 = 上一行镜像的客户端升级到本行需下载的字节数\n")
     print(f"  {'created (UTC)':19} {'image version':15} {'input':11} "
           f"{'chunks':8} {'cost':>9}  {'kernel':22} refs")
+    print(f"  {'创建时间 (UTC)':16} {'镜像版本':13} {'输入哈希':10} "
+          f"{'chunk':8} {'下载量':>8}  {'内核':20} 引用")
     print("  " + "-" * 110)
     dup = 0
     for r in reversed(rows):
@@ -1296,18 +1403,22 @@ def cmd_history(args):
         mark = ""
         if r.get("same_input_as_prev"):
             dup += 1
-            mark = "   <= same inputhash as previous build: rebuild only"
-        cur = " *CURRENT" if r["tags"] and args.to in r["tags"] else ""
+            mark = "   <= same inputhash as previous build: rebuild only / 与上次构建 inputhash 相同：仅重建"
+        cur = " *CURRENT/当前" if r["tags"] and args.to in r["tags"] else ""
         print(f"  {(r.get('created') or '?')[:19]:19} {str(r['version'])[:15]:15} "
               f"{str(r['inputhash'])[:10]:11} {ch:8} {cost:>9}  "
               f"{str(r['kernel'])[:22]:22} {refs[:40]}{cur}{mark}")
     if dup:
         print(f"\n  {dup} of these builds changed no package input at all "
-              f"(identical rpm-ostree inputhash) - updating to one of them buys nothing.")
+              f"(identical rpm-ostree inputhash) - updating to one of them buys nothing. / "
+              f"其中 {dup} 次构建的软件包输入完全没有变化"
+              f"（rpm-ostree inputhash 相同）——升级到它们没有任何收益。")
     oldest = rows[-1]
-    print("\n  every image is addressable by its (immutable) digest, e.g.")
+    print("\n  every image is addressable by its (immutable) digest, e.g. / "
+          "每个镜像都可以用其（不可变的）digest 定位，例如：")
     print(f"    sbwatch.py diff sha256:{oldest['digest'].split(':')[1]} {args.to}")
-    print("  (named tags are mutable - prefer digests when you want a specific build)")
+    print(T("  (named tags are mutable - prefer digests when you want a specific build)",
+            "  （命名标签可变——想指定某次构建时请优先使用 digest）"))
     return 0
 
 
@@ -1342,10 +1453,10 @@ def cmd_tags(args):
     cur = resolve(reg, args.to, tks)
     maybe_verify_resolved(reg, cur, args)
     print(f"{args.to} -> {cur['digest']}")
-    print(f"  version: {cur['annotations'].get('org.opencontainers.image.version')}")
-    print(f"  created: {cur.get('created')}   kernel: {cur['annotations'].get('ostree.linux')}")
-    print(f"  chunks: {len(cur['layers'])}  total: {human(sum(l['size'] for l in cur['layers']))}")
-    print("\ndated tags (registry keeps ~4 weeks):")
+    print(f"  version 版本: {cur['annotations'].get('org.opencontainers.image.version')}")
+    print(f"  created 构建时间: {cur.get('created')}   kernel 内核: {cur['annotations'].get('ostree.linux')}")
+    print(f"  chunks 分块: {len(cur['layers'])}  total 总量: {human(sum(l['size'] for l in cur['layers']))}")
+    print("\ndated tags (registry keeps ~4 weeks): / 日期标签（registry 约保留 4 周）：")
     now = time.time()
     for i in range(1, args.days + 1):
         d = time.strftime("%Y%m%d", time.gmtime(now - i * 86400))
@@ -1367,18 +1478,18 @@ def cmd_layers(args):
     if args.json:
         json.dump(ld, open(args.json, "w"), indent=1)
     print(f"{args.image}: {args.a} -> {args.b}")
-    print(f"  version: {a['annotations'].get('org.opencontainers.image.version')}"
+    print(f"  version 版本: {a['annotations'].get('org.opencontainers.image.version')}"
           f" -> {b['annotations'].get('org.opencontainers.image.version')}")
-    print(f"  kernel:  {a['annotations'].get('ostree.linux')} -> {b['annotations'].get('ostree.linux')}")
-    print(f"  chunks:  {ld['chunks_a']} -> {ld['chunks_b']} | {ld['chunks_changed']} changed, "
-          f"{ld['chunks_reused']} reused")
-    print(f"  download: {human(ld['download_bytes'])} ({ld['download_pct']}% of "
+    print(f"  kernel 内核:  {a['annotations'].get('ostree.linux')} -> {b['annotations'].get('ostree.linux')}")
+    print(f"  chunks 分块:  {ld['chunks_a']} -> {ld['chunks_b']} | "
+          f"{ld['chunks_changed']} changed 变化, {ld['chunks_reused']} reused 复用")
+    print(f"  download 下载: {human(ld['download_bytes'])} ({ld['download_pct']}% of "
           f"{human(ld['total_size_b'])})")
     pk = ld["changed_packages_from_chunks"]
-    print(f"  packages whose chunk changed: {len(pk)}")
+    print(f"  packages whose chunk changed / 所在 chunk 发生变化的软件包: {len(pk)}")
     for p in pk:
         print("     -", p)
-    print("  biggest chunks to re-download:")
+    print(T("  biggest chunks to re-download:", "需要重新下载的最大 chunk："))
     for ch in ld["changed_chunks"][:12]:
         print(f"     {human(ch['size']):>9}  {' '.join(ch['components'])[:100]}")
     return 0
@@ -1395,7 +1506,8 @@ def cmd_pkgs(args):
         json.dump({"ref": args.ref, "digest": r["digest"],
                    "annotations": r["annotations"], "packages": slim},
                   open(args.json, "w"), indent=1)
-        log(f"wrote {args.json}: {len(pkgs)} packages")
+        log(T(f"wrote {args.json}: {len(pkgs)} packages",
+              f"已写入 {args.json}：{len(pkgs)} 个软件包"))
         return 0
     for n in sorted(pkgs):
         print(f"{n}\t{pkgs[n]['evr']}\t{pkgs[n]['arch']}\t{pkgs[n]['src']}")
@@ -1423,15 +1535,20 @@ def load_pkglist(reg, img, ref, cache_dir, notes):
     cf = os.path.join(cache_dir, f"pkglist-{img['digest'].replace(':', '')}.json")
     if os.path.exists(cf) and os.path.getsize(cf) > 10_000:
         try:
-            notes.append(f"package list of `{ref}` served from `{cf}` (no download)")
+            notes.append(f"package list of `{ref}` served from `{cf}` (no download) / "
+                         f"`{ref}` 的软件包列表来自缓存 `{cf}`（未下载）")
             return json.load(open(cf))
         except Exception:
-            log(f"  ! cache {cf} corrupted, refetching")
-    log(f"  fetching rpmdb chunk of {ref} ({img['digest'][:19]}…)")
+            log(T(f"  ! cache {cf} corrupted, refetching",
+                  f"  ！缓存 {cf} 已损坏，重新获取"))
+    log(T(f"  fetching rpmdb chunk of {ref} ({img['digest'][:19]}…)",
+          f"  正在获取 {ref} 的 rpmdb chunk（{img['digest'][:19]}…）"))
     pk = package_list(reg, img)
     _atomic_write_json(cf, pk)
     notes.append(f"package list of `{ref}` came from that image's `rpmdb.sqlite` chunk "
-                 f"(~33 MB fetched, ~3.7 GiB avoided)")
+                 f"(~33 MB fetched, ~3.7 GiB avoided) / "
+                 f"`{ref}` 的软件包列表来自该镜像的 `rpmdb.sqlite` chunk"
+                 f"（仅下载约 33 MB，避免约 3.7 GiB）")
     return pk
 
 
@@ -1459,8 +1576,13 @@ def do_diff(args, ref_a: str, ref_b: str) -> dict:
                          + f" | {len(ld['changed_packages_from_chunks'])} packages sit in "
                            "changed chunks - see the chunk list below, or drop --exact 0 "
                            "for exact versions and CVE matching")
+        v["headline_zh"] = ("chunk 级模式（仅 manifest，未拉取 rpmdb）："
+                            + (v.get("headline_zh") or "")
+                            + f" ｜ {len(ld['changed_packages_from_chunks'])} 个软件包位于"
+                              "发生变化的 chunk 中——见下方 chunk 列表；去掉 --exact 0 可获得精确版本与 CVE 匹配")
         return {"a": a, "b": b, "diff": diff, "layers": ld, "xc": xc, "verdict": v,
-                "notes": notes + ["manifest-only mode (--exact 0): no real versions or CVE matching"]}
+                "notes": notes + [T("manifest-only mode (--exact 0): no real versions or CVE matching",
+                                    "仅 manifest 模式 (--exact 0)：无精确版本，也不做 CVE 匹配")]}
     cache_dir = args.cache_dir or os.path.expanduser("~/.cache/sbwatch")
     pa = load_pkglist(reg, a, ref_a, cache_dir, notes)
     pb = load_pkglist(reg, b, ref_b, cache_dir, notes)
@@ -1477,8 +1599,10 @@ def do_diff(args, ref_a: str, ref_b: str) -> dict:
     bstate = {"failed": bodhi.failed, "skipped": bodhi.skipped} if bodhi else {"disabled": 1}
     v = verdict_of(diff, ld, meta, xc, backlog, bstate)
     if bstate.get("failed"):
-        notes.append(f"WARNING: {bstate['failed']} Bodhi errata query(ies) failed; those "
-                     f"packages were judged from changelog CVEs only")
+        notes.append(T(f"WARNING: {bstate['failed']} Bodhi errata query(ies) failed; those "
+                       f"packages were judged from changelog CVEs only",
+                       f"警告：{bstate['failed']} 次 Bodhi 勘误查询失败；"
+                       f"这些软件包仅依据更新日志中的 CVE 判断"))
     return {"a": a, "b": b, "diff": diff, "layers": ld, "xc": xc, "verdict": v,
             "notes": notes, "release": rel, "backlog": backlog}
 
@@ -1491,7 +1615,7 @@ def cmd_diff(args):
                          res.get("xc"), res.get("backlog"))
     if args.markdown:
         open(args.markdown, "w").write(md)
-        log(f"wrote {args.markdown}")
+        log(T(f"wrote {args.markdown}", f"已写入 {args.markdown}"))
     else:
         print(md)
     if args.json_out:
@@ -1556,8 +1680,10 @@ def cmd_check(args):
         json.dump(d, open(state_path, "w"), indent=1)
 
     if state.get("digest") == cur["digest"] and not args.force:
-        msg = (f"no new build for {args.image}:{args.to} - still {ver} "
-               f"({cur['digest'][:19]}...), nothing to download")
+        msg = T(f"no new build for {args.image}:{args.to} - still {ver} "
+                f"({cur['digest'][:19]}...), nothing to download",
+                f"{args.image}:{args.to} 无新构建——仍为 {ver}"
+                f"（{cur['digest'][:19]}...），无需下载任何内容")
         log(msg)
         # silent exit: no report needed, but keep GITHUB_OUTPUT for the workflow
         # to skip notify/upload. Create a minimal report only if caller asked for one,
@@ -1567,7 +1693,7 @@ def cmd_check(args):
             # write a tiny placeholder if the workflow expects a file; otherwise skip
             if os.environ.get("GITHUB_ACTIONS"):
                 with open(report, "w") as fh:
-                    fh.write(f"# No new build\n\n{msg}\n")
+                    fh.write(f"# No new build 无新构建\n\n{msg}\n")
         except Exception:
             pass
         gh_outputs({"verdict": "no-update", "digest": cur["digest"], "summary": msg,
@@ -1584,7 +1710,8 @@ def cmd_check(args):
         try:
             hist = build_history(reg, tks, scan=args.scan, days=0, to=args.to)
         except Exception as e:
-            log(f"  ! history scan failed: {str(e)[:80]}")
+            log(T(f"  ! history scan failed: {str(e)[:80]}",
+                  f"  ！历史扫描失败：{str(e)[:80]}"))
 
     ref_a, label_a = args.a, args.a
     if not ref_a and state.get("digest") and state["digest"] != cur["digest"]:
@@ -1605,7 +1732,8 @@ def cmd_check(args):
                 ref_a, label_a = d, d
                 break
     if not ref_a:
-        msg = f"new build ({ver}) but no earlier image available to diff against"
+        msg = T(f"new build ({ver}) but no earlier image available to diff against",
+                f"有新构建（{ver}），但没有可用于对比的更早镜像")
         log(msg)
         # first run / no baseline: don't fail the workflow, just report unknown
         # and let the workflow decide whether to notify. This used to return 1
@@ -1614,8 +1742,9 @@ def cmd_check(args):
         try:
             if os.environ.get("GITHUB_ACTIONS"):
                 with open(report, "w") as fh:
-                    fh.write(f"# {msg}\n\nNo baseline image found to diff against. "
-                             f"Current: {ver} {cur['digest'][:19]}...\n")
+                    fh.write(f"# {msg}\n\nNo baseline image found to diff against / "
+                             f"未找到可用于对比的基线镜像. "
+                             f"Current 当前: {ver} {cur['digest'][:19]}...\n")
                 json.dump({"verdict": {"level": "unknown"}, "version": ver,
                            "digest": cur["digest"]}, open(report + ".json", "w"), indent=1)
         except Exception:
@@ -1633,7 +1762,8 @@ def cmd_check(args):
             if (prev["annotations"].get("rpmostree.inputhash")
                     == cur["annotations"].get("rpmostree.inputhash")
                     and cur["annotations"].get("rpmostree.inputhash")):
-                log("  identical inputhash -> manifest-only comparison (no rpmdb fetch)")
+                log(T("  identical inputhash -> manifest-only comparison (no rpmdb fetch)",
+                      "  inputhash 相同 -> 仅用 manifest 对比（不拉取 rpmdb）"))
                 args.exact = 0
         except Exception:
             pass
@@ -1657,17 +1787,23 @@ def cmd_check(args):
                 + ", ".join(str(r["created"])[:16] for r in uniq)
                 + " (UTC). Tags like `20260910` or `<sha>-44` are mutable and only point at "
                   "the newest build of a day, so the comparison below is by digest: your last "
-                  "image -> current image, i.e. the full delta of skipping them all.")
+                  "image -> current image, i.e. the full delta of skipping them all. / "
+                f"这不是唯一的新镜像：在你上次查看的构建（{seen[:16]}）之后还推送了 {len(uniq)} 次构建 —— "
+                + ", ".join(str(r["created"])[:16] for r in uniq)
+                + " (UTC)。`20260910`、`<sha>-44` 之类的标签是可变的，只指向当天最新构建，"
+                  "因此下方对比按 digest 进行：你的上一版镜像 -> 当前镜像，"
+                  "即跳过它们全部时的完整差异。")
     md = render_markdown(
-        f"secureblue update watch - {args.image}  {shortref(label_a)} -> {args.to} ({ver})",
+        f"secureblue update watch / secureblue 更新监控 - {args.image}  {shortref(label_a)} -> {args.to} ({ver})",
                          res["a"], res["b"], res["diff"], res["layers"], v, res["notes"],
                          res.get("xc"), res.get("backlog"))
     report = args.report or "report.md"
     with open(report, "w") as fh:
         fh.write(md)
     print(md)
-    summary = (f"[{v['level'].upper()}] {v['headline']} | download "
-               f"{human(res['layers']['download_bytes'])}")
+    summary = (f"[{v['level'].upper()}] {v['headline']}"
+               + (f" / {v['headline_zh']}" if v.get("headline_zh") else "")
+               + f" | download 下载 {human(res['layers']['download_bytes'])}")
     print("\n" + "=" * 72, file=sys.stderr)
     print(summary, file=sys.stderr)
     json.dump({"verdict": v, "from": label_a, "to": args.to, "digest": cur["digest"],
@@ -1693,26 +1829,34 @@ def cmd_check(args):
 # --------------------------------------------------------------------------- #
 def add_common(p):
     p.add_argument("--image", default=DEFAULT_IMAGE,
-                   help="registry repo (host/namespace/name), default: %(default)s")
+                   help="registry repo (host/namespace/name) 镜像仓库（主机/命名空间/名称）, "
+                        "default: %(default)s")
     p.add_argument("--arch", default="amd64", choices=["amd64", "arm64"])
     p.add_argument("--exact", type=int, default=1,
-                   help="1 = read the rpmdb chunk for real NEVRAs + CVEs "
-                        "(~33 MB per image, cached), 0 = manifest-only")
+                   help="1 = read the rpmdb chunk for real NEVRAs + CVEs (~33 MB per image, "
+                        "cached) / 读取 rpmdb chunk 获取精确 NEVRA 与 CVE（每镜像约 33 MB，带缓存）, "
+                        "0 = manifest-only 仅用 manifest")
     p.add_argument("--no-bodhi", action="store_true",
-                   help="do not query Fedora Bodhi (changelog-CVE matching only)")
-    p.add_argument("--max-bodhi", type=int, default=80, help="cap on Bodhi API calls")
+                   help="do not query Fedora Bodhi (changelog-CVE matching only) / "
+                        "不查询 Fedora Bodhi（仅按更新日志匹配 CVE）")
+    p.add_argument("--max-bodhi", type=int, default=80,
+                   help="cap on Bodhi API calls / Bodhi API 调用上限")
     p.add_argument("--audit", action="store_true",
                    help="also report published stable Fedora security updates the image is "
-                        "missing (needs extra Bodhi calls)")
+                        "missing (needs extra Bodhi calls) / 额外报告镜像缺少的已发布 stable "
+                        "Fedora 安全更新（需要更多 Bodhi 调用）")
     p.add_argument("--cache-dir", default=None,
                    help="where to cache parsed package lists / Bodhi answers "
-                        "(default ~/.cache/sbwatch)")
+                        "(default ~/.cache/sbwatch) / 软件包列表与 Bodhi 应答的缓存目录"
+                        "（默认 ~/.cache/sbwatch）")
     # optional cosign verification
     p.add_argument("--cosign-pub", default=None,
                    help="path to cosign public key to verify image signature "
-                        "(e.g. https://github.com/secureblue/secureblue/raw/live/cosign.pub)")
+                        "(e.g. https://github.com/secureblue/secureblue/raw/live/cosign.pub) / "
+                        "用于校验镜像签名的 cosign 公钥路径")
     p.add_argument("--require-cosign", action="store_true",
-                   help="fail if cosign verification fails or cosign binary missing")
+                   help="fail if cosign verification fails or cosign binary missing / "
+                        "cosign 校验失败或缺少 cosign 时直接失败退出")
 
 
 def main(argv=None):
@@ -1720,26 +1864,27 @@ def main(argv=None):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("tags", help="show current image + recent dated tags")
+    p = sub.add_parser("tags", help="show current image + recent dated tags / 显示当前镜像与近期日期标签")
     add_common(p)
     p.add_argument("--to", default="latest")
     p.add_argument("--days", type=int, default=21)
     p.set_defaults(func=cmd_tags)
 
-    p = sub.add_parser("layers", help="chunk-level diff: what changed, what you'd download")
+    p = sub.add_parser("layers", help="chunk-level diff: what changed, what you'd download / "
+                                      "chunk 级差异：变化内容与预计下载量")
     add_common(p)
     p.add_argument("a")
     p.add_argument("b")
     p.add_argument("--json")
     p.set_defaults(func=cmd_layers)
 
-    p = sub.add_parser("pkgs", help="exact package list (NEVRA) of one image")
+    p = sub.add_parser("pkgs", help="exact package list (NEVRA) of one image / 单个镜像的精确软件包列表（NEVRA）")
     add_common(p)
     p.add_argument("ref")
-    p.add_argument("--json", help="write machine-readable package list")
+    p.add_argument("--json", help="write machine-readable package list / 输出机器可读的软件包列表")
     p.set_defaults(func=cmd_pkgs)
 
-    p = sub.add_parser("diff", help="exact package diff + security classification")
+    p = sub.add_parser("diff", help="exact package diff + security classification / 精确软件包差异 + 安全分类")
     add_common(p)
     p.add_argument("a")
     p.add_argument("b")
@@ -1747,37 +1892,45 @@ def main(argv=None):
     p.add_argument("--json-out")
     p.set_defaults(func=cmd_diff)
 
-    p = sub.add_parser("backlog", help="what security updates THIS image is still missing")
+    p = sub.add_parser("backlog", help="what security updates THIS image is still missing / 此镜像仍缺少哪些安全更新")
     add_common(p)
     p.add_argument("ref", nargs="?", default="latest")
     p.add_argument("--json-out")
     p.set_defaults(func=cmd_backlog)
 
-    p = sub.add_parser("history", help="list recent builds (handles several per day)")
+    p = sub.add_parser("history", help="list recent builds (handles several per day) / 列出近期构建（支持一天多次）")
     add_common(p)
     p.add_argument("--to", default="latest")
-    p.add_argument("--scan", type=int, default=12, help="how many builds to list")
+    p.add_argument("--scan", type=int, default=12, help="how many builds to list / 列出多少次构建")
     p.add_argument("--days", type=int, default=7,
-                   help="also resolve this many dated tags to label rows (0 = off)")
+                   help="also resolve this many dated tags to label rows (0 = off) / "
+                        "同时解析这么多天的日期标签来标注行（0 = 关闭）")
     p.set_defaults(func=cmd_history)
 
-    p = sub.add_parser("check", help="stateful digest watch (for CI/cron)")
+    p = sub.add_parser("check", help="stateful digest watch (for CI/cron) / 有状态 digest 监控（用于 CI/cron）")
     add_common(p)
-    p.add_argument("--to", default="latest", help="tag to watch")
-    p.add_argument("--a", default=None, help="compare against this tag (default: state/recent tag)")
-    p.add_argument("--state", default=None, help="state json path")
-    p.add_argument("--report", default=None, help="markdown report path")
-    p.add_argument("--force", action="store_true", help="diff even if digest is unchanged")
+    p.add_argument("--to", default="latest", help="tag to watch / 要监控的标签")
+    p.add_argument("--a", default=None,
+                   help="compare against this tag (default: state/recent tag) / 与该标签对比"
+                        "（默认：状态文件/近期标签）")
+    p.add_argument("--state", default=None, help="state json path / 状态 json 路径")
+    p.add_argument("--report", default=None, help="markdown report path / Markdown 报告路径")
+    p.add_argument("--force", action="store_true",
+                   help="diff even if digest is unchanged / 即使 digest 未变也做对比")
     p.add_argument("--scan", type=int, default=12,
-                   help="build refs to scan when searching for a baseline / newer builds (0 = skip)")
+                   help="build refs to scan when searching for a baseline / newer builds "
+                        "(0 = skip) / 搜索基线或新构建时扫描的构建数（0 = 跳过）")
     p.add_argument("--no-fast", dest="fast", action="store_false",
-                   help="always do the exact rpmdb diff, even when inputhash is unchanged")
+                   help="always do the exact rpmdb diff, even when inputhash is unchanged / "
+                        "即使 inputhash 未变也始终执行精确 rpmdb 差异")
     p.set_defaults(fast=True)
     p.add_argument("--no-audit", dest="audit", action="store_false",
-                   help="skip the 'behind on stable security updates' check")
+                   help="skip the 'behind on stable security updates' check / "
+                        "跳过“落后于 stable 安全更新”的检查")
     p.set_defaults(audit=True)
     p.add_argument("--fail-on", choices=["nothing", "security"], default="nothing",
-                   help="exit 10 when the report contains security fixes")
+                   help="exit 10 when the report contains security fixes / "
+                        "报告包含安全修复时以退出码 10 结束")
     p.set_defaults(func=cmd_check)
 
     args = ap.parse_args(argv)
