@@ -23,7 +23,6 @@ import os
 import sys
 import tempfile
 import unittest
-import urllib.error
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -41,6 +40,22 @@ def pkg(name, evr, src=None, changelog=(), epoch=""):
     return {"name": name, "version": v, "release": r, "epoch": epoch, "arch": "x86_64",
             "evr": evr, "nvr": f"{name}-{evr}", "srpm": f"{src or name}-{evr}.src.rpm",
             "src": src or name, "changelog": [dict(t) for t in changelog]}
+
+
+class _FakeResp:
+    """Minimal urlopen() return value."""
+
+    def __init__(self, body):
+        self._b = body
+
+    def read(self):
+        return self._b
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
 
 
 class FakeBodhi:
@@ -358,7 +373,8 @@ class TestBodhiCache(unittest.TestCase):
                 json.dump({"not": "a list"}, fh)   # valid JSON, wrong type
             self.assertIsNone(b._read_cache(cf))
 
-    def test_valid_cache_is_used(self):
+    def test_legacy_list_cache_still_readable(self):
+        # caches written before pagination existed are a bare list
         with tempfile.TemporaryDirectory() as d:
             b = S.Bodhi(cache_dir=d, max_calls=3)
             cf = b._cf("rpm-F44")
@@ -367,7 +383,106 @@ class TestBodhiCache(unittest.TestCase):
                         "notes": "", "bugs": [], "title": "", "cves": []}]
             with open(cf, "w") as fh:
                 json.dump(payload, fh)
+            ent = b._read_cache_entry(cf)
+            self.assertEqual(ent["updates"], payload)
+            self.assertFalse(ent["truncated"])
+            self.assertIsNone(ent["total"])
+            self.assertEqual(b._read_cache(cf), payload)   # list contract preserved
+            self.assertEqual(b.updates_for_src("rpm", "F44"), payload)
+
+    def test_read_cache_returns_the_updates_list(self):
+        """_read_cache returns the bare updates list - its original contract.
+
+        Adding pagination changed the on-disk shape; the first attempt also changed
+        what this method returns, which broke every caller written against the old
+        contract (that is exactly what failed in CI). Pin it here.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            b = S.Bodhi(cache_dir=d, max_calls=3)
+            cf = b._cf("rpm-F44")
+            payload = [{"alias": "FEDORA-2026-1", "type": "bugfix", "status": "stable",
+                        "severity": "unspecified", "nvrs": ["rpm-4.20-1.fc44"],
+                        "notes": "", "bugs": [], "title": "", "cves": []}]
+            with open(cf, "w") as fh:
+                json.dump(payload, fh)                    # legacy bare-list shape
             self.assertEqual(b._read_cache(cf), payload)
+            with open(cf, "w") as fh:
+                json.dump({"total": 1, "truncated": False, "updates": payload}, fh)
+            self.assertEqual(b._read_cache(cf), payload)  # and from the new shape
+
+    def test_new_cache_shape_roundtrips(self):
+        with tempfile.TemporaryDirectory() as d:
+            b = S.Bodhi(cache_dir=d, max_calls=3)
+            cf = b._cf("rpm-F44")
+            with open(cf, "w") as fh:
+                json.dump({"total": 1, "truncated": False,
+                           "updates": [{"alias": "FEDORA-2026-1"}]}, fh)
+            self.assertEqual(b.updates_for_src("rpm", "F44"),
+                             [{"alias": "FEDORA-2026-1"}])
+            self.assertEqual(b.truncated_src, set())
+
+    def test_truncated_cache_marks_the_source(self):
+        with tempfile.TemporaryDirectory() as d:
+            b = S.Bodhi(cache_dir=d, max_calls=3)
+            cf = b._cf("kernel-F44")
+            with open(cf, "w") as fh:
+                json.dump({"total": 999, "truncated": True, "updates": []}, fh)
+            b.updates_for_src("kernel", "F44")
+            self.assertEqual(b.truncated_src, {"kernel"})
+
+
+class TestBodhiPagination(unittest.TestCase):
+    """Bodhi paginates; reading only page 1 silently dropped 27 of the F44
+    kernel's 127 errata. Walk every page, and say so when the bound is hit."""
+
+    class FakeHTTP:
+        """urlopen stand-in serving N fake updates across pages of 100."""
+
+        def __init__(self, total):
+            self.total, self.calls = total, 0
+
+        def __call__(self, url, timeout=None):
+            import urllib.parse as up
+            q = dict(up.parse_qsl(up.urlparse(url).query))
+            page, rpp = int(q["page"]), int(q["rows_per_page"])
+            self.calls += 1
+            start = (page - 1) * rpp
+            ups = [{"alias": f"FEDORA-{i}", "type": "bugfix", "severity": "unspecified",
+                    "status": "stable", "title": "", "notes": "", "bugs": [],
+                    "builds": [{"nvr": f"kernel-1.{i}-1.fc44"}]}
+                   for i in range(start, min(start + rpp, self.total))]
+            body = json.dumps({"total": self.total, "updates": ups}).encode()
+            return _FakeResp(body)
+
+    def _run(self, total, max_pages=None):
+        b = S.Bodhi(cache_dir=None, max_calls=99, sleep=0)
+        orig_open, orig_max = S.urllib.request.urlopen, S.MAX_BODHI_PAGES
+        fake = self.FakeHTTP(total)
+        S.urllib.request.urlopen = fake
+        if max_pages:
+            S.MAX_BODHI_PAGES = max_pages
+        try:
+            ups = b.updates_for_src("kernel", "F44")
+        finally:
+            S.urllib.request.urlopen = orig_open
+            S.MAX_BODHI_PAGES = orig_max
+        return ups, b, fake
+
+    def test_reads_beyond_the_first_page(self):
+        ups, b, fake = self._run(127)          # the real F44 kernel count
+        self.assertEqual(len(ups), 127)
+        self.assertEqual(fake.calls, 2)
+        self.assertEqual(b.truncated_src, set())
+
+    def test_single_page_package_costs_one_request(self):
+        ups, b, fake = self._run(20)
+        self.assertEqual(len(ups), 20)
+        self.assertEqual(fake.calls, 1)
+
+    def test_hitting_the_page_bound_is_reported_not_hidden(self):
+        ups, b, fake = self._run(5000, max_pages=2)
+        self.assertEqual(len(ups), 200)
+        self.assertEqual(b.truncated_src, {"kernel"})
 
 
 # --------------------------------------------------------------------------- #
