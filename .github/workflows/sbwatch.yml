@@ -50,8 +50,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # Offline: 41 tests, no registry or Bodhi access. They gate the watch job so a
+      # regression in rpmvercmp / classify_change cannot quietly change a verdict.
+      - name: Run the offline test suite
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Lint (dead imports / undefined names)
+        run: |
+          python3 -m pip install --quiet pyflakes
+          python3 -m pyflakes sbwatch.py tests/test_sbwatch.py
+
   watch:
     name: Update watch
+    needs: test
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
