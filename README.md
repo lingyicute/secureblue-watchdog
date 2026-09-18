@@ -101,6 +101,36 @@ python3 sbwatch.py backlog latest --max-bodhi 80
 - `downgrades` / `cves_dropped`：这次更新回退了已发布修复
 - `backlog`：即使跳过，你仍暴露在多少已发布 stable 安全更新之外
 
+## 测试
+
+`tests/test_sbwatch.py` 是 **41 项离线回归测试**，不需要网络、不访问 registry
+或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
+
+```bash
+python3 -m unittest discover -s tests      # 或 python3 tests/test_sbwatch.py
+```
+
+覆盖的行为（每组都对应一个曾经真实出错的判定）：
+
+| 组 | 锁住的行为 |
+|---|---|
+| A1 / A3 | 匹配**旧版本**的勘误、以及 `status != stable` 的勘误，都不得抬高结论 |
+| A2 | `build_history` 的行必须同时带 index digest 与 platform digest，两者不可互换 |
+| A4 | 未读取软件包版本时，不得断言"版本相同但被重建" |
+| A5 | `A B` 中 A 必须是较旧的一方，否则自动纠正 |
+| A6 | `rpmvercmp` 与 rpm 上游 **91 条**测试向量逐条一致（含 `^`、数字段胜过字母段、`~`） |
+| B1 | Bodhi 缓存损坏/形状不符时丢弃重取；CVE 可从 `bugs[].title` 提取 |
+| — | Bodhi 分页：超过一页的勘误必须全部读到，读到上限时要报告"审计不完整" |
+| C1 | backlog 审计的覆盖率必须可见（候选/已查/被截断/池内缺失） |
+| D | 已删除的死代码不得复活；`RPMTAG[1006]` 不得再被当作 `buildhost` |
+| E3 / E5 | 状态原子写入；`fedora_release` 由数据推导而非硬编码 |
+
+其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
+`tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
+
+CI 中由 `test` 作业运行，`watch` 作业 `needs: test`——测试不通过就不跑监控，
+避免 `rpmvercmp` / `classify_change` 的回归悄悄改变结论。
+
 ## GitHub Action
 
 仓库自带 `.github/workflows/sbwatch.yml`，每小时跑一次：
