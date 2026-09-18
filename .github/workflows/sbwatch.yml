@@ -65,8 +65,10 @@ jobs:
         with:
           python-version: '3.13'
 
-      # Offline: 41 tests, no registry or Bodhi access. They gate the watch job so a
-      # regression in rpmvercmp / classify_change cannot quietly change a verdict.
+      # Offline: 56 tests, no registry or Bodhi access (the build-history test
+      # stubs list_tags, so nothing here touches the network). NOTE: the watch
+      # job runs independently of this one - a regression in rpmvercmp /
+      # classify_change shows up here but does NOT block the hourly watch.
       - name: Run the offline test suite
         run: python3 -m unittest discover -s tests -v
 
@@ -115,7 +117,9 @@ jobs:
           # Scoped per image *and* arch: a shared prefix let an amd64 run evict the
           # arm64 entry and vice versa, and evicting state.json is not harmless -
           # without it `check` has no baseline and falls back to scanning history.
-          key: sbwatch-${{ steps.ns.outputs.ns }}-${{ env.SB_ARCH }}-${{ github.run_id }}
+          # run_attempt is part of the key so that RE-running a workflow run (same
+          # run_id) does not hit "Cache already exists" and fail the save step.
+          key: sbwatch-${{ steps.ns.outputs.ns }}-${{ env.SB_ARCH }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             sbwatch-${{ steps.ns.outputs.ns }}-${{ env.SB_ARCH }}-
 
@@ -148,14 +152,21 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/sbwatch
-          key: sbwatch-${{ steps.ns.outputs.ns }}-${{ env.SB_ARCH }}-${{ github.run_id }}
+          key: sbwatch-${{ steps.ns.outputs.ns }}-${{ env.SB_ARCH }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Prune old sbwatch caches
         if: always()
         uses: actions/github-script@v7
+        env:
+          NS: ${{ steps.ns.outputs.ns }}
         with:
           script: |
-            const prefix = `sbwatch-${process.env.SB_ARCH}`;
+            // Must be the SAME prefix the cache keys actually start with:
+            // sbwatch-<ns>-<arch>-<run_id>-<run_attempt>. The previous
+            // `sbwatch-${SB_ARCH}` never matched any key (the image namespace
+            // sits between), so this step silently pruned nothing while still
+            // reporting success.
+            const prefix = `sbwatch-${process.env.NS}-${process.env.SB_ARCH}-`;
             const keep = 7;                                  // newest entries to keep
             const res = await github.rest.actions.getActionsCacheList({
               owner: context.repo.owner, repo: context.repo.repo,
@@ -183,9 +194,10 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Same condition as the history step: a `no-change` run writes a report, so
-      # uploading it is intentional. They used to disagree, which meant the step
-      # summary and the artifact did not describe the same set of runs.
+      # NOTE: deliberately NOT the same condition as the history step above:
+      # this one also runs for 'no-change' - a no-change run produces a real
+      # report worth keeping as an artifact, while re-listing the build history
+      # for it adds nothing.
       - name: Upload report
         uses: actions/upload-artifact@v4
         if: always() && steps.check.outputs.verdict != 'no-update' && steps.check.outputs.verdict != '' && steps.check.outputs.verdict != 'unknown'

@@ -103,7 +103,7 @@ python3 sbwatch.py backlog latest --max-bodhi 80
 
 ## 测试
 
-`tests/test_sbwatch.py` 是 **41 项离线回归测试**，不需要网络、不访问 registry
+`tests/test_sbwatch.py` 是 **56 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -115,21 +115,33 @@ python3 -m unittest discover -s tests      # 或 python3 tests/test_sbwatch.py
 | 组 | 锁住的行为 |
 |---|---|
 | A1 / A3 | 匹配**旧版本**的勘误、以及 `status != stable` 的勘误，都不得抬高结论 |
-| A2 | `build_history` 的行必须同时带 index digest 与 platform digest，两者不可互换 |
+| A2 | `build_history` 的行必须同时带 index digest 与 platform digest，两者不可互换（`list_tags` 已打桩，套件零网络访问） |
 | A4 | 未读取软件包版本时，不得断言"版本相同但被重建" |
 | A5 | `A B` 中 A 必须是较旧的一方，否则自动纠正 |
 | A6 | `rpmvercmp` 与 rpm 上游 **91 条**测试向量逐条一致（含 `^`、数字段胜过字母段、`~`） |
+| A7 | Bodhi 匹配必须同时提供**源码包拼写**（shim-x64 → `shim-16.1-5` 等 246/1107 个无同名二进制的源码包）与剥离 `.secureblue.N` 后的拼写 |
 | B1 | Bodhi 缓存损坏/形状不符时丢弃重取；CVE 可从 `bugs[].title` 提取 |
 | — | Bodhi 分页：超过一页的勘误必须全部读到，读到上限时要报告"审计不完整" |
-| C1 | backlog 审计的覆盖率必须可见（候选/已查/被截断/池内缺失） |
-| D | 已删除的死代码不得复活；`RPMTAG[1006]` 不得再被当作 `buildhost` |
+| C1 | backlog 审计的覆盖率必须可见（候选/已查/被截断/池内缺失）；池条目必须是真实源码包名 |
+| C2 | backlog 匹配：epoch>0 的包（cups、bind、grub2…）不得因 Bodhi NVR 无 epoch 而永远"不落后"；`.secureblue.N` 标记不得抬高本地 release |
+| D | 已删除的死代码不得复活（含 `Bodhi._read_cache`、`Registry.__enter__/__exit__`）；`RPMTAG[1006]` 不得再被当作 `buildhost` |
 | E3 / E5 | 状态原子写入；`fedora_release` 由数据推导而非硬编码 |
+| E6 | `pkg_diff`：仅 epoch 变化（0:1.2-3 → 1:1.2-3）必须可见 |
+| E7 | `pick_tar_member`：活镜像 tar 内有两个 `rpmdb.sqlite`（92MiB 真库 + 0 字节占位），必须按大小选、与 tar 顺序无关 |
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
 
-CI 中由 `test` 作业运行，`watch` 作业 `needs: test`——测试不通过就不跑监控，
-避免 `rpmvercmp` / `classify_change` 的回归悄悄改变结论。
+CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并行）——测试失败
+不会阻塞每小时的监控，但会在 Tests 作业中红牌示警。
+
+### 退出码
+
+所有子命令**正常运行一律以 0 退出**，无论 verdict 是什么（verdict 从报告、
+stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示运行出错
+（网络/registry/参数错误等）。唯一的显式例外是 `check --fail-on security`：
+发现安全修复时以 **10** 退出，专供 CI 使用（本仓库 workflow 的
+`FAIL_ON_SECURITY` 变量即依赖它）。
 
 ## GitHub Action
 
