@@ -16,7 +16,7 @@ on:
         type: choice
         options: [amd64, arm64]
       from_tag:
-        description: "compare against this tag instead of the last seen image (e.g. 20260910)"
+        description: "compare against this tag instead of the last seen image (e.g. 20260916)"
         required: false
         default: ""
       force:
@@ -27,15 +27,23 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: write        # needed only by the "prune old caches" step
 
 env:
   SB_IMAGE: ${{ inputs.image || 'secureblue/silverblue-main-hardened' }}
   SB_ARCH: ${{ inputs.arch || 'amd64' }}
   SB_FROM: ${{ inputs.from_tag }}
-  # "skip" verdicts are the boring majority: keep them in the log, don't notify
-  POST_SKIP_VERDICT: "false"
-  # make the run red when the update carries security fixes (nice with a status badge)
-  FAIL_ON_SECURITY: "false"
+  # Both switches are repository *variables* (Settings -> Secrets and variables ->
+  # Actions -> Variables) so they can actually be turned on without editing this
+  # file. They used to be hard-coded "false" here, which made the Telegram step
+  # and the red-run step unreachable no matter what the README promised.
+  POST_SKIP_VERDICT: ${{ vars.POST_SKIP_VERDICT || 'false' }}
+  FAIL_ON_SECURITY: ${{ vars.FAIL_ON_SECURITY || 'false' }}
+  # Job-level, so that a step-level `if: env.X != ''` can see it. A step-level env
+  # entry is not in scope for that step's own `if:` - that is why the Telegram
+  # push never fired before.
+  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
 concurrency:
   group: sbwatch-${{ inputs.image || 'secureblue/silverblue-main-hardened' }}-${{ inputs.arch || 'amd64' }}
@@ -53,23 +61,38 @@ jobs:
           persist-credentials: false
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3.8.1 # pin: 7e3a2104f2d99210007d200c5a6296c1e5cc7ada
+        # Pinned by commit SHA, not by tag: the `# pin:` comment next to a mutable
+        # tag documents an intention it does not enforce.
+        uses: sigstore/cosign-installer@7e3a2104f2d99210007d200c5a6296c1e5cc7ada # v3.8.1
         with:
           cosign-release: 'v2.4.1'
 
       - name: Download secureblue cosign.pub
         run: |
+          set -euo pipefail
           curl -fsSL -o cosign.pub https://raw.githubusercontent.com/secureblue/secureblue/live/cosign.pub
           ls -l cosign.pub
+          # The key must be the ECDSA P-256 one secureblue publishes; a truncated or
+          # replaced file should fail here rather than at verification time.
+          head -1 cosign.pub | grep -q 'BEGIN PUBLIC KEY'
+
+      - name: Derive a cache namespace from the image name
+        id: ns
+        run: |
+          # cache keys allow only alphanumerics, '-' and '_', and SB_IMAGE has a '/'
+          ns=$(printf '%s' "$SB_IMAGE" | tr -c 'A-Za-z0-9' '-' | tr -s '-' | sed 's/^-*//;s/-*$//')
+          echo "ns=$ns" >> "$GITHUB_OUTPUT"
 
       - name: Restore sbwatch cache (package lists per image, Bodhi answers, last digest)
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/sbwatch
-          key: sbwatch-${{ env.SB_ARCH }}-${{ github.run_id }}
+          # Scoped per image *and* arch: a shared prefix let an amd64 run evict the
+          # arm64 entry and vice versa, and evicting state.json is not harmless -
+          # without it `check` has no baseline and falls back to scanning history.
+          key: sbwatch-${{ steps.ns.outputs.ns }}-${{ env.SB_ARCH }}-${{ github.run_id }}
           restore-keys: |
-            sbwatch-${{ env.SB_ARCH }}-
-            sbwatch-
+            sbwatch-${{ steps.ns.outputs.ns }}-${{ env.SB_ARCH }}-
 
       - name: Analyse the newest build
         id: check
@@ -79,9 +102,11 @@ jobs:
           [ -n "${SB_FROM:-}" ] && args+=(--a "$SB_FROM")
           [ "${{ inputs.force }}" = "true" ] && args+=(--force)
           if [ -f cosign.pub ]; then
-            args+=(--cosign-pub cosign.pub)
-            args+=(--require-cosign) 
+            args+=(--cosign-pub cosign.pub --require-cosign)
           fi
+          # Ask sbwatch to signal "security fixes waiting" as exit code 10. Without
+          # this flag the rc=10 branch below was dead code.
+          [ "$FAIL_ON_SECURITY" = "true" ] && args+=(--fail-on security)
           rc=0
           python3 sbwatch.py check "${args[@]}" || rc=$?
           # 0 = ok, 10 = "fail-on security" tripped: neither is an error here
@@ -90,7 +115,36 @@ jobs:
             exit "$rc"
           fi
           echo 'sbwatch exit code: '"$rc"
+          echo "fail_on_security=$([ "$rc" = 10 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           [ -f report.md ] && cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save sbwatch cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/sbwatch
+          key: sbwatch-${{ steps.ns.outputs.ns }}-${{ env.SB_ARCH }}-${{ github.run_id }}
+
+      - name: Prune old sbwatch caches
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prefix = `sbwatch-${process.env.SB_ARCH}`;
+            const keep = 7;                                  // newest entries to keep
+            const res = await github.rest.actions.getActionsCacheList({
+              owner: context.repo.owner, repo: context.repo.repo,
+              per_page: 100, key: prefix,
+              sort: 'last_accessed_at', direction: 'desc',
+            });
+            const caches = (res.data.actions_caches || []).slice(keep);
+            for (const c of caches) {
+              await github.rest.actions.deleteActionsCacheById({
+                owner: context.repo.owner, repo: context.repo.repo, cache_id: c.id,
+              });
+              core.info(`deleted cache ${c.id} (${c.key})`);
+            }
+            core.info(`pruned ${caches.length} old cache entr(ies), kept ${keep}`);
 
       - name: Append build history (several pushes a day share one version string)
         if: steps.check.outputs.verdict != 'no-update' && steps.check.outputs.verdict != 'no-change' && steps.check.outputs.verdict != '' && steps.check.outputs.verdict != 'unknown'
@@ -104,6 +158,9 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Same condition as the history step: a `no-change` run writes a report, so
+      # uploading it is intentional. They used to disagree, which meant the step
+      # summary and the artifact did not describe the same set of runs.
       - name: Upload report
         uses: actions/upload-artifact@v4
         if: always() && steps.check.outputs.verdict != 'no-update' && steps.check.outputs.verdict != '' && steps.check.outputs.verdict != 'unknown'
@@ -127,7 +184,7 @@ jobs:
             echo "post=$post"
             echo "verdict=$verdict"
           } >> "$GITHUB_OUTPUT"
-          echo "verdict=$verdict post=$post"
+          echo "verdict=$verdict post=$post post_skip=$POST_SKIP_VERDICT fail_on_security=$FAIL_ON_SECURITY"
 
       - name: Comment on (or open) a sticky issue
         if: steps.notify.outputs.post == 'true'
@@ -150,10 +207,9 @@ jobs:
           fi
 
       - name: Push to Telegram
-        if: steps.notify.outputs.post == 'true' && env.TELEGRAM_BOT_TOKEN != ''
+        # env.TELEGRAM_BOT_TOKEN is defined at *job* level, so it is visible here.
+        if: steps.notify.outputs.post == 'true' && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SUMMARY: ${{ steps.check.outputs.summary }}
         run: |
           python3 - <<'PY'
@@ -175,7 +231,7 @@ jobs:
           PY
 
       - name: Red run when security fixes are waiting
-        if: env.FAIL_ON_SECURITY == 'true' && steps.notify.outputs.verdict == 'update-now'
+        if: env.FAIL_ON_SECURITY == 'true' && steps.check.outputs.fail_on_security == 'true'
         run: |
           echo "::error::new image has security fixes -> rpm-ostree upgrade && systemctl reboot"
           exit 10
