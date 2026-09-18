@@ -101,6 +101,14 @@ python3 sbwatch.py backlog latest --max-bodhi 80
 - `downgrades` / `cves_dropped`：这次更新回退了已发布修复
 - `backlog`：即使跳过，你仍暴露在多少已发布 stable 安全更新之外
 
+### 退出码
+
+所有子命令**正常运行一律以 0 退出**，无论 verdict 是什么（verdict 从报告、
+stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示运行出错
+（网络/registry/参数错误等）。唯一的显式例外是 `check --fail-on security`：
+发现安全修复时以 **10** 退出，专供 CI 使用（本仓库 workflow 的
+`FAIL_ON_SECURITY` 变量即依赖它）。
+
 ## 测试
 
 `tests/test_sbwatch.py` 是 **56 项离线回归测试**，不需要网络、不访问 registry
@@ -134,14 +142,6 @@ python3 -m unittest discover -s tests      # 或 python3 tests/test_sbwatch.py
 
 CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并行）——测试失败
 不会阻塞每小时的监控，但会在 Tests 作业中红牌示警。
-
-### 退出码
-
-所有子命令**正常运行一律以 0 退出**，无论 verdict 是什么（verdict 从报告、
-stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示运行出错
-（网络/registry/参数错误等）。唯一的显式例外是 `check --fail-on security`：
-发现安全修复时以 **10** 退出，专供 CI 使用（本仓库 workflow 的
-`FAIL_ON_SECURITY` 变量即依赖它）。
 
 ## GitHub Action
 
