@@ -51,24 +51,32 @@ sbwatch backlog [ref]         # 这个镜像还缺哪些已发布的 stable 安�
 sbwatch check                 # 有状态的 digest watch，用于 CI/cron -> report.md + verdict + $GITHUB_OUTPUT
 
 # A/B/ref 可以是：
-#   latest | 44 | 20260915 | 9ec80ca-44 | sha256:<digest>
+#   latest | 44 | 20260916 | 9ec80ca-44 | sha256:<digest>
 # 推荐用 digest，因为 dated tag 是可变的
+#
+# ⚠️ `diff A B` / `layers A B` 中的 A 必须是【较旧】的一方，B 是【较新】的一方。
+#    写反了会得出完全相反的结论（把新镜像里新增的 CVE 说成"本次更新移除的修复"）。
+#    工具现在会用 `org.opencontainers.image.created` 自动纠正顺序并在报告里说明；
+#    如需强制保持你给的顺序，加 --keep-order。
+# 先用 `sbwatch.py history` 或 `sbwatch.py tags` 确认哪个 tag 更新。
 ```
 
 ### 示例
 
 ```bash
-# 1. 看当前 latest 和 7 天前 dated tag 的 chunk 变化
-python3 sbwatch.py layers latest 20250910 --image secureblue/silverblue-main-hardened
+# 1. 看当前 latest 和更早的 dated tag 之间的 chunk 变化（旧 -> 新）
+python3 sbwatch.py layers 20260916 latest --image secureblue/silverblue-main-hardened
 
-# 2. 精确 diff，带 CVE 判定
-python3 sbwatch.py diff latest 20250910 --markdown diff.md --json-out diff.json
+# 2. 精确 diff，带 CVE 判定（旧 -> 新）
+python3 sbwatch.py diff 20260916 latest --markdown diff.md --json-out diff.json
 
 # 3. 只看 manifest，不拉 rpmdb (秒级)
-python3 sbwatch.py diff latest 20250910 --exact 0
+#    注意：这个模式没有读取任何软件包版本，所以它不会断言"哪些包版本没变"，
+#    也不做 CVE 匹配——报告里会明确写出这一点。
+python3 sbwatch.py diff 20260916 latest --exact 0
 
-# 4. 带签名校验 (P0 加固)
-python3 sbwatch.py diff latest 20250910 --cosign-pub ./cosign.pub --require-cosign
+# 4. 带签名校验 (P0 加固)；校验结果会写进报告
+python3 sbwatch.py diff 20260916 latest --cosign-pub ./cosign.pub --require-cosign
 
 # 5. CI 模式：只有 tag 移动时才做重活
 python3 sbwatch.py check --image secureblue/silverblue-main-hardened --to latest --report report.md
@@ -97,16 +105,22 @@ python3 sbwatch.py backlog latest --max-bodhi 80
 
 仓库自带 `.github/workflows/sbwatch.yml`，每小时跑一次：
 
-- cache `~/.cache/sbwatch` (pkglist + Bodhi + state.json)
+- cache `~/.cache/sbwatch` (pkglist + Bodhi + state.json)，按 image+arch 分命名空间，
+  并有一个 prune 步骤只保留最近 7 份（否则 `state.json` 会被 LRU 挤掉，`check` 就失去基线）
 - `sbwatch.py check` → `report.md` + `report.md.json` → summary + artifact
-- 若 verdict 不是 `no-update`/`no-change`，会评论到 sticky issue `secureblue update watch`
+- 若 verdict 不是 `no-update`/`no-change`/`unknown`，会评论到 sticky issue
+  `secureblue update watch`
 - 若配置了 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` secrets，推送到 Telegram
 
-环境变量：
+环境变量（workflow_dispatch 输入）：
 - `SB_IMAGE` (默认 `secureblue/silverblue-main-hardened`)
 - `SB_ARCH` (`amd64`/`arm64`)
-- `POST_SKIP_VERDICT` (默认 false，skip 不通知)
-- `FAIL_ON_SECURITY` (默认 false，为 true 时 security 更新会让 run 变红)
+- `SB_FROM` (与指定 tag 对比，而不是上次看到的镜像)
+
+仓库变量（Settings → Secrets and variables → Actions → **Variables**，不是 Secrets）：
+- `POST_SKIP_VERDICT` (默认 `false`，`true` 时 skip 也通知)
+- `FAIL_ON_SECURITY` (默认 `false`，`true` 时会给 sbwatch 传 `--fail-on security`，
+  安全更新会让 run 变红)
 
 ## 🗂️ License
 
