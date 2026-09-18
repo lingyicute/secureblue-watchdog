@@ -48,7 +48,6 @@ import argparse
 import atexit
 import gzip
 import hashlib
-import io
 import json
 import os
 import re
@@ -77,6 +76,8 @@ MAX_BLOB_BYTES = 200 * 1024 * 1024          # 200 MiB compressed
 MAX_DECOMPRESSED_BYTES = 200 * 1024 * 1024  # 200 MiB decompressed
 MAX_TAR_MEMBERS = 10_000
 MAX_TAR_FILE_SIZE = 100 * 1024 * 1024       # 100 MiB single file inside tar
+BODHI_PAGE_SIZE = 100                       # Bodhi's max rows_per_page
+MAX_BODHI_PAGES = 10                        # 1000 errata/src is far beyond any real case
 TAG_LIST_RETRIES = 4                        # ghcr is flaky on tags/list pagination
 MANIFEST_ACCEPT = ",".join([
     "application/vnd.oci.image.index.v1+json",
@@ -791,7 +792,7 @@ class Bodhi:
         self.calls, self._mem = 0, {}
         self.failed = 0          # queries that errored => verdict must not claim "clean"
         self.skipped = 0         # queries we never made because of --max-bodhi
-        self.total_for_src = None
+        self.truncated_src = set()   # srcs where we could not read every erratum
         if cache_dir:
             os.makedirs(cache_dir, exist_ok=True)
 
@@ -800,11 +801,23 @@ class Bodhi:
             if self.cache_dir else None
 
     def _read_cache(self, cf):
-        """Return the cached answer, or None. Never let a corrupt cache kill a run."""
+        """Return the cached answer as {"total", "truncated", "updates"}, or None.
+
+        Never let a corrupt cache kill a run. Two shapes are accepted: the current
+        dict, and the bare list written before pagination existed (no truncation
+        info, so treated as complete). Anything else is treated as corrupt, removed
+        and refetched - a cache the reader cannot parse must not be written by the
+        writer, and if the two ever disagree again the symptom is a refetch, not a
+        wrong verdict.
+        """
         try:
             with open(cf) as f:
                 data = json.load(f)
-            return data if isinstance(data, list) else None
+            if isinstance(data, list):
+                return {"total": None, "truncated": False, "updates": data}
+            if isinstance(data, dict) and isinstance(data.get("updates"), list):
+                return data
+            return None
         except Exception as e:
             log(T(f"  ! bodhi cache {os.path.basename(cf)} unreadable ({e}), refetching",
                   f"  ！Bodhi 缓存 {os.path.basename(cf)} 无法读取（{e}），重新获取"))
@@ -815,30 +828,53 @@ class Bodhi:
             return None
 
     def updates_for_src(self, src: str, release: str) -> list:
+        """Every Fedora erratum for one source package in one release.
+
+        Bodhi paginates. Asking for rows_per_page=100 and reading only the first
+        page silently drops the rest: the live F44 kernel has 127 errata, so 27 of
+        them - and any security fix among them - used to be invisible. We now walk
+        every page (bounded by MAX_BODHI_PAGES) and, if the bound is hit, record
+        the package in `truncated_src` so the report can say the audit was partial
+        instead of quietly claiming completeness.
+        """
         key = f"{src}-{release}"
         cf = self._cf(key)
         if cf and os.path.exists(cf) and time.time() - os.path.getmtime(cf) < self.ttl:
             cached = self._read_cache(cf)
             if cached is not None:
                 self._mem[key] = cached
-                return cached
+                if cached.get("truncated"):
+                    self.truncated_src.add(src)
+                return cached["updates"]
         if key in self._mem:
-            return self._mem[key]
+            ent = self._mem[key]
+            return ent["updates"] if isinstance(ent, dict) else ent
         if self.calls >= self.max_calls:
             self.skipped += 1
             return []
 
         res: list = []
-        self.calls += 1
-        url = f"{self.BASE}/updates/?" + urllib.parse.urlencode(
-            {"packages": src, "releases": release, "rows_per_page": "100"})
+        total = None
+        truncated = False
         ok = False
-        try:
-            with urllib.request.urlopen(url, timeout=40) as r:
-                data = json.load(r)
+        for page in range(1, MAX_BODHI_PAGES + 1):
+            self.calls += 1
+            url = f"{self.BASE}/updates/?" + urllib.parse.urlencode(
+                {"packages": src, "releases": release,
+                 "rows_per_page": str(BODHI_PAGE_SIZE), "page": str(page)})
+            try:
+                with urllib.request.urlopen(url, timeout=40) as r:
+                    data = json.load(r)
+            except Exception as ex:
+                self.failed += 1
+                log(T(f"  ! bodhi lookup failed for {src} (page {page}): {ex}",
+                      f"  ！查询 Bodhi 失败：{src}（第 {page} 页）：{ex}"))
+                ok = False
+                break
             ok = True
-            self.total_for_src = data.get("total")
-            for u in data.get("updates", []):
+            total = data.get("total", total)
+            page_ups = data.get("updates", []) or []
+            for u in page_ups:
                 # Bodhi's /updates/ payload has NO "cves" key (verified against the
                 # live API); CVE ids live in the notes text and in bugs[].title,
                 # e.g. "CVE-2026-2673 openssl: TLS 1.3 server may choose ...".
@@ -858,15 +894,25 @@ class Bodhi:
                     "date_stable": u.get("date_stable"),
                     "nvrs": [b.get("nvr") for b in (u.get("builds") or [])],
                 })
-        except Exception as ex:
-            self.failed += 1
-            log(T(f"  ! bodhi lookup failed for {src}: {ex}",
-                  f"  ！查询 Bodhi 失败：{src}：{ex}"))
+            if len(page_ups) < BODHI_PAGE_SIZE:
+                break                       # last page
+            if isinstance(total, int) and len(res) >= total:
+                break
+            if page == MAX_BODHI_PAGES:
+                truncated = True
+                log(T(f"  ! bodhi: stopped at {len(res)} of {total} errata for {src} "
+                      f"(MAX_BODHI_PAGES={MAX_BODHI_PAGES}) - this package's audit is "
+                      f"INCOMPLETE",
+                      f"  ！Bodhi：{src} 只取到 {total} 条勘误中的 {len(res)} 条"
+                      f"（MAX_BODHI_PAGES={MAX_BODHI_PAGES}）——该包的审计不完整"))
+            time.sleep(self.sleep)
+        if truncated:
+            self.truncated_src.add(src)
         # never cache a failed query: an empty answer would blind later runs
         if cf and ok:
-            _atomic_write_json(cf, res)
-        time.sleep(self.sleep)
-        self._mem[key] = res
+            _atomic_write_json(cf, {"total": total, "truncated": truncated,
+                                    "updates": res})
+        self._mem[key] = {"total": total, "truncated": truncated, "updates": res}
         return res
 
 
@@ -2074,7 +2120,8 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None) -> dict:
     if getattr(args, "audit", False) and bodhi is not None:
         ab = Bodhi(cache_dir=cache_dir, max_calls=max(args.max_bodhi, 45))
         backlog, coverage = security_backlog(pb, rel, ab, limit=max(args.max_bodhi, 45))
-    bstate = {"failed": bodhi.failed, "skipped": bodhi.skipped} if bodhi else {"disabled": 1}
+    bstate = {"failed": bodhi.failed, "skipped": bodhi.skipped,
+              "truncated": sorted(bodhi.truncated_src)} if bodhi else {"disabled": 1}
     v = verdict_of(diff, ld, meta, xc, backlog, bstate)
     if getattr(args, "audit", False) and backlog is not None:
         notes.append(coverage_line(coverage))
@@ -2083,6 +2130,15 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None) -> dict:
                        f"packages were judged from changelog CVEs only",
                        f"警告：{bstate['failed']} 次 Bodhi 勘误查询失败；"
                        f"这些软件包仅依据更新日志中的 CVE 判断"))
+    if bstate.get("truncated"):
+        tr = ", ".join(bstate["truncated"][:8])
+        notes.append(T(
+            f"WARNING: could not read every erratum for: {tr} - their verdict is based on "
+            f"the first {MAX_BODHI_PAGES * BODHI_PAGE_SIZE} only, so 'no security fix' for "
+            f"them is NOT established",
+            f"警告：以下软件包的勘误未能全部读取：{tr}——它们的结论仅基于前 "
+            f"{MAX_BODHI_PAGES * BODHI_PAGE_SIZE} 条，因此对它们而言"
+            f"「没有安全修复」并未被证实"))
     return {"a": a, "b": b, "diff": diff, "layers": ld, "xc": xc, "verdict": v,
             "notes": notes, "release": rel, "backlog": backlog, "backlog_coverage": coverage}
 
