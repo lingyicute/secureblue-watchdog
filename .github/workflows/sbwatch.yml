@@ -1,6 +1,7 @@
 name: secureblue update watch
 
 on:
+  push:
   schedule:
     - cron: '20 * * * *'
   workflow_dispatch:
@@ -51,7 +52,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install cosign (optional, for --cosign-pub verification)
+      - name: Install cosign
         uses: sigstore/cosign-installer@v3.8.1 # pin: 7e3a2104f2d99210007d200c5a6296c1e5cc7ada
         with:
           cosign-release: 'v2.4.1'
