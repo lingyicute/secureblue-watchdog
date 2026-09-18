@@ -800,8 +800,8 @@ class Bodhi:
         return os.path.join(self.cache_dir, "bodhi-" + re.sub(r"\W+", "_", key) + ".json") \
             if self.cache_dir else None
 
-    def _read_cache(self, cf):
-        """Return the cached answer as {"total", "truncated", "updates"}, or None.
+    def _read_cache_entry(self, cf):
+        """Full cache entry {"total", "truncated", "updates"}, or None.
 
         Never let a corrupt cache kill a run. Two shapes are accepted: the current
         dict, and the bare list written before pagination existed (no truncation
@@ -827,6 +827,17 @@ class Bodhi:
                 pass
             return None
 
+    def _read_cache(self, cf):
+        """The cached updates list, or None.
+
+        This is the original contract and it is deliberately preserved: adding
+        pagination changed the on-disk shape, but silently changing what this
+        method *returns* broke every caller written against the old one. The
+        envelope (with its truncation flag) lives in _read_cache_entry instead.
+        """
+        ent = self._read_cache_entry(cf)
+        return None if ent is None else ent["updates"]
+
     def updates_for_src(self, src: str, release: str) -> list:
         """Every Fedora erratum for one source package in one release.
 
@@ -840,7 +851,7 @@ class Bodhi:
         key = f"{src}-{release}"
         cf = self._cf(key)
         if cf and os.path.exists(cf) and time.time() - os.path.getmtime(cf) < self.ttl:
-            cached = self._read_cache(cf)
+            cached = self._read_cache_entry(cf)
             if cached is not None:
                 self._mem[key] = cached
                 if cached.get("truncated"):
