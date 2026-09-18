@@ -88,7 +88,7 @@ jobs:
       - name: Install cosign
         # Pinned by commit SHA, not by tag: the `# pin:` comment next to a mutable
         # tag documents an intention it does not enforce.
-        uses: sigstore/cosign-installer@7e3a2104f2d99210007d200c5a6296c1e5cc7ada # v3.8.1
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
         with:
           cosign-release: 'v2.4.1'
 
