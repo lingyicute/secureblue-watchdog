@@ -773,17 +773,32 @@ def read_header(blob: bytes) -> dict:
     return out
 
 
+def rpmdb_chunk(resolved: dict) -> dict | None:
+    """The single layer that carries rpmdb.sqlite, by the same rule package_list()
+    uses to fetch it.
+
+    Extracted so that the `check --fast` short-circuit and the real fetch can never
+    disagree about which layer is the rpmdb: if they picked different layers the
+    fast path could skip a fetch whose result it had not actually verified.
+    """
+    cands = [l for l in resolved["layers"]
+             if any(CHUNK_MATCH in c for c in l["components"])]
+    if not cands:
+        return None
+    cands.sort(key=lambda l: l["size"])
+    return cands[0]
+
+
 def package_list(reg: Registry, resolved: dict) -> dict:
     """{binary name: {evr, srpm, src, changelog[]}} for a single image."""
-    cands = [l for l in resolved["layers"] if any(CHUNK_MATCH in c for c in l["components"])]
-    if not cands:
+    chunk = rpmdb_chunk(resolved)
+    if chunk is None:
         raise SystemExit(T(
             "no standalone rpmdb chunk in this image (needs chunkah 'bigfiles' layout); "
             "use `layers` or --exact 0 instead",
             "此镜像中没有独立的 rpmdb chunk（需要 chunkah 'bigfiles' 布局）；"
             "请改用 `layers` 或 --exact 0"))
-    cands.sort(key=lambda l: l["size"])
-    path = reg.extract_member(cands[0], CHUNK_MATCH)
+    path = reg.extract_member(chunk, CHUNK_MATCH)
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
         rows = con.execute("select blob from Packages").fetchall()
@@ -1015,6 +1030,10 @@ def nvr_candidates(pkg: dict) -> list:
 def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) -> dict:
     info = {"security": False, "cves": set(), "cves_dropped": set(), "aliases": [],
             "severities": [], "bodhi_type": None, "why": [], "erratum": None,
+            # set only by a *pushed* type=security erratum that shipped a build in
+            # the NEW image - the exact condition that puts an advisory into
+            # rpm-ostree's .advisories, which is what secureblue keys off.
+            "has_security_erratum": False, "erratum_severity": "",
             # errata that only matched the OLD build: fixes the user already has.
             # Kept separate so they can never inflate the verdict for this update.
             "already_had": [], "not_pushed": [],
@@ -1097,6 +1116,12 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                                "notes": (u.get("notes") or "")[:300]}
             if u["type"] == "security":
                 info["security"] = True
+                # Recorded separately from `security`: secureblue's rule keys off
+                # the *advisory kind* (DnfAdvisoryKind SECURITY == 1), not off
+                # changelog CVE mentions, and its urgency comes from this
+                # severity string run through rpm-ostree's str2severity().
+                info["has_security_erratum"] = True
+                info["erratum_severity"] = (u.get("severity") or "").lower()
                 info["why"].append(
                     f"erratum/勘误 {u['alias']}: type=security severity={u.get('severity')} "
                     f"status={status}")
@@ -1223,6 +1248,124 @@ def fedora_release(pkgs: dict, image_version: str = "") -> str:
     return ""
 
 
+# --------------------------------------------------------------------------- #
+# secureblue's own notification rule
+# --------------------------------------------------------------------------- #
+# Reproduced from files/system/desktop/usr/libexec/secureblue/security-update-
+# notification (secureblue/secureblue).  That script reads
+# `rpm-ostree status --json | jq '."cached-update"'` and decides:
+#
+#   MAJOR  ("A major security vulnerability has been patched", urgency=critical):
+#       'trivalent' in .rpm-diff.upgraded[][1]  OR  max_advisory_severity == critical
+#   NORMAL ("A security vulnerability has been patched", urgency=normal):
+#       'kernel'    in .rpm-diff.upgraded[][1]  OR  max_advisory_severity in
+#                                                   {important, unknown}
+#   else: no notification at all.
+#
+# .rpm-diff.upgraded is GVariant "a(us(ss)(ss))", i.e. JSON
+# [[type, NAME, [evr, arch], [evr, arch]], ...] - index 1 is the package NAME
+# (rpm-ostree's own sort_pkgvariant_by_name() reads child 1 as the name), and
+# the script matches it *literally* against `kernel` / `trivalent`.
+#
+# max_advisory_severity is `[.advisories[]? | select(.[1] == 1) | .[2]] | max`.
+# Field 1 is DnfAdvisoryKind, where SECURITY == 1 (libdnf dnf-advisory.h:
+# UNKNOWN=0, SECURITY=1, BUGFIX=2, ENHANCEMENT=3, NEWPACKAGE=4).  Field 2 is
+# RpmOstreeAdvisorySeverity, produced by str2severity() in rpm-ostree's
+# src/libpriv/rpmostree-rpm-util.cxx - which recognises ONLY the RHEL spellings
+# LOW / MODERATE / IMPORTANT / CRITICAL and returns NONE (0) for everything
+# else, including NULL.  secureblue's `case` has no arm for 0, so 0 falls into
+# `*)` and becomes 'unknown' - which the NORMAL branch acts on.
+#
+# On Fedora that 0 is not a corner case, it is the only value: Fedora's
+# updateinfo.xml publishes no `severity` attribute at all (measured twice on the
+# live dl.fedoraproject.org mirrors: 0 of 2966 <update> tags in the F44 updates
+# repo on 2026-09-23 and 0 of 2979 on 2026-09-24, likewise 0 of 4308 in F43; the
+# only attributes present are from/status/type/version), and Bodhi's own
+# UpdateSeverity enum is unspecified/urgent/high/medium/low - it has no
+# 'critical' and no 'important'.  So dnf_advisory_get_severity() returns NULL,
+# str2severity() returns 0, and:
+#   * max_advisory_severity == 'critical'  is UNREACHABLE, and
+#   * any security advisory on a changed package lands on 'unknown' -> NORMAL.
+# Net effect: on Fedora the MAJOR notification fires if and only if `trivalent`
+# was upgraded, and NORMAL fires for a kernel upgrade or any security advisory.
+# (Should Fedora ever start publishing severities, the mapping below still
+# tracks upstream, because it uses upstream's own str2severity() vocabulary
+# rather than Bodhi's.)
+RPMOSTREE_SEVERITY = {"low": 1, "moderate": 2, "important": 3, "critical": 4}
+
+
+def rpmostree_str2severity(s) -> int:
+    """rpm-ostree str2severity(): RHEL spellings only, everything else -> 0.
+
+    Deliberately NOT SEV_RANK: Bodhi's 'high'/'medium'/'urgent' mean nothing to
+    rpm-ostree, and folding them in would predict an urgency the desktop never
+    shows.
+    """
+    if not s:
+        return 0
+    return RPMOSTREE_SEVERITY.get(str(s).strip().lower(), 0)
+
+
+def _sev_rank_for_upstream(s) -> int:
+    """str2severity() with a distinct floor for 'nothing recorded yet'.
+
+    Every spelling Fedora and Bodhi can actually produce ranks 0 under
+    str2severity(), so picking a max with 0 as the empty-set value would never
+    record the first advisory's severity.
+    """
+    return -1 if not s else rpmostree_str2severity(s)
+
+
+def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
+    """Which notification (if any) secureblue will pop after this update.
+
+    Uses the *binary package names* that actually moved, exactly as rpm-ostree's
+    rpm-diff does.  The `ostree.linux` annotation is not usable for this: it is
+    written by the base compose and does not follow secureblue's own kernel
+    rebuilds - on 44.20260922.0 -> 44.20260923.0 both images report
+    `ostree.linux = 7.2.6-200.fc44.x86_64` while the kernel package really went
+    7.2.6-200.secureblue.3.fc44 -> 7.2.7-200.secureblue.1.fc44.
+    """
+    changed = diff.get("changed") or []
+    if groups is None:
+        # group_by_src() needs full NEVRA fixtures; the erratum signal only
+        # exists once classify_change() has run, so derive groups lazily.
+        groups = group_by_src(changed) if any(c.get("cls") for c in changed) else []
+    # rpm-ostree's .rpm-diff.upgraded holds upgrades only; downgrades go to a
+    # separate array that the notification script never reads.
+    upgraded = {c["name"] for c in (diff.get("changed") or []) if c.get("dir") != "downgrade"}
+    kernel_updated = "kernel" in upgraded
+    trivalent_updated = "trivalent" in upgraded
+
+    # Only errata that (a) shipped a build in THIS image and (b) are type=security
+    # reach .advisories, so only the pushed security errata of changed packages
+    # count.  `cls` already enforces both (PUSHED_STATUSES + hit_new).
+    sevs = [rpmostree_str2severity((g.get("erratum_severity") or "")) for g in groups
+            if g.get("has_security_erratum")]
+    max_sev_int = max(sevs) if sevs else None
+    max_sev = ("none" if max_sev_int is None else
+               {1: "low", 2: "moderate", 3: "important", 4: "critical"}.get(
+                   max_sev_int, "unknown"))
+
+    if trivalent_updated or max_sev == "critical":
+        level, msg = "major", "A major security vulnerability has been patched"
+    elif kernel_updated or max_sev in ("important", "unknown"):
+        level, msg = "normal", "A security vulnerability has been patched"
+    else:
+        level, msg = "none", None
+    why = []
+    if trivalent_updated:
+        why.append("trivalent upgraded (secureblue treats every Trivalent bump as major: "
+                   "Trivalent is rebuilt when upstream Chromium CVEs land)")
+    if kernel_updated:
+        why.append("kernel upgraded")
+    if max_sev in ("critical", "important", "unknown"):
+        why.append(f"security advisory with rpm-ostree severity '{max_sev}'")
+    return {"level": level, "message": msg, "max_advisory_severity": max_sev,
+            "kernel_updated": kernel_updated, "trivalent_updated": trivalent_updated,
+            "security_advisory_count": len(sevs), "why": why}
+
+
 def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                backlog: list | None = None, bodhi_state: dict | None = None) -> dict:
     """Turn the raw diff into a recommendation. Grouped by *source* package so that a
@@ -1236,7 +1379,24 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     imp = [g for g in groups if g["important"] and not g["security"]]
     cves = sorted({c for g in sec for c in g["cves"]})
     sev = max([g["sev_rank"] for g in sec] or [0])
-    kernel_moved = bool(meta.get("kernel_a")) and meta.get("kernel_a") != meta.get("kernel_b")
+    # `kernel` as a *binary package that actually moved* - the same test
+    # secureblue runs against .rpm-diff.upgraded.  The ostree.linux annotation is
+    # kept only as corroboration: it records the kernel from the base compose and
+    # does not move when secureblue rebuilds the kernel with a .secureblue.N
+    # release, which is the common case (44.20260922.0 -> 44.20260923.0 carries an
+    # identical ostree.linux while kernel went 7.2.6 -> 7.2.7).
+    moved_names = {c["name"] for c in diff["changed"] if c.get("dir") != "downgrade"}
+    kernel_in_diff = "kernel" in moved_names
+    kernel_annot_moved = bool(meta.get("kernel_a")) and \
+        meta.get("kernel_a") != meta.get("kernel_b")
+    kernel_moved = kernel_in_diff or kernel_annot_moved
+    sbn = secureblue_notification(diff, groups)
+    if diff.get("count_a") == "?":
+        # manifest-only mode (--exact 0): no rpmdb was read, so the package set
+        # is unknown and "no notification" would be an unfounded claim.
+        sbn = dict(sbn, level="unknown", message=None, why=[],
+                   note="package versions were not read (--exact 0), so the "
+                        "notification cannot be predicted")
     silent = xc.get("silent_rebuilds") or []
     silent_key = [n for n, _ in silent[:60] if n.startswith("kernel") or n in IMPORTANT_SRC]
     n_bin = len(diff["changed"])
@@ -1246,7 +1406,9 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
          "important_pkgs": sorted({p["name"] for g in imp for p in g["pkgs"]}),
          "cves": cves, "cves_dropped": sorted({c for g in lost for c in g["dropped"]}),
          "downgrades": [g["src"] for g in down], "severity_rank": sev,
-         "kernel_changed": kernel_moved, "silent_rebuilds": [n for n, _ in silent],
+         "kernel_changed": kernel_moved, "kernel_in_diff": kernel_in_diff,
+         "kernel_annotation_changed": kernel_annot_moved,
+         "secureblue_notification": sbn, "silent_rebuilds": [n for n, _ in silent],
          "silent_important": silent_key, "non_package_bytes": xc.get("non_package_bytes", 0),
          "download_human": human(ldiff["download_bytes"]),
          "backlog_count": len(backlog or [])}
@@ -1255,27 +1417,43 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     v["same_inputhash"] = same_input
     v["same_commit"] = same_commit
     v["already_had"] = sorted({x["alias"] for g in groups for x in g.get("already_had", [])})
-    if same_input and not sec and not down and not lost:
+    # `no-change` may only be claimed when nothing in the package set moved.
+    # inputhash is not sufficient evidence on its own: 44.20260922.0 and
+    # 44.20260923.0 carry the SAME rpmostree.inputhash (4fde5b5a8c4f...) while
+    # kernel, kernel-core, kernel-modules{,-core,-extra}, hardened_malloc and
+    # trivalent all moved - secureblue pops a MAJOR notification for that pair,
+    # yet the old guard (same_input and not sec/down/lost) answered "updating
+    # would re-download X for no new content" whenever the kernel carried no
+    # matching erratum.
+    pkg_set_moved = bool(diff["changed"] or diff["added"] or diff["removed"])
+    v["same_inputhash_but_packages_moved"] = same_input and pkg_set_moved
+    # `no-change` additionally requires that package versions were actually read.
+    # In manifest-only mode (--exact 0) `changed` is empty by construction, not
+    # because nothing moved - without this guard the verdict asserted "no package
+    # changed in the rpmdb" for a 40-chunk / 900 MiB delta that had never been
+    # inspected. `count_a == "?"` is the marker do_diff() sets for that mode.
+    versions_known = diff.get("count_a") != "?"
+    v["package_versions_known"] = versions_known
+    if same_input and versions_known and not pkg_set_moved and not sec and not down and not lost:
         v["level"] = "no-change"
         nchunks = len(xc.get("silent_rebuilds") or [])
-        # `ostree.commit` is the actual evidence here: an identical commit means the
-        # deployed tree is byte-identical, so the re-emitted chunks carry nothing new.
-        # inputhash alone is weaker - it covers the compose inputs, not the build.
-        if same_commit:
-            ev = (f"identical rpm-ostree inputhash AND identical ostree.commit "
-                  f"({str(meta['commit_a'])[:12]}) - the deployed tree is byte-identical")
-            ev_zh = (f"rpm-ostree inputhash 与 ostree.commit 均相同"
-                     f"（{str(meta['commit_a'])[:12]}）——部署树逐字节一致")
-        else:
-            ev = (f"identical rpm-ostree inputhash ({str(meta['inputhash_a'])[:12]}) - same "
-                  f"package inputs, but the ostree commit differs, so check the chunk list "
-                  f"below before trusting this")
-            ev_zh = (f"rpm-ostree inputhash 相同（{str(meta['inputhash_a'])[:12]}）——软件包输入一致，"
-                     f"但 ostree commit 不同，请先核对下方 chunk 列表")
-        v["headline"] = (f"{ev}; {nchunks} chunk(s) were merely re-emitted. Updating would "
-                         f"re-download {v['download_human']} for no new content")
-        v["headline_zh"] = (f"{ev_zh}；{nchunks} 个 chunk 只是被重新发出。"
-                            f"更新需重新下载 {v['download_human']}，不会带来任何新内容")
+        # The evidence is the *package set*, not the annotations.  Both
+        # `rpmostree.inputhash` and `ostree.commit` are inherited from the Fedora
+        # base image and describe Fedora's compose, not this build - two distinct
+        # secureblue images with 20 of 128 layers differing were measured sharing
+        # both values (98613c9b784b vs 82baf9855818, homebrew 7.0.2 -> 7.0.6).
+        # Claiming "the deployed tree is byte-identical" from an identical
+        # ostree.commit was therefore unsound; what actually justifies this verdict
+        # is that no package moved in the rpmdb.
+        ev = (f"no package changed in the rpmdb "
+              f"({diff.get('count_b', '?')} packages compared); the {nchunks} moved "
+              f"chunk(s) carry no new package content")
+        ev_zh = (f"rpmdb 中没有任何软件包发生变化（共比对 {diff.get('count_b', '?')} 个包）；"
+                 f"{nchunks} 个变化的 chunk 不含新的软件包内容")
+        v["headline"] = (f"{ev}. Updating would re-download {v['download_human']} "
+                         f"for no new package content")
+        v["headline_zh"] = (f"{ev_zh}。更新需重新下载 {v['download_human']}，"
+                            f"不会带来新的软件包内容")
         return v
     if sec:
         v["level"] = "update-now"
@@ -1295,8 +1473,17 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         v["level"] = "consider"
         bits, bits_zh = [], []
         if kernel_moved:
-            bits.append(f"kernel {meta['kernel_a']} → {meta['kernel_b']}")
-            bits_zh.append(f"内核 kernel {meta['kernel_a']} → {meta['kernel_b']}")
+            # Prefer the real package EVR; the ostree.linux annotation can be
+            # absent or stale (see kernel_in_diff above).
+            kg = next((g for g in groups if g["src"] == "kernel"), None)
+            if kg:
+                ktxt, ktxt_zh = f"kernel {kg['old_evr']} → {kg['new_evr']}", \
+                                f"内核 kernel {kg['old_evr']} → {kg['new_evr']}"
+            else:
+                ktxt = f"kernel {meta['kernel_a']} → {meta['kernel_b']}"
+                ktxt_zh = f"内核 kernel {meta['kernel_a']} → {meta['kernel_b']}"
+            bits.append(ktxt)
+            bits_zh.append(ktxt_zh)
         if imp:
             bits.append("version bump in security-sensitive packages: "
                         + ", ".join(g["src"] for g in imp[:5]))
@@ -1326,6 +1513,40 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                             "无 CVE、无安全勘误"
                             + (f"，{len(silent)} 个 chunk 以相同版本重建" if silent else "")
                             + tail_zh)
+    # --- what secureblue's desktop will actually do ------------------------- #
+    # This is orthogonal to the levels above: `update-now`/`consider`/`skip` is
+    # sbwatch's own advice, while `secureblue_notification` is a prediction of
+    # the popup the user will see.  A MAJOR popup (urgency=critical, Reboot
+    # action) means the vendor considers this update urgent, so it must not sit
+    # in `consider` or below - notably, every Trivalent bump lands here even when
+    # it carries no CVE and no Fedora erratum at all (Trivalent has no Fedora
+    # counterpart, so no Bodhi match is possible by construction).
+    if sbn["level"] == "major" and v["level"] not in ("update-now", "no-change"):
+        was = v["level"]
+        v["level"] = "update-now"
+        v["escalated_by_secureblue_rule"] = was
+        if was == "skip":
+            # "routine churn ... no CVE and no security erratum" would directly
+            # contradict the escalated level and the popup prediction below.
+            v["headline"] = ("secureblue escalates this to major despite no CVE and no "
+                             "Fedora erratum being attributable to it. Was: " + v["headline"])
+            v["headline_zh"] = ("尽管无法归因到任何 CVE 或 Fedora 勘误，secureblue 仍将其判定为"
+                                "重大更新。原判：" + v["headline_zh"])
+    if sbn["message"]:
+        tag = "MAJOR" if sbn["level"] == "major" else "normal"
+        v["headline"] += (f" | secureblue will show a {tag} notification: "
+                          f"\"{sbn['message']}\" "
+                          f"(because: {'; '.join(sbn['why'])})")
+        tag_zh = "「重大 / major」" if sbn["level"] == "major" else "「普通 / normal」"
+        v["headline_zh"] += (f" ｜ secureblue 将弹出{tag_zh}通知："
+                             f"「{sbn['message']}」"
+                             f"（触发原因：{'；'.join(sbn['why'])}）")
+    if v["same_inputhash_but_packages_moved"]:
+        v["headline"] += (" | NOTE: rpmostree.inputhash is identical on both images yet "
+                          f"{n_bin} package(s) moved - do not treat inputhash as evidence "
+                          "of a no-op")
+        v["headline_zh"] += (f" ｜ 注意：两个镜像的 rpmostree.inputhash 相同，却有 {n_bin} 个"
+                             "软件包发生了变化——不要拿 inputhash 当作「无变化」的证据")
     if down:
         dl_txt = ", ".join(f"{g['src']} ({g['old_evr']} → {g['new_evr']})"
                            for g in down[:3])
@@ -1388,7 +1609,8 @@ def group_by_src(changed: list) -> list:
         g = groups.setdefault(key, {"src": key, "pkgs": [], "security": False,
                                     "cves": set(), "dropped": set(), "aliases": [],
                                     "why": [], "sev_rank": 0, "important": False,
-                                    "downgrade": False})
+                                    "downgrade": False, "has_security_erratum": False,
+                                    "erratum_severity": ""})
         g["pkgs"].append(c)
         cls = c.get("cls") or {}
         g.setdefault("already_had", [])
@@ -1397,6 +1619,17 @@ def group_by_src(changed: list) -> list:
         g["important"] = g["important"] or bool(cls.get("important_src"))
         g["cves"].update(cls.get("cves") or [])
         g["dropped"].update(cls.get("cves_dropped") or [])
+        if cls.get("has_security_erratum"):
+            g["has_security_erratum"] = True
+            cand = cls.get("erratum_severity") or ""
+            # rpm-ostree takes the max severity across advisories, so keep the
+            # spelling that ranks highest under its own str2severity().  The
+            # sentinel matters: every spelling Fedora/Bodhi can produce ranks 0
+            # under that mapping, so a plain `>` would never store the first one
+            # and the group would report an empty severity.
+            cur = g.get("erratum_severity")
+            if cur is None or _sev_rank_for_upstream(cand) > _sev_rank_for_upstream(cur):
+                g["erratum_severity"] = cand
         for a in cls.get("aliases") or []:
             if a not in g["aliases"]:
                 g["aliases"].append(a)
@@ -1454,6 +1687,28 @@ def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog
     if verdict.get("headline_zh"):
         W(verdict["headline_zh"])
     W("")
+    _sbn = verdict.get("secureblue_notification") or {}
+    if _sbn:
+        _lvl = _sbn.get("level", "none")
+        _badge = {"major": "**MAJOR** (urgency=critical)",
+                  "normal": "normal (urgency=normal)",
+                  "none": "none",
+                  "unknown": "unknown (package versions not read)"}.get(_lvl, _lvl)
+        W("## secureblue notification 桌面通知预测")
+        W("")
+        W(f"- predicted popup 预测弹窗: {_badge}"
+          + (f" — \"{_sbn['message']}\"" if _sbn.get("message") else ""))
+        W(f"- trigger 触发条件: {', '.join(_sbn['why']) or '—'}")
+        W(f"- kernel upgraded 内核已升级: {_sbn.get('kernel_updated')} · "
+          f"trivalent upgraded trivalent 已升级: {_sbn.get('trivalent_updated')} · "
+          f"max advisory severity 最高勘误等级 (rpm-ostree's own scale): "
+          f"`{_sbn.get('max_advisory_severity')}`")
+        W("")
+        W("> 依据 secureblue 的 `security-update-notification` 脚本：`trivalent` 升级 → 重大通知；"
+          "`kernel` 升级或存在安全勘误 → 普通通知。Fedora 的 updateinfo.xml 不发布 severity 属性，"
+          "因此 rpm-ostree 的等级恒为 0（落在 `unknown` 分支），"
+          "`critical` 等级在 Fedora 上不可达——重大通知实际上只由 trivalent 触发。")
+        W("")
     W(f"**If you update, you download {human(ldiff['download_bytes'])}** — "
       f"{ldiff['chunks_changed']} of {ldiff['chunks_b']} chunks changed, "
       f"{ldiff['chunks_reused']} are already on disk and get reused. "
@@ -1485,10 +1740,20 @@ def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog
     W("")
     if (a["annotations"].get("rpmostree.inputhash") and a["annotations"].get("rpmostree.inputhash")
             == b["annotations"].get("rpmostree.inputhash")):
-        W("> **Both images were composed from identical package inputs (same")
-        W("> `rpmostree.inputhash`)** - byte differences here are rebuild noise, not changes.")
-        W("> **两个镜像由完全相同的软件包输入构成（`rpmostree.inputhash` 相同）**——")
-        W("> 这里的字节差异只是重建噪声，并非真实变化。")
+        W("> **`rpmostree.inputhash` is identical on both images - this does NOT mean the")
+        W("> images are equivalent.** That value is produced by `rpm-ostree compose tree`")
+        W("> and inherited verbatim from the Fedora base image; blue-build never runs")
+        W("> `compose tree` (its only compose call is `build-chunked-oci`, a rechunker), so")
+        W("> it describes Fedora's compose and is blind to everything secureblue rebuilds.")
+        W("> Measured: two distinct images sharing this hash differed in 20 of 128 layers")
+        W("> and in `homebrew 7.0.2-26091605 -> 7.0.6-26092310`. `ostree.commit` and")
+        W("> `ostree.linux` are inherited the same way. Judge the package table below.")
+        W("> **两个镜像的 `rpmostree.inputhash` 相同，但这不代表两者等价。**该值由")
+        W("> `rpm-ostree compose tree` 产生、并原样继承自 Fedora 基础镜像；blue-build 从不运行")
+        W("> `compose tree`（唯一的 compose 调用是重分块器 `build-chunked-oci`），因此它描述的是")
+        W("> Fedora 的 compose，看不到 secureblue 自己重建的任何东西。实测：两个共享该哈希的不同")
+        W("> 镜像有 128 层中的 20 层不同，且 `homebrew 7.0.2-26091605 -> 7.0.6-26092310`。")
+        W("> `ostree.commit`、`ostree.linux` 同理继承。请以下方的软件包表为准。")
         W("")
     notes = list(dict.fromkeys(notes))
     for n in notes:
@@ -2020,16 +2285,23 @@ def cmd_history(args):
         mark = ""
         if r.get("same_input_as_prev"):
             dup += 1
-            mark = "   <= same inputhash as previous build: rebuild only / 与上次构建 inputhash 相同：仅重建"
+            # Not "rebuild only": inputhash is inherited from the Fedora base and
+            # cannot see secureblue's own rebuilds (see render_markdown's note).
+            mark = ("   <= same inputhash as previous build (inherited from the Fedora "
+                    "base - NOT proof that nothing changed) / 与上次构建 inputhash 相同"
+                    "（继承自 Fedora 基础镜像——不能证明没有变化）")
         cur = " *CURRENT/当前" if r["tags"] and args.to in r["tags"] else ""
         print(f"  {(r.get('created') or '?')[:19]:19} {str(r['version'])[:15]:15} "
               f"{str(r['inputhash'])[:10]:11} {ch:8} {cost:>9}  "
               f"{str(r['kernel'])[:22]:22} {refs[:40]}{cur}{mark}")
     if dup:
-        print(f"\n  {dup} of these builds changed no package input at all "
-              f"(identical rpm-ostree inputhash) - updating to one of them buys nothing. / "
-              f"其中 {dup} 次构建的软件包输入完全没有变化"
-              f"（rpm-ostree inputhash 相同）——升级到它们没有任何收益。")
+        print(f"\n  {dup} of these builds share their predecessor's rpm-ostree inputhash. "
+              f"That value comes from the Fedora base compose and is blind to secureblue's "
+              f"own rebuilds, so it does NOT establish that the package set is unchanged - "
+              f"use `diff` on the digests to find out. / "
+              f"其中 {dup} 次构建与前一构建共享同一个 rpm-ostree inputhash。"
+              f"该值来自 Fedora 基础镜像的 compose，看不到 secureblue 自己的重建，"
+              f"因此并不能证明软件包集合没有变化——请用 `diff` 对比 digest 来确认。")
     oldest = rows[-1]
     print("\n  every image is addressable by its (immutable) digest, e.g. / "
           "每个镜像都可以用其（不可变的）digest 定位，例如：")
@@ -2490,15 +2762,40 @@ def cmd_check(args):
     # tag twice was a TOCTOU window (a new push in between would make us analyse a
     # different image than the one we then record in state) and ran cosign twice.
     prev = resolve(reg, ref_a)
-    # rebuild-only fast path: if rpm-ostree's resolved inputs are byte-identical, no
-    # package can have changed - skip the 33 MB rpmdb fetch entirely.
+    # Rebuild-only fast path.  The signal must be the rpmdb chunk's own digest:
+    # identical blob => identical rpmdb.sqlite => pkg_diff() is necessarily empty.
+    #
+    # This used to key off `rpmostree.inputhash`, on the reasoning that identical
+    # compose inputs mean no package can have changed.  That reasoning does not
+    # hold for secureblue.  inputhash is produced by `rpm-ostree compose tree`
+    # (src/app/rpmostree-compose-builtin-tree.cxx: rpmostree_context_get_state_digest
+    # = SHA256(treefile checksum + dnf goal repodata checksums)) and stored in the
+    # *ostree commit metadata*; rpm-ostree then copies it into the OCI config
+    # labels on export (rust/src/container.rs: "Default to copying the input hash
+    # to support cheap change detection").  blue-build never runs `compose tree` -
+    # its only rpm-ostree compose call is `compose build-chunked-oci`, a rechunker
+    # (process/drivers/traits.rs) - so secureblue inherits the value verbatim from
+    # quay.io/fedora-ostree-desktops/silverblue.  Measured: 98613c9b784b (05:40Z)
+    # and 82baf9855818 (20:22Z) are distinct images with 20 of 128 layers differing
+    # and homebrew 7.0.2-26091605 -> 7.0.6-26092310, yet share inputhash
+    # 4fde5b5a8c4f..., ostree.commit 4df81387..., ostree.linux and final-diffid.
+    # Both annotations describe Fedora's compose, not secureblue's build.
     if args.fast and not args.force:
-        ih_a, ih_b = (prev["annotations"].get("rpmostree.inputhash"),
-                      cur["annotations"].get("rpmostree.inputhash"))
-        if ih_a and ih_a == ih_b:
-            log(T("  identical inputhash -> manifest-only comparison (no rpmdb fetch)",
-                  "  inputhash 相同 -> 仅用 manifest 对比（不拉取 rpmdb）"))
+        ra, rb = rpmdb_chunk(prev), rpmdb_chunk(cur)
+        if ra and rb and ra["digest"] == rb["digest"]:
+            log(T("  rpmdb chunk digest identical -> manifest-only comparison "
+                  "(no rpmdb fetch)",
+                  "  rpmdb chunk 摘要相同 -> 仅用 manifest 对比（不拉取 rpmdb）"))
             args.exact = 0
+        else:
+            ih_a, ih_b = (prev["annotations"].get("rpmostree.inputhash"),
+                          cur["annotations"].get("rpmostree.inputhash"))
+            if ih_a and ih_a == ih_b:
+                log(T("  inputhash matches but the rpmdb chunk differs - inputhash is "
+                      "inherited from the Fedora base and is blind to secureblue's own "
+                      "rebuilds, so fetching the rpmdb anyway",
+                      "  inputhash 相同但 rpmdb chunk 不同 —— inputhash 继承自 Fedora 基础镜像，"
+                      "看不到 secureblue 自己的重建，因此仍然拉取 rpmdb"))
 
     res = do_diff(args, ref_a, args.to, images=(prev, cur))
     v = res["verdict"]
