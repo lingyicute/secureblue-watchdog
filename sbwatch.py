@@ -139,9 +139,18 @@ def log(*a):
     print(*a, file=sys.stderr, flush=True)
 
 
-def T(en: str, zh: str) -> str:
+class BiText(str):
+    """Bilingual user-facing text with structured access to English and Chinese components."""
+    def __new__(cls, en: str, zh: str):
+        obj = super().__new__(cls, f"{en} / {zh}")
+        obj.en = en
+        obj.zh = zh
+        return obj
+
+
+def T(en: str, zh: str) -> BiText:
     """Bilingual user-facing message: English first, then Chinese（中英双语输出）."""
-    return f"{en} / {zh}"
+    return BiText(en, zh)
 
 
 def human(nbytes) -> str:
@@ -1331,9 +1340,10 @@ def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
         # group_by_src() needs full NEVRA fixtures; the erratum signal only
         # exists once classify_change() has run, so derive groups lazily.
         groups = group_by_src(changed) if any(c.get("cls") for c in changed) else []
-    # rpm-ostree's .rpm-diff.upgraded holds upgrades only; downgrades go to a
-    # separate array that the notification script never reads.
-    upgraded = {c["name"] for c in (diff.get("changed") or []) if c.get("dir") != "downgrade"}
+    # rpm-ostree's .rpm-diff.upgraded holds upgrades only; downgrades and rebuilds
+    # are not in upgraded (upgraded packages only).
+    upgraded = {c["name"] for c in (diff.get("changed") or [])
+                if c.get("dir") == "upgrade" or (c.get("dir") is None and c.get("name"))}
     kernel_updated = "kernel" in upgraded
     trivalent_updated = "trivalent" in upgraded
 
@@ -1438,7 +1448,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     # inspected. `count_a == "?"` is the marker do_diff() sets for that mode.
     versions_known = diff.get("count_a") != "?" or bool(diff.get("same_rpmdb"))
     v["package_versions_known"] = versions_known
-    if (same_input or diff.get("same_rpmdb")) and versions_known and not pkg_set_moved and not sec and not down and not lost:
+    if versions_known and not pkg_set_moved and not sec and not down and not lost:
         v["level"] = "no-change"
         nchunks = len(xc.get("silent_rebuilds") or [])
         cnt_info = f"{diff.get('count_b')} packages compared" if diff.get("count_b") != "?" else "identical rpmdb chunk digest"
@@ -1532,10 +1542,12 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                                 "重大更新。原判：" + v["headline_zh"])
         elif was == "consider":
             # Strip "Reasonable to skip" recommendation since it contradicts update-now
-            v["headline"] = v["headline"].replace(". Reasonable to skip if the download matters to you", "")
-            v["headline_zh"] = v["headline_zh"].replace("。如果下载量对你很重要，可以合理地跳过", "")
-            v["headline"] = ("secureblue escalates this to major: " + v["headline"])
-            v["headline_zh"] = ("secureblue 将此更新上调为重大更新：" + v["headline_zh"])
+            for phrase in [". Reasonable to skip if the download matters to you", "Reasonable to skip if the download matters to you"]:
+                v["headline"] = v["headline"].replace(phrase, "")
+            for phrase in ["。如果下载量对你很重要，可以合理地跳过", "如果下载量对你很重要，可以合理地跳过"]:
+                v["headline_zh"] = v["headline_zh"].replace(phrase, "")
+            v["headline"] = ("secureblue escalates this to major: " + v["headline"].strip())
+            v["headline_zh"] = ("secureblue 将此更新上调为重大更新：" + v["headline_zh"].strip())
     if sbn["message"]:
         tag = "MAJOR" if sbn["level"] == "major" else "normal"
         v["headline"] += (f" | secureblue will show a {tag} notification: "
@@ -1694,6 +1706,26 @@ def fmt_pkgs(g: dict, lang: str = "en") -> str:
     return f"{head}{suffix}" if len(names) > 3 else head
 
 
+def split_bilingual(s: str) -> tuple[str, str]:
+    """Extract (en, zh) strings from BiText, or cleanly split a bilingual string.
+
+    Avoids naive s.split(" / ", 1) breaking when the English component itself
+    contains ' / ' (e.g. 'new / dropped entries').
+    """
+    if hasattr(s, "en") and hasattr(s, "zh"):
+        return str(s.en), str(s.zh)
+    if not isinstance(s, str) or " / " not in s:
+        return str(s), str(s)
+    parts = s.split(" / ")
+    for i in range(len(parts) - 1, 0, -1):
+        left = " / ".join(parts[:i])
+        right = " / ".join(parts[i:])
+        if not re.search(r"[\u4e00-\u9fff]", left) and re.search(r"[\u4e00-\u9fff]", right):
+            return left, right
+    left, right = s.split(" / ", 1)
+    return left, right
+
+
 def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                            xc=None, backlog=None) -> str:
     xc = xc or {}
@@ -1822,11 +1854,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
 
     dedup_notes = list(dict.fromkeys(notes))
     for n in dedup_notes:
-        if " / " in n:
-            en_note, zh_note = n.split(" / ", 1)
-            W(f"> {zh_note if is_zh else en_note}")
-        else:
-            W(f"> {n}")
+        en_note, zh_note = split_bilingual(n)
+        W(f"> {zh_note if is_zh else en_note}")
     if dedup_notes:
         W("")
 
@@ -1961,7 +1990,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                 W(f"- `{g['src']}`: {', '.join(x['alias'] + ' (' + str(x['status']) + ')' for x in g['unreleased'][:4])}")
         W("")
 
-    if not changed and isinstance(diff.get("count_a"), int):
+    if not changed and (isinstance(diff.get("count_a"), int) or diff.get("same_rpmdb")):
         if is_zh:
             W("## 没有任何软件包版本发生变化")
             W("")
@@ -2243,7 +2272,7 @@ def coverage_line(cov: dict) -> str:
              f"{'…' if len(cov['skipped_names']) > 6 else ''}）" if cov.get("skipped") else "")
           + (f"；BACKLOG_POOL 中有 {len(cov['pool_missing'])} 个条目不在此镜像内"
              if cov.get("pool_missing") else ""))
-    return en + " / " + zh
+    return T(en, zh)
 
 
 def cmd_backlog(args):
@@ -2604,8 +2633,8 @@ def load_pkglist(reg, img, ref, cache_dir, notes):
     cf = os.path.join(cache_dir, f"pkglist-{img['digest'].replace(':', '')}.json")
     if os.path.exists(cf) and os.path.getsize(cf) > 10_000:
         try:
-            notes.append(f"package list of `{ref}` served from `{cf}` (no download) / "
-                         f"`{ref}` 的软件包列表来自缓存 `{cf}`（未下载）")
+            notes.append(T(f"package list of `{ref}` served from `{cf}` (no download)",
+                           f"`{ref}` 的软件包列表来自缓存 `{cf}`（未下载）"))
             return json.load(open(cf))
         except Exception:
             log(T(f"  ! cache {cf} corrupted, refetching",
@@ -2614,10 +2643,8 @@ def load_pkglist(reg, img, ref, cache_dir, notes):
           f"  正在获取 {ref} 的 rpmdb chunk（{img['digest'][:19]}…）"))
     pk = package_list(reg, img)
     _atomic_write_json(cf, pk)
-    notes.append(f"package list of `{ref}` came from that image's `rpmdb.sqlite` chunk "
-                 f"(~33 MB fetched, ~3.7 GiB avoided) / "
-                 f"`{ref}` 的软件包列表来自该镜像的 `rpmdb.sqlite` chunk"
-                 f"（仅下载约 33 MB，避免约 3.7 GiB）")
+    notes.append(T(f"package list of `{ref}` came from that image's `rpmdb.sqlite` chunk (~33 MB fetched, ~3.7 GiB avoided)",
+                   f"`{ref}` 的软件包列表来自该镜像的 `rpmdb.sqlite` chunk（仅下载约 33 MB，避免约 3.7 GiB）"))
     return pk
 
 
@@ -2666,26 +2693,34 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None) -> dict:
     maybe_verify_resolved(reg, a, args, notes)
     maybe_verify_resolved(reg, b, args, notes)
 
+    ra, rb = rpmdb_chunk(a), rpmdb_chunk(b)
+    same_rpmdb = bool(ra and rb and ra.get("digest") and ra["digest"] == rb.get("digest"))
+
     if not args.exact:
         diff = {"added": [], "removed": [], "downgrades": [], "changed": [],
-                "count_a": "?", "count_b": "?"}
-        # versions are unknown here, so crosscheck must not claim any package kept
-        # its version - see crosscheck_chunks(versions_known=False)
-        xc = crosscheck_chunks(ld, diff, versions_known=False)
+                "count_a": "?", "count_b": "?", "same_rpmdb": same_rpmdb}
+        # versions are unknown here unless same_rpmdb is true
+        xc = crosscheck_chunks(ld, diff, versions_known=same_rpmdb)
         v = verdict_of(diff, ld, meta, xc)
-        npk = len(ld["changed_packages_from_chunks"])
-        v["headline"] = ("chunk-level mode (manifests only, no rpmdb fetch, so no package "
-                         "versions were read): " + v["headline"]
-                         + f" | {npk} packages sit in changed chunks - see the chunk list "
-                           "below, or drop --exact 0 for exact versions and CVE matching")
-        v["headline_zh"] = ("chunk 级模式（仅 manifest，未拉取 rpmdb，因此未读取任何软件包版本）："
-                            + (v.get("headline_zh") or "")
-                            + f" ｜ {npk} 个软件包位于发生变化的 chunk 中——见下方 chunk 列表；"
-                              "去掉 --exact 0 可获得精确版本与 CVE 匹配")
-        notes.append(T("manifest-only mode (--exact 0): no real versions, no CVE matching, "
-                       "and no claim about which packages kept their version",
-                       "仅 manifest 模式 (--exact 0)：无精确版本、不做 CVE 匹配，"
-                       "也不断言哪些软件包版本未变"))
+        if same_rpmdb:
+            notes.append(T(
+                "rpmdb chunk digest identical: package database is byte-identical, "
+                "so rpmdb fetch was safely skipped",
+                "rpmdb chunk 摘要完全一致：软件包数据库逐字节相同，安全跳过 rpmdb 拉取"))
+        else:
+            npk = len(ld["changed_packages_from_chunks"])
+            v["headline"] = ("chunk-level mode (manifests only, no rpmdb fetch, so no package "
+                             "versions were read): " + v["headline"]
+                             + f" | {npk} packages sit in changed chunks - see the chunk list "
+                               "below, or drop --exact 0 for exact versions and CVE matching")
+            v["headline_zh"] = ("chunk 级模式（仅 manifest，未拉取 rpmdb，因此未读取任何软件包版本）："
+                                + (v.get("headline_zh") or "")
+                                + f" ｜ {npk} 个软件包位于发生变化的 chunk 中——见下方 chunk 列表；"
+                                  "去掉 --exact 0 可获得精确版本与 CVE 匹配")
+            notes.append(T("manifest-only mode (--exact 0): no real versions, no CVE matching, "
+                           "and no claim about which packages kept their version",
+                           "仅 manifest 模式 (--exact 0)：无精确版本、不做 CVE 匹配，"
+                           "也不断言哪些软件包版本未变"))
         return {"a": a, "b": b, "diff": diff, "layers": ld, "xc": xc, "verdict": v,
                 "notes": notes}
 
@@ -2693,6 +2728,7 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None) -> dict:
     pa = load_pkglist(reg, a, ref_a, cache_dir, notes)
     pb = load_pkglist(reg, b, ref_b, cache_dir, notes)
     diff = pkg_diff(pa, pb)
+    diff["same_rpmdb"] = same_rpmdb
     rel = fedora_release(pb, an_b.get("org.opencontainers.image.version", ""))
     if not rel:
         notes.append(T("WARNING: could not determine the Fedora release from the package "
@@ -2975,18 +3011,18 @@ def cmd_check(args):
             minutes.add(k)
             uniq.append(r)
         if uniq:
-            res["notes"].append(
+            res["notes"].append(T(
                 f"this image is not the only new one: {len(uniq)} build(s) were pushed after "
                 f"the build you last looked at ({seen[:16]}) — "
                 + ", ".join(str(r["created"])[:16] for r in uniq)
                 + " (UTC). Tags like `20260910` or `<sha>-44` are mutable and only point at "
                   "the newest build of a day, so the comparison below is by digest: your last "
-                  "image -> current image, i.e. the full delta of skipping them all. / "
+                  "image -> current image, i.e. the full delta of skipping them all.",
                 f"这不是唯一的新镜像：在你上次查看的构建（{seen[:16]}）之后还推送了 {len(uniq)} 次构建 —— "
                 + ", ".join(str(r["created"])[:16] for r in uniq)
                 + " (UTC)。`20260910`、`<sha>-44` 之类的标签是可变的，只指向当天最新构建，"
                   "因此下方对比按 digest 进行：你的上一版镜像 -> 当前镜像，"
-                  "即跳过它们全部时的完整差异。")
+                  "即跳过它们全部时的完整差异。"))
     md = render_markdown(
         f"secureblue update watch / secureblue 更新监控 - {args.image}  {shortref(label_a)} -> {args.to} ({ver})",
                          res["a"], res["b"], res["diff"], res["layers"], v, res["notes"],
