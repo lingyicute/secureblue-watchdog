@@ -1189,3 +1189,92 @@ class TestRenderMarkdownReportSeparation(unittest.TestCase):
         self.assertNotIn("## secureblue 桌面通知预测", en_part)
         self.assertNotIn("如果现在更新，需要下载", en_part)
         self.assertNotIn("由 `sbwatch` 生成", en_part)
+
+
+class TestDoDiffFastPathSameRpmdb(unittest.TestCase):
+    def test_do_diff_with_same_rpmdb_sets_no_change(self):
+        """When args.exact == 0 (e.g. from cmd_check --fast) and rpmdb chunk digest
+        is identical, do_diff must set diff['same_rpmdb'] = True, versions_known = True,
+        and verdict level must be 'no-change', without asserting 'chunk-level mode'."""
+        import types
+        args = types.SimpleNamespace(
+            image="secureblue/silverblue-main-hardened",
+            arch="amd64",
+            exact=0,
+            fast=True,
+            force=False,
+            keep_order=True,
+            no_bodhi=True,
+            cache_dir=None,
+            cosign_pub=None,
+            require_cosign=False,
+        )
+        img_a = {
+            "ref": "a",
+            "digest": "sha256:1111111111111111111",
+            "created": "2026-09-20T00:00:00Z",
+            "annotations": {"rpmostree.inputhash": "ih1", "ostree.linux": "7.2.6"},
+            "layers": [
+                {"digest": "sha256:rpmdb_same_digest", "size": 100, "components": ["bigfiles/rpmdb.sqlite"], "stability": ""},
+                {"digest": "sha256:layer1", "size": 500, "components": ["rpm/app"], "stability": ""},
+            ]
+        }
+        img_b = {
+            "ref": "b",
+            "digest": "sha256:2222222222222222222",
+            "created": "2026-09-21T00:00:00Z",
+            "annotations": {"rpmostree.inputhash": "ih2", "ostree.linux": "7.2.6"},
+            "layers": [
+                {"digest": "sha256:rpmdb_same_digest", "size": 100, "components": ["bigfiles/rpmdb.sqlite"], "stability": ""},
+                {"digest": "sha256:layer2", "size": 500, "components": ["rpm/app"], "stability": ""},
+            ]
+        }
+
+        res = S.do_diff(args, "a", "b", images=(img_a, img_b))
+        self.assertTrue(res["diff"]["same_rpmdb"])
+        self.assertTrue(res["xc"]["versions_known"])
+        self.assertEqual(res["verdict"]["level"], "no-change")
+        self.assertTrue(res["verdict"]["package_versions_known"])
+        self.assertIn("identical rpmdb chunk digest", res["verdict"]["headline"])
+        self.assertIn("rpmdb chunk 摘要完全一致", res["verdict"]["headline_zh"])
+        self.assertNotIn("chunk-level mode", res["verdict"]["headline"])
+        self.assertNotIn("未读取任何软件包版本", res["verdict"]["headline_zh"])
+
+
+class TestRenderMarkdownNotesWithSlash(unittest.TestCase):
+    def test_note_with_slashes_in_english_not_broken(self):
+        """Notes containing ' / ' within the English prose must not be split prematurely."""
+        img_a = {"ref": "a", "digest": "sha256:1111111111111111111", "annotations": {}}
+        img_b = {"ref": "b", "digest": "sha256:2222222222222222222", "annotations": {}}
+        diff = {"added": [], "removed": [], "downgrades": [], "changed": [], "count_a": 10, "count_b": 10}
+        ldiff = {"download_bytes": 0, "total_size_b": 1000, "chunks_changed": 0,
+                 "chunks_reused": 1, "chunks_b": 1, "changed_chunks": [], "download_pct": 0.0}
+        verdict = {"level": "no-change", "headline": "ok", "headline_zh": "正常",
+                   "security_pkgs": []}
+
+        # Test both BiText and raw string with 'new / dropped'
+        bi_note = S.T("changelog scan capped at 40 new / 30 dropped entries per package; 1 pkg",
+                      "更新日志扫描上限为每包 40 条新增 / 30 条丢失条目；1 个包")
+        str_note = ("changelog scan capped at 40 new / 30 dropped entries; more "
+                    "/ 更新日志扫描上限为每包 40 条新增 / 30 条丢失条目；更多")
+
+        md = S.render_markdown("Test Subject", img_a, img_b, diff, ldiff, verdict, [bi_note, str_note])
+        zh_part, en_part = md.split("\n\n---\n\n")
+
+        # English part must contain full sentence, not truncated at '40 new'
+        self.assertIn("40 new / 30 dropped entries per package; 1 pkg", en_part)
+        self.assertIn("40 new / 30 dropped entries; more", en_part)
+        self.assertNotIn("更新日志扫描上限", en_part)
+
+        # Chinese part must contain Chinese translation and no English residual
+        self.assertIn("更新日志扫描上限为每包 40 条新增 / 30 条丢失条目；1 个包", zh_part)
+        self.assertIn("更新日志扫描上限为每包 40 条新增 / 30 条丢失条目；更多", zh_part)
+        self.assertNotIn("dropped entries", zh_part)
+
+
+class TestRebuildNotCountedAsUpgraded(unittest.TestCase):
+    def test_rebuild_excluded_from_upgraded(self):
+        d = {"changed": [{"name": "kernel", "src": "kernel", "dir": "rebuild"}]}
+        n = S.secureblue_notification(d)
+        self.assertFalse(n["kernel_updated"])
+
