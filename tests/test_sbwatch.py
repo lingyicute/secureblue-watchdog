@@ -406,19 +406,31 @@ class TestVerdictNoChange(unittest.TestCase):
                              "changed": [], "count_a": 0, "count_b": 0},
                             self.LDIFF, meta, self.XC)
 
-    def test_identical_commit_is_called_byte_identical(self):
+    def test_no_change_rests_on_the_package_set_not_the_annotations(self):
+        """`ostree.commit` and `rpmostree.inputhash` are inherited from the Fedora
+        base image, so an identical commit is NOT evidence of a byte-identical
+        tree.  Measured: secureblue 98613c9b784b and 82baf9855818 are distinct
+        images with 20 of 128 layers differing and homebrew 7.0.2-26091605 ->
+        7.0.6-26092310, yet share ostree.commit 4df81387..., inputhash
+        4fde5b5a8c4f..., ostree.linux and final-diffid.  The verdict must be
+        justified by the rpmdb, so the headline must not claim byte-identity."""
         v = self._verdict({"inputhash_a": "x", "inputhash_b": "x",
                            "commit_a": "c1", "commit_b": "c1"})
         self.assertEqual(v["level"], "no-change")
         self.assertTrue(v["same_commit"])
-        self.assertIn("byte-identical", v["headline"])
+        self.assertIn("no package changed in the rpmdb", v["headline"])
+        self.assertNotIn("byte-identical", v["headline"])
+        self.assertNotIn("byte-identical", v["headline_zh"])
 
-    def test_inputhash_alone_is_weaker_evidence(self):
+    def test_differing_commit_does_not_weaken_an_empty_package_set(self):
+        """The commit annotation carries no information about this build either way,
+        so it must not change the wording or the level."""
         v = self._verdict({"inputhash_a": "x", "inputhash_b": "x",
                            "commit_a": "c1", "commit_b": "c2"})
         self.assertEqual(v["level"], "no-change")
         self.assertFalse(v["same_commit"])
-        self.assertIn("ostree commit differs", v["headline"])
+        self.assertIn("no package changed in the rpmdb", v["headline"])
+        self.assertNotIn("ostree commit differs", v["headline"])
 
     def test_any_change_blocks_the_no_change_verdict(self):
         ld = dict(self.LDIFF, changed_chunks=[{"components": ["rpm/a"], "size": 1}])
@@ -792,3 +804,290 @@ class TestPickTarMember(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+# --------------------------------------------------------------------------- #
+# F - secureblue's own notification rule must be reproduced, not approximated
+#
+# Source of truth: secureblue/secureblue
+#   files/system/desktop/usr/libexec/secureblue/security-update-notification
+#     MAJOR : 'trivalent' in .rpm-diff.upgraded[][1]  OR  max advisory sev == critical
+#     NORMAL: 'kernel'    in .rpm-diff.upgraded[][1]  OR  max advisory sev in
+#                                                     {important, unknown}
+# Every test below is anchored to a measured fact about the live system, noted
+# inline, so a failure says which observation stopped holding.
+# --------------------------------------------------------------------------- #
+LD_FIX = {"download_bytes": 250 * 1024 * 1024, "total_size_b": 4 * 1024 ** 3,
+          "changed_chunks": [], "reused_chunks": [], "changed_packages_from_chunks": []}
+# Measured: 44.20260922.0 and 44.20260923.0 carry the SAME rpmostree.inputhash
+# (4fde5b5a8c4ff655...) AND the SAME ostree.linux (7.2.6-200.fc44.x86_64), while
+# kernel/kernel-core/kernel-modules{,-core,-extra}, hardened_malloc and trivalent
+# all moved.
+META_IDENTICAL = {"kernel_a": "7.2.6-200.fc44.x86_64", "kernel_b": "7.2.6-200.fc44.x86_64",
+                  "inputhash_a": "4fde5b5a8c4ff655", "inputhash_b": "4fde5b5a8c4ff655",
+                  "commit_a": "7a67d1be315f2184", "commit_b": "4df81387b6a0c38c"}
+BSTATE = {"failed": 0, "skipped": 0, "truncated": []}
+
+
+def _verdict(pa, pb, meta=META_IDENTICAL):
+    d = S.pkg_diff(pa, pb)
+    src_of = {n: p["src"] for n, p in pb.items()}
+    return S.verdict_of(d, LD_FIX, meta, S.crosscheck_chunks(LD_FIX, d, src_of), [], BSTATE)
+
+
+class TestRpmOstreeSeverityVocabulary(unittest.TestCase):
+    def test_only_rhel_spellings_rank(self):
+        """rpm-ostree str2severity() knows LOW/MODERATE/IMPORTANT/CRITICAL only."""
+        for word, want in (("low", 1), ("moderate", 2), ("important", 3), ("critical", 4),
+                           ("LOW", 1), ("Critical", 4)):
+            self.assertEqual(S.rpmostree_str2severity(word), want, word)
+
+    def test_bodhi_vocabulary_is_invisible_to_rpmostree(self):
+        """Bodhi's UpdateSeverity is unspecified/urgent/high/medium/low - none of
+        which str2severity() recognises, so all rank 0 -> 'unknown' upstream.
+        Folding them into SEV_RANK would predict an urgency the desktop never shows."""
+        for word in ("urgent", "high", "medium", "unspecified", "", None):
+            self.assertEqual(S.rpmostree_str2severity(word), 0, word)
+
+    def test_fedora_publishes_no_severity_at_all(self):
+        """Measured twice on the live mirrors: 0 of 2966 <update> tags in the F44
+        updates repo on 2026-09-23, 0 of 2979 on 2026-09-24, and 0 of 4308 in F43
+        carry a severity= attribute (attributes present are only
+        from/status/type/version). So dnf_advisory_get_severity() returns
+        NULL and str2severity() returns 0 - 'critical' is unreachable on Fedora."""
+        self.assertEqual(S.rpmostree_str2severity(None), 0)
+        # and a NULL severity must therefore land on upstream's 'unknown' arm,
+        # which the NORMAL branch acts on - not on 'none'.
+        n = S.secureblue_notification(
+            {"changed": [{"name": "glibc", "src": "glibc", "dir": "upgrade"}]},
+            [{"src": "glibc", "has_security_erratum": True, "erratum_severity": ""}])
+        self.assertEqual(n["max_advisory_severity"], "unknown")
+        self.assertEqual(n["level"], "normal")
+
+
+class TestTrivalentIsMajor(unittest.TestCase):
+    def test_trivalent_bump_alone_is_major_and_escalates(self):
+        """secureblue fires its critical-urgency popup for ANY trivalent bump.
+        Trivalent has no Fedora counterpart, so no Bodhi erratum can ever match -
+        the old code parked it in IMPORTANT_SRC and answered `no-change` here."""
+        v = _verdict({"trivalent": pkg("trivalent", "153.0.8010.52-447428")},
+                     {"trivalent": pkg("trivalent", "154.0.8037.57-447533")})
+        n = v["secureblue_notification"]
+        self.assertEqual(n["level"], "major")
+        self.assertEqual(n["message"], "A major security vulnerability has been patched")
+        self.assertTrue(n["trivalent_updated"])
+        self.assertEqual(v["level"], "update-now")
+        self.assertEqual(v["escalated_by_secureblue_rule"], "skip")
+
+    def test_trivalent_subpackage_name_is_not_enough(self):
+        """Upstream matches the binary name literally; a differently-named binary
+        from the same source does not trip it."""
+        n = S.secureblue_notification(
+            {"changed": [{"name": "trivalent-libs", "src": "trivalent", "dir": "upgrade"}]})
+        self.assertFalse(n["trivalent_updated"])
+
+
+class TestKernelDetectionUsesThePackageDiff(unittest.TestCase):
+    def test_kernel_seen_despite_identical_ostree_linux(self):
+        """The real 20260922 -> 20260923 case: ostree.linux is identical on both
+        images, so annotation-based detection reported kernel_changed=False while
+        the kernel package really went 7.2.6 -> 7.2.7."""
+        pa = {"kernel": pkg("kernel", "7.2.6-200.secureblue.3.fc44"),
+              "kernel-core": pkg("kernel-core", "7.2.6-200.secureblue.3.fc44", "kernel")}
+        pb = {"kernel": pkg("kernel", "7.2.7-200.secureblue.1.fc44"),
+              "kernel-core": pkg("kernel-core", "7.2.7-200.secureblue.1.fc44", "kernel")}
+        v = _verdict(pa, pb)
+        self.assertTrue(v["kernel_in_diff"])
+        self.assertFalse(v["kernel_annotation_changed"])
+        self.assertTrue(v["kernel_changed"])
+        self.assertEqual(v["secureblue_notification"]["level"], "normal")
+        # the reported EVRs must come from the packages, not from a None annotation
+        self.assertIn("7.2.7-200.secureblue.1.fc44", v["headline"])
+
+    def test_kernel_downgrade_is_not_an_upgrade(self):
+        """rpm-ostree puts downgrades in a separate array the script never reads."""
+        n = S.secureblue_notification(
+            {"changed": [{"name": "kernel", "src": "kernel", "dir": "downgrade"}]})
+        self.assertFalse(n["kernel_updated"])
+        self.assertEqual(n["level"], "none")
+
+
+class TestNoChangeNeedsAnEmptyPackageSet(unittest.TestCase):
+    def test_identical_inputhash_with_moved_packages_is_not_no_change(self):
+        """inputhash alone is not evidence of a no-op: the measured 20260922/23
+        pair shares it while 7 packages moved."""
+        v = _verdict({"trivalent": pkg("trivalent", "153.0.8010.52-447428")},
+                     {"trivalent": pkg("trivalent", "154.0.8037.57-447533")})
+        self.assertNotEqual(v["level"], "no-change")
+        self.assertTrue(v["same_inputhash_but_packages_moved"])
+        self.assertNotIn("no new content", v["headline"])
+
+    def test_identical_inputhash_and_identical_commit_still_no_change(self):
+        pa = {"glibc": pkg("glibc", "2.42-5.fc44")}
+        d = S.pkg_diff(pa, dict(pa))
+        meta = dict(META_IDENTICAL)
+        v = S.verdict_of(d, LD_FIX, meta, S.crosscheck_chunks(LD_FIX, d, {}), [], BSTATE)
+        self.assertEqual(v["level"], "no-change")
+        self.assertFalse(v["same_inputhash_but_packages_moved"])
+
+
+class TestDecisionTableMatchesUpstream(unittest.TestCase):
+    """Cross-check secureblue_notification against the upstream `case` block,
+    transcribed from the shell script. (kernel, trivalent, advisory sev) -> level."""
+    TABLE = [
+        # kernel, trivalent, advisory severity -> expected
+        (False, False, None,        "none"),    # nothing relevant moved
+        (True,  False, None,        "normal"),  # kernel alone always notifies
+        (False, True,  None,        "major"),   # trivalent alone -> critical urgency
+        (True,  True,  None,        "major"),   # elif: major wins
+        (False, False, 0,           "normal"),  # 0 -> 'unknown' arm (Fedora's only value)
+        (False, False, 1,           "none"),    # low: no notification
+        (False, False, 2,           "none"),    # moderate: no notification
+        (False, False, 3,           "normal"),  # important
+        (False, False, 4,           "major"),   # critical (unreachable on Fedora)
+        (True,  False, 1,           "normal"),
+        (False, True,  2,           "major"),
+    ]
+
+    LABEL = {None: None, 0: "", 1: "low", 2: "moderate", 3: "important", 4: "critical"}
+
+    def test_table(self):
+        for kernel, trivalent, sev, want in self.TABLE:
+            changed, groups = [], []
+            for nm in (("kernel",) if kernel else ()) + (("trivalent",) if trivalent else ()):
+                changed.append({"name": nm, "src": nm, "dir": "upgrade"})
+            if sev is not None:
+                changed.append({"name": "glibc", "src": "glibc", "dir": "upgrade"})
+                groups.append({"src": "glibc", "has_security_erratum": True,
+                               "erratum_severity": self.LABEL[sev]})
+            got = S.secureblue_notification({"changed": changed}, groups)
+            self.assertEqual(got["level"], want,
+                             f"kernel={kernel} trivalent={trivalent} sev={sev}")
+
+    def test_plain_bugfix_of_unimportant_package_is_silent(self):
+        v = _verdict({"nano": pkg("nano", "8.0-1.fc44")}, {"nano": pkg("nano", "8.1-1.fc44")})
+        self.assertEqual(v["secureblue_notification"]["level"], "none")
+        self.assertEqual(v["level"], "skip")
+
+
+class TestSecurityErratumFeedsTheRule(unittest.TestCase):
+    def test_pushed_security_erratum_marks_the_group(self):
+        old = pkg("nss", "4.39.0-4.fc44", "nss", [{"time": 1, "text": "- old"}])
+        new = pkg("nss", "4.39.0-5.fc44", "nss", [{"time": 2, "text": "- fix"}])
+        ups = {"nss": [{"alias": "FEDORA-2026-x", "type": "security", "severity": "medium",
+                        "status": "stable", "nvrs": ["nss-4.39.0-5.fc44"], "notes": "",
+                        "bugs": [], "title": "", "cves": []}]}
+        d = S.pkg_diff({"nss": old}, {"nss": new})
+        for c in d["changed"]:
+            c["cls"] = S.classify_change(c["old"], c["new"], "F44", FakeBodhi(ups))
+        g = S.group_by_src(d["changed"])[0]
+        self.assertTrue(g["has_security_erratum"])
+        self.assertEqual(g["erratum_severity"], "medium")
+        n = S.secureblue_notification(d, [g])
+        # Bodhi's 'medium' is invisible to str2severity -> 0 -> 'unknown' -> NORMAL
+        self.assertEqual(n["max_advisory_severity"], "unknown")
+        self.assertEqual(n["level"], "normal")
+
+    def test_old_build_only_erratum_does_not_trigger(self):
+        """An erratum that shipped the OLD build is a fix already installed."""
+        old = pkg("nss", "4.39.0-4.fc44", "nss", [{"time": 1, "text": "- old"}])
+        new = pkg("nss", "4.39.0-5.fc44", "nss", [{"time": 2, "text": "- fix"}])
+        d = S.pkg_diff({"nss": old}, {"nss": new})
+        for c in d["changed"]:
+            c["cls"] = S.classify_change(c["old"], c["new"], "F44", FakeBodhi(NSS_UPDATES))
+        g = S.group_by_src(d["changed"])[0]
+        self.assertFalse(g["has_security_erratum"])
+        self.assertEqual(S.secureblue_notification(d, [g])["level"], "none")
+
+    def test_unpushed_erratum_does_not_trigger(self):
+        old = pkg("nss", "4.39.0-4.fc44", "nss")
+        new = pkg("nss", "4.39.0-5.fc44", "nss")
+        ups = {"nss": [{"alias": "FEDORA-2026-y", "type": "security", "severity": "high",
+                        "status": "testing", "nvrs": ["nss-4.39.0-5.fc44"], "notes": "",
+                        "bugs": [], "title": "", "cves": []}]}
+        d = S.pkg_diff({"nss": old}, {"nss": new})
+        for c in d["changed"]:
+            c["cls"] = S.classify_change(c["old"], c["new"], "F44", FakeBodhi(ups))
+        g = S.group_by_src(d["changed"])[0]
+        self.assertFalse(g["has_security_erratum"])
+        self.assertEqual(S.secureblue_notification(d, [g])["level"], "none")
+
+
+class TestManifestOnlyModeDoesNotOverclaim(unittest.TestCase):
+    def test_prediction_is_unknown_without_versions(self):
+        """--exact 0 never reads the rpmdb, so the package set is unknown and the
+        popup cannot be predicted; answering 'none' there would be a claim."""
+        d = {"added": [], "removed": [], "downgrades": [], "changed": [],
+             "count_a": "?", "count_b": "?"}
+        v = S.verdict_of(d, LD_FIX, META_IDENTICAL,
+                         S.crosscheck_chunks(LD_FIX, d, versions_known=False), [], BSTATE)
+        self.assertEqual(v["secureblue_notification"]["level"], "unknown")
+        self.assertIsNone(v["secureblue_notification"]["message"])
+        self.assertNotIn("secureblue will show", v["headline"])
+
+
+# --------------------------------------------------------------------------- #
+# G - the fast path must key off something that actually implies "no package
+#     change".  rpmostree.inputhash does not: it is inherited from the Fedora
+#     base (see TestVerdictNoChange), so two secureblue images can share it while
+#     their package sets differ.
+# --------------------------------------------------------------------------- #
+class TestRpmdbChunkSelection(unittest.TestCase):
+    def _img(self, layers):
+        return {"layers": layers, "annotations": {}}
+
+    def test_picks_the_smallest_matching_layer(self):
+        """Must match the rule package_list() fetches by, or the fast path could
+        verify one layer while the diff reads another."""
+        img = self._img([
+            {"digest": "sha256:big", "size": 900, "components": ["bigfiles/rpmdb.sqlite"]},
+            {"digest": "sha256:small", "size": 40, "components": ["rpm/curl"]},
+            {"digest": "sha256:zero", "size": 0, "components": ["bigfiles/rpmdb.sqlite"]},
+        ])
+        self.assertEqual(S.rpmdb_chunk(img)["digest"], "sha256:zero")
+
+    def test_none_when_no_rpmdb_chunk(self):
+        self.assertIsNone(S.rpmdb_chunk(self._img([
+            {"digest": "sha256:a", "size": 10, "components": ["rpm/curl"]}])))
+
+    def test_identical_digest_is_the_only_safe_skip_signal(self):
+        """The measured 98613c9b784b/82baf9855818 pair: same inputhash, different
+        content.  A digest comparison distinguishes them; inputhash does not."""
+        same_ih = "4fde5b5a8c4ff655"
+        a = self._img([{"digest": "sha256:db1", "size": 1, "components": ["bigfiles/rpmdb.sqlite"]}])
+        b = self._img([{"digest": "sha256:db2", "size": 1, "components": ["bigfiles/rpmdb.sqlite"]}])
+        a["annotations"]["rpmostree.inputhash"] = same_ih
+        b["annotations"]["rpmostree.inputhash"] = same_ih
+        self.assertEqual(a["annotations"]["rpmostree.inputhash"],
+                         b["annotations"]["rpmostree.inputhash"])
+        self.assertNotEqual(S.rpmdb_chunk(a)["digest"], S.rpmdb_chunk(b)["digest"])
+
+
+class TestNoChangeRequiresVersionsToHaveBeenRead(unittest.TestCase):
+    """Regression: in manifest-only mode `changed` is empty by construction, so the
+    `no-change` guard passed while the rpmdb had never been fetched - the report
+    then asserted "no package changed in the rpmdb" for a delta nobody inspected."""
+    LD = {"download_bytes": 900 * 1024 * 1024, "total_size_b": 4 * 1024 ** 3,
+          "chunks_changed": 40, "chunks_reused": 88, "chunks_a": 128, "chunks_b": 128,
+          "changed_chunks": [], "changed_packages_from_chunks": ["kernel"]}
+    META = {"kernel_a": "7.2.6-200.fc44.x86_64", "kernel_b": "7.2.6-200.fc44.x86_64",
+            "inputhash_a": "4fde5b5a8c4f", "inputhash_b": "4fde5b5a8c4f",
+            "commit_a": "4df81387", "commit_b": "4df81387"}
+
+    def _v(self, count):
+        d = {"added": [], "removed": [], "downgrades": [], "changed": [],
+             "count_a": count, "count_b": count}
+        return S.verdict_of(d, self.LD, self.META,
+                            S.crosscheck_chunks(self.LD, d, versions_known=(count != "?")))
+
+    def test_manifest_only_cannot_claim_no_change(self):
+        v = self._v("?")
+        self.assertNotEqual(v["level"], "no-change")
+        self.assertFalse(v["package_versions_known"])
+        self.assertNotIn("no package changed in the rpmdb", v["headline"])
+
+    def test_exact_mode_with_empty_diff_still_claims_no_change(self):
+        v = self._v(2242)
+        self.assertEqual(v["level"], "no-change")
+        self.assertTrue(v["package_versions_known"])
+        self.assertIn("no package changed in the rpmdb", v["headline"])
