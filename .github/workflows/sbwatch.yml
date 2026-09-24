@@ -65,7 +65,7 @@ jobs:
         with:
           python-version: '3.13'
 
-      # Offline: 56 tests, no registry or Bodhi access (the build-history test
+      # Offline: 80 tests, no registry or Bodhi access (the build-history test
       # stubs list_tags, so nothing here touches the network). NOTE: the watch
       # job runs independently of this one - a regression in rpmvercmp /
       # classify_change shows up here but does NOT block the hourly watch.

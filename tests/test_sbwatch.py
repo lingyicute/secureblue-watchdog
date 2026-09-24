@@ -1091,3 +1091,101 @@ class TestNoChangeRequiresVersionsToHaveBeenRead(unittest.TestCase):
         self.assertEqual(v["level"], "no-change")
         self.assertTrue(v["package_versions_known"])
         self.assertIn("no package changed in the rpmdb", v["headline"])
+
+
+class TestNoChangeWithSameRpmdb(unittest.TestCase):
+    LD = {"download_bytes": 0, "total_size_b": 4 * 1024 ** 3,
+          "chunks_changed": 0, "chunks_reused": 128, "chunks_a": 128, "chunks_b": 128,
+          "changed_chunks": [], "changed_packages_from_chunks": []}
+    META = {"kernel_a": "7.2.6-200.fc44.x86_64", "kernel_b": "7.2.6-200.fc44.x86_64",
+            "inputhash_a": "4fde5b5a8c4f", "inputhash_b": "4fde5b5a8c4f",
+            "commit_a": "4df81387", "commit_b": "4df81387"}
+
+    def test_fast_path_same_rpmdb_claims_no_change(self):
+        """When the rpmdb chunk digest is identical, the database is byte-for-byte
+        the same, so versions are known to be unchanged even if rpmdb fetch was skipped."""
+        d = {"added": [], "removed": [], "downgrades": [], "changed": [],
+             "count_a": "?", "count_b": "?", "same_rpmdb": True}
+        v = S.verdict_of(d, self.LD, self.META,
+                         S.crosscheck_chunks(self.LD, d, versions_known=True))
+        self.assertEqual(v["level"], "no-change")
+        self.assertTrue(v["package_versions_known"])
+        self.assertIn("no package changed in the rpmdb", v["headline"])
+        self.assertIn("rpmdb chunk 摘要完全一致", v["headline_zh"])
+
+
+class TestEscalationFromConsider(unittest.TestCase):
+    def test_trivalent_escalation_removes_skip_advice(self):
+        """If an update had an important package bump (initially 'consider' with
+        'Reasonable to skip if the download matters to you'), escalating to 'update-now'
+        via trivalent must strip that contradictory advice."""
+        pa = {"trivalent": pkg("trivalent", "153.0-1"), "curl": pkg("curl", "8.0-1")}
+        pb = {"trivalent": pkg("trivalent", "154.0-1"), "curl": pkg("curl", "8.0-2")}
+        d = S.pkg_diff(pa, pb)
+        for c in d["changed"]:
+            c["cls"] = S.classify_change(c["old"], c["new"], "F44", None)
+        v = S.verdict_of(d, LD_FIX, META_IDENTICAL, {})
+        self.assertEqual(v["level"], "update-now")
+        self.assertEqual(v["escalated_by_secureblue_rule"], "consider")
+        self.assertNotIn("Reasonable to skip", v["headline"])
+        self.assertNotIn("可以合理地跳过", v["headline_zh"])
+        self.assertIn("secureblue escalates this to major", v["headline"])
+        self.assertIn("secureblue 将此更新上调为重大更新", v["headline_zh"])
+        self.assertIn("trivalent 已升级", v["headline_zh"])
+
+
+class TestSecureblueNotificationLocalization(unittest.TestCase):
+    def test_why_zh_present_and_localized(self):
+        d = {"changed": [{"name": "trivalent", "src": "trivalent", "dir": "upgrade"},
+                         {"name": "kernel", "src": "kernel", "dir": "upgrade"}]}
+        n = S.secureblue_notification(d)
+        self.assertTrue(len(n["why_zh"]) >= 2)
+        self.assertIn("trivalent 已升级", n["why_zh"][0])
+        self.assertIn("内核已升级", n["why_zh"][1])
+
+
+class TestRenderMarkdownReportSeparation(unittest.TestCase):
+    def test_pure_chinese_first_then_dashes_then_pure_english(self):
+        """Report output must have pure Chinese first, followed by '---' separator,
+        then pure English."""
+        pa = {"trivalent": pkg("trivalent", "153.0-1"), "nano": pkg("nano", "8.0-1")}
+        pb = {"trivalent": pkg("trivalent", "154.0-1"), "nano": pkg("nano", "8.1-1")}
+        d = S.pkg_diff(pa, pb)
+        for c in d["changed"]:
+            c["cls"] = S.classify_change(c["old"], c["new"], "F44", None)
+        ld = {"download_bytes": 1024, "total_size_b": 10240, "chunks_changed": 1,
+              "chunks_reused": 10, "chunks_a": 11, "chunks_b": 11,
+              "changed_chunks": [{"size": 1024, "components": ["rpm/nano"]}],
+              "changed_packages_from_chunks": ["nano"], "download_pct": 10.0}
+        meta = {"kernel_a": "k", "kernel_b": "k", "inputhash_a": "h", "inputhash_b": "h"}
+        v = S.verdict_of(d, ld, meta, {})
+        img_a = {"ref": "a", "digest": "sha256:1111111111111111111", "annotations": {"rpmostree.inputhash": "h"}}
+        img_b = {"ref": "b", "digest": "sha256:2222222222222222222", "annotations": {"rpmostree.inputhash": "h"}}
+
+        md = S.render_markdown("Test Subject", img_a, img_b, d, ld, v, ["Note / 备注"])
+        self.assertIn("\n\n---\n\n", md)
+        parts = md.split("\n\n---\n\n")
+        self.assertEqual(len(parts), 2)
+        zh_part, en_part = parts[0], parts[1]
+
+        # Chinese part checks
+        self.assertIn("## 结论: ", zh_part)
+        self.assertIn("## secureblue 桌面通知预测", zh_part)
+        self.assertIn("如果现在更新，需要下载", zh_part)
+        self.assertIn("对比引用", zh_part)
+        self.assertIn("由 `sbwatch` 生成", zh_part)
+        self.assertNotIn("## Verdict: ", zh_part)
+        self.assertNotIn("## secureblue Notification Prediction", zh_part)
+        self.assertNotIn("If you update, you download", zh_part)
+        self.assertNotIn("Generated by `sbwatch`", zh_part)
+
+        # English part checks
+        self.assertIn("## Verdict: ", en_part)
+        self.assertIn("## secureblue Notification Prediction", en_part)
+        self.assertIn("If you update, you download", en_part)
+        self.assertIn("compared refs", en_part)
+        self.assertIn("Generated by `sbwatch`", en_part)
+        self.assertNotIn("## 结论: ", en_part)
+        self.assertNotIn("## secureblue 桌面通知预测", en_part)
+        self.assertNotIn("如果现在更新，需要下载", en_part)
+        self.assertNotIn("由 `sbwatch` 生成", en_part)

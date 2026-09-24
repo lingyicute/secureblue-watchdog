@@ -1354,16 +1354,20 @@ def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
     else:
         level, msg = "none", None
     why = []
+    why_zh = []
     if trivalent_updated:
         why.append("trivalent upgraded (secureblue treats every Trivalent bump as major: "
                    "Trivalent is rebuilt when upstream Chromium CVEs land)")
+        why_zh.append("trivalent 已升级（secureblue 将任何 Trivalent 更新视为重大：在上游 Chromium 修复 CVE 时重新编译）")
     if kernel_updated:
         why.append("kernel upgraded")
+        why_zh.append("内核已升级")
     if max_sev in ("critical", "important", "unknown"):
         why.append(f"security advisory with rpm-ostree severity '{max_sev}'")
+        why_zh.append(f"存在 rpm-ostree 严重等级为 '{max_sev}' 的安全勘误")
     return {"level": level, "message": msg, "max_advisory_severity": max_sev,
             "kernel_updated": kernel_updated, "trivalent_updated": trivalent_updated,
-            "security_advisory_count": len(sevs), "why": why}
+            "security_advisory_count": len(sevs), "why": why, "why_zh": why_zh}
 
 
 def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
@@ -1391,10 +1395,10 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         meta.get("kernel_a") != meta.get("kernel_b")
     kernel_moved = kernel_in_diff or kernel_annot_moved
     sbn = secureblue_notification(diff, groups)
-    if diff.get("count_a") == "?":
+    if diff.get("count_a") == "?" and not diff.get("same_rpmdb"):
         # manifest-only mode (--exact 0): no rpmdb was read, so the package set
         # is unknown and "no notification" would be an unfounded claim.
-        sbn = dict(sbn, level="unknown", message=None, why=[],
+        sbn = dict(sbn, level="unknown", message=None, why=[], why_zh=[],
                    note="package versions were not read (--exact 0), so the "
                         "notification cannot be predicted")
     silent = xc.get("silent_rebuilds") or []
@@ -1432,23 +1436,17 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     # because nothing moved - without this guard the verdict asserted "no package
     # changed in the rpmdb" for a 40-chunk / 900 MiB delta that had never been
     # inspected. `count_a == "?"` is the marker do_diff() sets for that mode.
-    versions_known = diff.get("count_a") != "?"
+    versions_known = diff.get("count_a") != "?" or bool(diff.get("same_rpmdb"))
     v["package_versions_known"] = versions_known
-    if same_input and versions_known and not pkg_set_moved and not sec and not down and not lost:
+    if (same_input or diff.get("same_rpmdb")) and versions_known and not pkg_set_moved and not sec and not down and not lost:
         v["level"] = "no-change"
         nchunks = len(xc.get("silent_rebuilds") or [])
-        # The evidence is the *package set*, not the annotations.  Both
-        # `rpmostree.inputhash` and `ostree.commit` are inherited from the Fedora
-        # base image and describe Fedora's compose, not this build - two distinct
-        # secureblue images with 20 of 128 layers differing were measured sharing
-        # both values (98613c9b784b vs 82baf9855818, homebrew 7.0.2 -> 7.0.6).
-        # Claiming "the deployed tree is byte-identical" from an identical
-        # ostree.commit was therefore unsound; what actually justifies this verdict
-        # is that no package moved in the rpmdb.
+        cnt_info = f"{diff.get('count_b')} packages compared" if diff.get("count_b") != "?" else "identical rpmdb chunk digest"
+        cnt_info_zh = f"共比对 {diff.get('count_b')} 个包" if diff.get("count_b") != "?" else "rpmdb chunk 摘要完全一致"
         ev = (f"no package changed in the rpmdb "
-              f"({diff.get('count_b', '?')} packages compared); the {nchunks} moved "
+              f"({cnt_info}); the {nchunks} moved "
               f"chunk(s) carry no new package content")
-        ev_zh = (f"rpmdb 中没有任何软件包发生变化（共比对 {diff.get('count_b', '?')} 个包）；"
+        ev_zh = (f"rpmdb 中没有任何软件包发生变化（{cnt_info_zh}）；"
                  f"{nchunks} 个变化的 chunk 不含新的软件包内容")
         v["headline"] = (f"{ev}. Updating would re-download {v['download_human']} "
                          f"for no new package content")
@@ -1532,15 +1530,22 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                              "Fedora erratum being attributable to it. Was: " + v["headline"])
             v["headline_zh"] = ("尽管无法归因到任何 CVE 或 Fedora 勘误，secureblue 仍将其判定为"
                                 "重大更新。原判：" + v["headline_zh"])
+        elif was == "consider":
+            # Strip "Reasonable to skip" recommendation since it contradicts update-now
+            v["headline"] = v["headline"].replace(". Reasonable to skip if the download matters to you", "")
+            v["headline_zh"] = v["headline_zh"].replace("。如果下载量对你很重要，可以合理地跳过", "")
+            v["headline"] = ("secureblue escalates this to major: " + v["headline"])
+            v["headline_zh"] = ("secureblue 将此更新上调为重大更新：" + v["headline_zh"])
     if sbn["message"]:
         tag = "MAJOR" if sbn["level"] == "major" else "normal"
         v["headline"] += (f" | secureblue will show a {tag} notification: "
                           f"\"{sbn['message']}\" "
                           f"(because: {'; '.join(sbn['why'])})")
         tag_zh = "「重大 / major」" if sbn["level"] == "major" else "「普通 / normal」"
+        reasons_zh = sbn.get("why_zh") or sbn.get("why") or []
         v["headline_zh"] += (f" ｜ secureblue 将弹出{tag_zh}通知："
                              f"「{sbn['message']}」"
-                             f"（触发原因：{'；'.join(sbn['why'])}）")
+                             f"（触发原因：{'；'.join(reasons_zh)}）")
     if v["same_inputhash_but_packages_moved"]:
         v["headline"] += (" | NOTE: rpmostree.inputhash is identical on both images yet "
                           f"{n_bin} package(s) moved - do not treat inputhash as evidence "
@@ -1599,6 +1604,20 @@ ICON = {"update-now": "[!] UPDATE NOW / [!] 立即更新",
         "no-change": "[ok] REBUILD ONLY - SKIP / [ok] 仅重建——可跳过",
         "no-update": "[ok] NO NEW BUILD / [ok] 无新构建",
         "unknown": "[?] UNKNOWN / [?] 未知"}
+
+ICON_ZH = {"update-now": "[!] 立即更新",
+           "consider": "[~] 可选更新",
+           "skip": "[ok] 可跳过",
+           "no-change": "[ok] 仅重建——可跳过",
+           "no-update": "[ok] 无新构建",
+           "unknown": "[?] 未知"}
+
+ICON_EN = {"update-now": "[!] UPDATE NOW",
+           "consider": "[~] OPTIONAL",
+           "skip": "[ok] SKIP OK",
+           "no-change": "[ok] REBUILD ONLY - SKIP",
+           "no-update": "[ok] NO NEW BUILD",
+           "unknown": "[?] UNKNOWN"}
 
 
 def group_by_src(changed: list) -> list:
@@ -1666,99 +1685,149 @@ def shortref(ref) -> str:
     return ref
 
 
-def fmt_pkgs(g: dict) -> str:
+def fmt_pkgs(g: dict, lang: str = "en") -> str:
     names = [p["name"] for p in g["pkgs"]]
     if len(names) == 1:
         return f"`{names[0]}`"
     head = ", ".join(f"`{x}`" for x in names[:3])
-    return f"{head} +{len(names)-3} subpackages/子包" if len(names) > 3 else head
+    suffix = f" +{len(names)-3} 个子包" if lang == "zh" else f" +{len(names)-3} subpackages"
+    return f"{head}{suffix}" if len(names) > 3 else head
 
 
-def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog=None) -> str:
+def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
+                           xc=None, backlog=None) -> str:
     xc = xc or {}
     L = []
     W = L.append
+    is_zh = (lang == "zh")
     sec_n = len(verdict["security_pkgs"])
+
     W(f"# {subject}")
     W("")
-    W(f"## Verdict 结论: {ICON.get(verdict['level'], verdict['level'])}")
+    verdict_title = "## 结论" if is_zh else "## Verdict"
+    badge_icon = (ICON_ZH.get(verdict['level']) if is_zh else ICON_EN.get(verdict['level'])) or ICON.get(verdict['level'], verdict['level'])
+    W(f"{verdict_title}: {badge_icon}")
     W("")
-    W(verdict["headline"])
-    if verdict.get("headline_zh"):
-        W(verdict["headline_zh"])
+    if is_zh:
+        W(verdict.get("headline_zh") or verdict["headline"])
+    else:
+        W(verdict["headline"])
     W("")
+
     _sbn = verdict.get("secureblue_notification") or {}
     if _sbn:
         _lvl = _sbn.get("level", "none")
-        _badge = {"major": "**MAJOR** (urgency=critical)",
-                  "normal": "normal (urgency=normal)",
-                  "none": "none",
-                  "unknown": "unknown (package versions not read)"}.get(_lvl, _lvl)
-        W("## secureblue notification 桌面通知预测")
-        W("")
-        W(f"- predicted popup 预测弹窗: {_badge}"
-          + (f" — \"{_sbn['message']}\"" if _sbn.get("message") else ""))
-        W(f"- trigger 触发条件: {', '.join(_sbn['why']) or '—'}")
-        W(f"- kernel upgraded 内核已升级: {_sbn.get('kernel_updated')} · "
-          f"trivalent upgraded trivalent 已升级: {_sbn.get('trivalent_updated')} · "
-          f"max advisory severity 最高勘误等级 (rpm-ostree's own scale): "
-          f"`{_sbn.get('max_advisory_severity')}`")
-        W("")
-        W("> 依据 secureblue 的 `security-update-notification` 脚本：`trivalent` 升级 → 重大通知；"
-          "`kernel` 升级或存在安全勘误 → 普通通知。Fedora 的 updateinfo.xml 不发布 severity 属性，"
-          "因此 rpm-ostree 的等级恒为 0（落在 `unknown` 分支），"
-          "`critical` 等级在 Fedora 上不可达——重大通知实际上只由 trivalent 触发。")
-        W("")
-    W(f"**If you update, you download {human(ldiff['download_bytes'])}** — "
-      f"{ldiff['chunks_changed']} of {ldiff['chunks_b']} chunks changed, "
-      f"{ldiff['chunks_reused']} are already on disk and get reused. "
-      f"(full image: {human(ldiff['total_size_b'])}, so this update = {ldiff['download_pct']}%)")
-    W("> **This download figure is an upper bound**: it counts every chunk whose digest "
-      "changed, but chunkah re-shards content between components, so part of it can be "
-      "bytes you already have under another name. / "
-      "**上面的下载量是上限**：它统计所有 digest 变化的 chunk，而 chunkah 会在组件之间重新切分内容，"
-      "因此其中一部分可能是你已经拥有的字节（只是换了名字）。")
+        if is_zh:
+            _badge = {"major": "**重大 (MAJOR)** (urgency=critical)",
+                      "normal": "普通 (normal) (urgency=normal)",
+                      "none": "无 (none)",
+                      "unknown": "未知（未读取软件包版本）"}.get(_lvl, _lvl)
+            W("## secureblue 桌面通知预测")
+            W("")
+            msg_str = (f" — \"{_sbn['message']}\"") if _sbn.get("message") else ""
+            W(f"- 预测弹窗: {_badge}{msg_str}")
+            reasons = _sbn.get("why_zh") or _sbn.get("why") or []
+            W(f"- 触发条件: {', '.join(reasons) or '—'}")
+            k_up = "是" if _sbn.get("kernel_updated") else "否"
+            t_up = "是" if _sbn.get("trivalent_updated") else "否"
+            W(f"- 内核已升级: {k_up} · trivalent 已升级: {t_up} · "
+              f"最高勘误等级 (rpm-ostree 体系): `{_sbn.get('max_advisory_severity')}`")
+            W("")
+            W("> 依据 secureblue 的 `security-update-notification` 脚本：`trivalent` 升级 → 重大通知；"
+              "`kernel` 升级或存在安全勘误 → 普通通知。Fedora 的 updateinfo.xml 不发布 severity 属性，"
+              "因此 rpm-ostree 的等级恒为 0（落在 `unknown` 分支），"
+              "`critical` 等级在 Fedora 上不可达——重大通知实际上只由 trivalent 触发。")
+            W("")
+        else:
+            _badge = {"major": "**MAJOR** (urgency=critical)",
+                      "normal": "normal (urgency=normal)",
+                      "none": "none",
+                      "unknown": "unknown (package versions not read)"}.get(_lvl, _lvl)
+            W("## secureblue Notification Prediction")
+            W("")
+            msg_str = (f" — \"{_sbn['message']}\"") if _sbn.get("message") else ""
+            W(f"- predicted popup: {_badge}{msg_str}")
+            reasons = _sbn.get("why") or []
+            W(f"- trigger: {', '.join(reasons) or '—'}")
+            W(f"- kernel upgraded: {bool(_sbn.get('kernel_updated'))} · "
+              f"trivalent upgraded: {bool(_sbn.get('trivalent_updated'))} · "
+              f"max advisory severity (rpm-ostree scale): `{_sbn.get('max_advisory_severity')}`")
+            W("")
+            W("> Based on secureblue's `security-update-notification` script: `trivalent` upgraded → major notification; "
+              "`kernel` upgraded or security advisory present → normal notification. Fedora's updateinfo.xml does not publish "
+              "severity attributes, so rpm-ostree's severity is always 0 (falling into the `unknown` case) — "
+              "`critical` severity is unreachable on Fedora, meaning major notifications are effectively only triggered by trivalent.")
+            W("")
+
+    if is_zh:
+        W(f"**如果现在更新，需要下载 {human(ldiff['download_bytes'])}** —— "
+          f"{ldiff['chunks_b']} 个 chunk 中有 {ldiff['chunks_changed']} 个发生变化，"
+          f"{ldiff['chunks_reused']} 个已在本地、会被复用。"
+          f"（完整镜像为 {human(ldiff['total_size_b'])}，本次更新约占 {ldiff['download_pct']}%）")
+        W("> **上面的下载量是上限**：它统计所有 digest 变化的 chunk，而 chunkah 会在组件之间重新切分内容，"
+          "因此其中一部分可能是你已经拥有的字节（只是换了名字）。")
+    else:
+        W(f"**If you update, you download {human(ldiff['download_bytes'])}** — "
+          f"{ldiff['chunks_changed']} of {ldiff['chunks_b']} chunks changed, "
+          f"{ldiff['chunks_reused']} are already on disk and get reused. "
+          f"(full image: {human(ldiff['total_size_b'])}, so this update = {ldiff['download_pct']}%)")
+        W("> **This download figure is an upper bound**: it counts every chunk whose digest "
+          "changed, but chunkah re-shards content between components, so part of it can be "
+          "bytes you already have under another name.")
     W("")
-    W(f"**如果现在更新，需要下载 {human(ldiff['download_bytes'])}** —— "
-      f"{ldiff['chunks_b']} 个 chunk 中有 {ldiff['chunks_changed']} 个发生变化，"
-      f"{ldiff['chunks_reused']} 个已在本地、会被复用。"
-      f"（完整镜像为 {human(ldiff['total_size_b'])}，本次更新约占 {ldiff['download_pct']}%）")
+
+    if is_zh:
+        W("| | 上一版 | 新版 |")
+        W("|---|---|---|")
+        W(f"| 对比引用 | `{shortref(a['ref'])}` | `{shortref(b['ref'])}` |")
+        W(f"| 镜像版本 | {a['annotations'].get('org.opencontainers.image.version', '?')} | {b['annotations'].get('org.opencontainers.image.version', '?')} |")
+        W(f"| 构建时间 (UTC) | {a.get('created') or '?'} | {b.get('created') or '?'} |")
+        W(f"| 内核 | {a['annotations'].get('ostree.linux', '?')} | {b['annotations'].get('ostree.linux', '?')} |")
+        W(f"| rpm-ostree 输入哈希 | `{(a['annotations'].get('rpmostree.inputhash') or '')[:12]}` | `{(b['annotations'].get('rpmostree.inputhash') or '')[:12]}` |")
+        W(f"| ostree 提交 | `{(a['annotations'].get('ostree.commit') or '—')[:12]}` | `{(b['annotations'].get('ostree.commit') or '—')[:12]}` |")
+        W(f"| 镜像摘要 (manifest) | `{a['digest'][:19]}…` | `{b['digest'][:19]}…` |")
+        W(f"| 镜像内软件包数 | {diff.get('count_a', '?')} | {diff.get('count_b', '?')} |")
+    else:
+        W("| | previous | new |")
+        W("|---|---|---|")
+        W(f"| compared refs | `{shortref(a['ref'])}` | `{shortref(b['ref'])}` |")
+        W(f"| image version | {a['annotations'].get('org.opencontainers.image.version', '?')} | {b['annotations'].get('org.opencontainers.image.version', '?')} |")
+        W(f"| built (UTC) | {a.get('created') or '?'} | {b.get('created') or '?'} |")
+        W(f"| kernel | {a['annotations'].get('ostree.linux', '?')} | {b['annotations'].get('ostree.linux', '?')} |")
+        W(f"| rpm-ostree inputhash | `{(a['annotations'].get('rpmostree.inputhash') or '')[:12]}` | `{(b['annotations'].get('rpmostree.inputhash') or '')[:12]}` |")
+        W(f"| ostree.commit | `{(a['annotations'].get('ostree.commit') or '—')[:12]}` | `{(b['annotations'].get('ostree.commit') or '—')[:12]}` |")
+        W(f"| manifest digest | `{a['digest'][:19]}…` | `{b['digest'][:19]}…` |")
+        W(f"| packages in image | {diff.get('count_a', '?')} | {diff.get('count_b', '?')} |")
     W("")
-    W("| | previous 上一版 | new 新版 |")
-    W("|---|---|---|")
-    W(f"| compared refs 对比引用 | `{shortref(a['ref'])}` | `{shortref(b['ref'])}` |")
-    W(f"| image version 镜像版本 | {a['annotations'].get('org.opencontainers.image.version', '?')} "
-      f"| {b['annotations'].get('org.opencontainers.image.version', '?')} |")
-    W(f"| built (UTC) 构建时间 | {a.get('created') or '?'} | {b.get('created') or '?'} |")
-    W(f"| kernel 内核 | {a['annotations'].get('ostree.linux', '?')} | {b['annotations'].get('ostree.linux', '?')} |")
-    W(f"| rpm-ostree inputhash 输入哈希 | `{(a['annotations'].get('rpmostree.inputhash') or '')[:12]}` "
-      f"| `{(b['annotations'].get('rpmostree.inputhash') or '')[:12]}` |")
-    W(f"| ostree.commit 提交 | `{(a['annotations'].get('ostree.commit') or '—')[:12]}` "
-      f"| `{(b['annotations'].get('ostree.commit') or '—')[:12]}` |")
-    W(f"| manifest digest 摘要 | `{a['digest'][:19]}…` | `{b['digest'][:19]}…` |")
-    W(f"| packages in image 镜像内软件包数 | {diff.get('count_a', '?')} | {diff.get('count_b', '?')} |")
-    W("")
-    if (a["annotations"].get("rpmostree.inputhash") and a["annotations"].get("rpmostree.inputhash")
-            == b["annotations"].get("rpmostree.inputhash")):
-        W("> **`rpmostree.inputhash` is identical on both images - this does NOT mean the")
-        W("> images are equivalent.** That value is produced by `rpm-ostree compose tree`")
-        W("> and inherited verbatim from the Fedora base image; blue-build never runs")
-        W("> `compose tree` (its only compose call is `build-chunked-oci`, a rechunker), so")
-        W("> it describes Fedora's compose and is blind to everything secureblue rebuilds.")
-        W("> Measured: two distinct images sharing this hash differed in 20 of 128 layers")
-        W("> and in `homebrew 7.0.2-26091605 -> 7.0.6-26092310`. `ostree.commit` and")
-        W("> `ostree.linux` are inherited the same way. Judge the package table below.")
-        W("> **两个镜像的 `rpmostree.inputhash` 相同，但这不代表两者等价。**该值由")
-        W("> `rpm-ostree compose tree` 产生、并原样继承自 Fedora 基础镜像；blue-build 从不运行")
-        W("> `compose tree`（唯一的 compose 调用是重分块器 `build-chunked-oci`），因此它描述的是")
-        W("> Fedora 的 compose，看不到 secureblue 自己重建的任何东西。实测：两个共享该哈希的不同")
-        W("> 镜像有 128 层中的 20 层不同，且 `homebrew 7.0.2-26091605 -> 7.0.6-26092310`。")
-        W("> `ostree.commit`、`ostree.linux` 同理继承。请以下方的软件包表为准。")
+
+    if (a["annotations"].get("rpmostree.inputhash") and
+            a["annotations"].get("rpmostree.inputhash") == b["annotations"].get("rpmostree.inputhash")):
+        if is_zh:
+            W("> **两个镜像的 `rpmostree.inputhash` 相同，但这不代表两者等价。**该值由 "
+              "`rpm-ostree compose tree` 产生、并原样继承自 Fedora 基础镜像；blue-build 从不运行 "
+              "`compose tree`（唯一的 compose 调用是重分块器 `build-chunked-oci`），因此它描述的是 "
+              "Fedora 的 compose，看不到 secureblue 自己重建的任何东西。实测：两个共享该哈希的不同 "
+              "镜像有 128 层中的 20 层不同，且 `homebrew 7.0.2-26091605 -> 7.0.6-26092310`。"
+              "`ostree.commit`、`ostree.linux` 同理继承。请以下方的软件包表为准。")
+        else:
+            W("> **`rpmostree.inputhash` is identical on both images - this does NOT mean the "
+              "images are equivalent.** That value is produced by `rpm-ostree compose tree` "
+              "and inherited verbatim from the Fedora base image; blue-build never runs "
+              "`compose tree` (its only compose call is `build-chunked-oci`, a rechunker), so "
+              "it describes Fedora's compose and is blind to everything secureblue rebuilds. "
+              "Measured: two distinct images sharing this hash differed in 20 of 128 layers "
+              "and in `homebrew 7.0.2-26091605 -> 7.0.6-26092310`. `ostree.commit` and "
+              "`ostree.linux` are inherited the same way. Judge the package table below.")
         W("")
-    notes = list(dict.fromkeys(notes))
-    for n in notes:
-        W(f"> {n}")
-    if notes:
+
+    dedup_notes = list(dict.fromkeys(notes))
+    for n in dedup_notes:
+        if " / " in n:
+            en_note, zh_note = n.split(" / ", 1)
+            W(f"> {zh_note if is_zh else en_note}")
+        else:
+            W(f"> {n}")
+    if dedup_notes:
         W("")
 
     changed = diff["changed"]
@@ -1767,176 +1836,269 @@ def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog
     g_lost = [g for g in groups if g["dropped"]]
     g_sec = [g for g in groups if g["security"] and not g["downgrade"]]
     g_imp = [g for g in groups if g["important"] and not g["security"] and not g["downgrade"]]
-    # identity, not equality: two source groups can compare == and silently drop out
     _tagged = {id(g) for g in g_sec + g_imp + g_down + g_lost}
     g_other = [g for g in groups if id(g) not in _tagged]
 
     if g_down:
-        W(f"## Downgrades in this update ({len(g_down)}) — read first"
-          f" / 本次更新中的降级（{len(g_down)}）——请先阅读")
+        if is_zh:
+            W(f"## 本次更新中的降级（{len(g_down)}）——请先阅读")
+        else:
+            W(f"## Downgrades in this update ({len(g_down)}) — read first")
         W("")
         for g in g_down:
-            W(f"- **{g['src']}**: {g['old_evr']} → {g['new_evr']} "
-              f"({len(g['pkgs'])} package(s)/包)"
-              + (" — this *reverts* a published erratum / 这会*回退*已发布的勘误: "
-                 + ", ".join(g["aliases"][:2])
-                 if g["security"] else ""))
+            pkgs_label = f"{len(g['pkgs'])} 个包" if is_zh else f"{len(g['pkgs'])} package(s)"
+            if g["security"]:
+                rev = f" — 这会*回退*已发布的勘误: {', '.join(g['aliases'][:2])}" if is_zh else f" — this *reverts* a published erratum: {', '.join(g['aliases'][:2])}"
+            else:
+                rev = ""
+            W(f"- **{g['src']}**: {g['old_evr']} → {g['new_evr']} ({pkgs_label}){rev}")
         W("")
+
     if g_lost:
-        W(f"## Fixes that this update REMOVES ({len(g_lost)})"
-          f" / 本次更新会移除的修复（{len(g_lost)}）")
-        W("")
-        for g in g_lost:
-            W(f"- `{g['src']}`: no longer mentions / 不再提及 {', '.join(g['dropped'][:8])}")
+        if is_zh:
+            W(f"## 本次更新会移除的修复（{len(g_lost)}）")
+            W("")
+            for g in g_lost:
+                W(f"- `{g['src']}`: 不再提及 {', '.join(g['dropped'][:8])}")
+        else:
+            W(f"## Fixes that this update REMOVES ({len(g_lost)})")
+            W("")
+            for g in g_lost:
+                W(f"- `{g['src']}`: no longer mentions {', '.join(g['dropped'][:8])}")
         W("")
 
     if g_sec:
-        W(f"## Security-relevant changes ({len(g_sec)} source package(s), "
-          f"{sec_n} binary package(s))"
-          f" / 安全相关变更（{len(g_sec)} 个源码包，{sec_n} 个二进制包）")
-        W("")
-        W("| source package 源码包 | old → new 旧 → 新 | CVEs | errata / evidence 勘误/依据 |")
-        W("|---|---|---|---|")
+        if is_zh:
+            W(f"## 安全相关变更（{len(g_sec)} 个源码包，{sec_n} 个二进制包）")
+            W("")
+            W("| 源码包 | 旧 → 新 | CVE 编号 | 勘误 / 依据 |")
+            W("|---|---|---|---|")
+        else:
+            W(f"## Security-relevant changes ({len(g_sec)} source package(s), {sec_n} binary package(s))")
+            W("")
+            W("| source package | old → new | CVEs | errata / evidence |")
+            W("|---|---|---|---|")
         for g in g_sec:
             ev = "; ".join(g["why"])[:190] or ", ".join(g["aliases"]) or "—"
-            W(f"| {fmt_pkgs(g)} ({g['src']}) | {g['old_evr']} → **{g['new_evr']}** | "
-              f"{', '.join(g['cves'][:6]) or '—'} | {ev} |")
+            cve_str = ", ".join(g["cves"][:6]) or "—"
+            pkg_col = fmt_pkgs(g, "zh" if is_zh else "en")
+            W(f"| {pkg_col} ({g['src']}) | {g['old_evr']} → **{g['new_evr']}** | {cve_str} | {ev} |")
         W("")
+
     if g_imp:
-        W(f"## Bumps in security-sensitive packages, no CVE mentioned ({len(g_imp)})"
-          f" / 安全敏感包版本升级、未提及 CVE（{len(g_imp)}）")
+        if is_zh:
+            W(f"## 安全敏感包版本升级、未提及 CVE（{len(g_imp)}）")
+            W("")
+            for g in g_imp:
+                extra = f"（勘误: {', '.join(g['aliases'][:2])}）" if g["aliases"] else ""
+                why_desc = "; ".join(g["why"])[:160] or "无安全相关更新日志"
+                W(f"- `{g['src']}` {g['old_evr']} → {g['new_evr']} — {len(g['pkgs'])} 个包{extra}; {why_desc}")
+        else:
+            W(f"## Bumps in security-sensitive packages, no CVE mentioned ({len(g_imp)})")
+            W("")
+            for g in g_imp:
+                extra = f" (errata: {', '.join(g['aliases'][:2])})" if g["aliases"] else ""
+                why_desc = "; ".join(g["why"])[:160] or "no security changelog entry"
+                W(f"- `{g['src']}` {g['old_evr']} → {g['new_evr']} — {len(g['pkgs'])} pkg(s){extra}; {why_desc}")
         W("")
-        for g in g_imp:
-            extra = f" (errata 勘误: {', '.join(g['aliases'][:2])})" if g["aliases"] else ""
-            W(f"- `{g['src']}` {g['old_evr']} → {g['new_evr']} — {len(g['pkgs'])} pkg(s)/包"
-              f"{extra}; {'; '.join(g['why'])[:160] or 'no security changelog entry / 无安全相关更新日志'}")
-        W("")
+
     if g_other:
-        W(f"## Routine bumps ({len(g_other)} source package(s), "
-          f"{sum(len(g['pkgs']) for g in g_other)} binary)"
-          f" / 常规版本升级（{len(g_other)} 个源码包，{sum(len(g['pkgs']) for g in g_other)} 个二进制包）")
-        W("")
-        W("| source package 源码包 | binary packages 二进制包 | old → new 旧 → 新 |")
-        W("|---|---|---|")
+        tot_bin = sum(len(g['pkgs']) for g in g_other)
+        if is_zh:
+            W(f"## 常规版本升级（{len(g_other)} 个源码包，{tot_bin} 个二进制包）")
+            W("")
+            W("| 源码包 | 二进制包 | 旧 → 新 |")
+            W("|---|---|---|")
+        else:
+            W(f"## Routine bumps ({len(g_other)} source package(s), {tot_bin} binary)")
+            W("")
+            W("| source package | binary packages | old → new |")
+            W("|---|---|---|")
         for g in g_other:
-            W(f"| {g['src']} | {fmt_pkgs(g)} | {g['old_evr']} → {g['new_evr']} |")
+            W(f"| {g['src']} | {fmt_pkgs(g, 'zh' if is_zh else 'en')} | {g['old_evr']} → {g['new_evr']} |")
         W("")
+
     g_had = [g for g in groups if g.get("already_had")]
     if g_had:
-        W(f"## Errata you already had before this update ({len(g_had)})"          f" / 本次更新之前你就已经拥有的勘误（{len(g_had)}）")
+        if is_zh:
+            W(f"## 本次更新之前你就已经拥有的勘误（{len(g_had)}）")
+            W("")
+            W("这些勘误对应的是你**原本就在运行**的版本，因此它们不构成升级理由，"
+              "其严重度也**没有**被计入上面的结论。")
+            W("")
+            for g in g_had:
+                al = ", ".join(x["alias"] for x in g["already_had"][:4])
+                W(f"- `{g['src']}`（停留在 {g['old_evr']}）: {al}")
+        else:
+            W(f"## Errata you already had before this update ({len(g_had)})")
+            W("")
+            W("These match the package version you were **already running**, so they are not a "
+              "reason to update and their severity is deliberately **not** counted in the verdict "
+              "above.")
+            W("")
+            for g in g_had:
+                al = ", ".join(x["alias"] for x in g["already_had"][:4])
+                W(f"- `{g['src']}` (staying at {g['old_evr']}): {al}")
         W("")
-        W("These match the package version you were **already running**, so they are not a "
-          "reason to update and their severity is deliberately **not** counted in the verdict "
-          "above. / "
-          "这些勘误对应的是你**原本就在运行**的版本，因此它们不构成升级理由，"
-          "其严重度也**没有**被计入上面的结论。")
-        W("")
-        for g in g_had:
-            al = ", ".join(x["alias"] for x in g["already_had"][:4])
-            W(f"- `{g['src']}` (staying at / 停留在 {g['old_evr']}): {al}")
-        W("")
+
     g_un = [g for g in groups if g.get("unreleased")]
     if g_un:
-        W(f"## Errata that exist but are not pushed yet ({len(g_un)})"          f" / 已存在但尚未推送的勘误（{len(g_un)}）")
-        W("")
-        W("Bodhi knows about these, but their `status` is not `stable`, so they carry no "
-          "weight here - matching `security_backlog`, which only counts pushed errata. / "
-          "Bodhi 中有这些记录，但其 `status` 不是 `stable`，因此在此不计权重——"
-          "与 `security_backlog` 只统计已推送勘误的口径一致。")
-        W("")
-        for g in g_un:
-            W(f"- `{g['src']}`: {', '.join(x['alias'] + ' (' + str(x['status']) + ')' for x in g['unreleased'][:4])}")
+        if is_zh:
+            W(f"## 已存在但尚未推送的勘误（{len(g_un)}）")
+            W("")
+            W("Bodhi 中有这些记录，但其 `status` 不是 `stable`，因此在此不计权重——"
+              "与 `security_backlog` 只统计已推送勘误的口径一致。")
+            W("")
+            for g in g_un:
+                W(f"- `{g['src']}`: {', '.join(x['alias'] + ' (' + str(x['status']) + ')' for x in g['unreleased'][:4])}")
+        else:
+            W(f"## Errata that exist but are not pushed yet ({len(g_un)})")
+            W("")
+            W("Bodhi knows about these, but their `status` is not `stable`, so they carry no "
+              "weight here - matching `security_backlog`, which only counts pushed errata.")
+            W("")
+            for g in g_un:
+                W(f"- `{g['src']}`: {', '.join(x['alias'] + ' (' + str(x['status']) + ')' for x in g['unreleased'][:4])}")
         W("")
 
     if not changed and isinstance(diff.get("count_a"), int):
-        W("## No package version changed at all / 没有任何软件包版本发生变化")
-        W("")
-        W("Every package in both images has the same NEVRA — the delta is entirely "
-          "rebuilt content / metadata churn. / "
-          "两个镜像中所有软件包的 NEVRA 完全一致——差异全部来自重建内容 / 元数据变动。")
+        if is_zh:
+            W("## 没有任何软件包版本发生变化")
+            W("")
+            W("两个镜像中所有软件包的 NEVRA 完全一致——差异全部来自重建内容 / 元数据变动。")
+        else:
+            W("## No package version changed at all")
+            W("")
+            W("Every package in both images has the same NEVRA — the delta is entirely "
+              "rebuilt content / metadata churn.")
         W("")
 
     if diff["added"] or diff["removed"]:
-        W("## Package set / 软件包集合")
-        if diff["added"]:
-            W(f"added 新增 ({len(diff['added'])}): "
-              + ", ".join(f"`{x}`" for x in diff["added"][:40]))
-        if diff["removed"]:
-            W(f"removed 移除 ({len(diff['removed'])}): "
-              + ", ".join(f"`{x}`" for x in diff["removed"][:40]))
+        if is_zh:
+            W("## 软件包集合变更")
+            if diff["added"]:
+                W(f"新增 ({len(diff['added'])}): " + ", ".join(f"`{x}`" for x in diff["added"][:40]))
+            if diff["removed"]:
+                W(f"移除 ({len(diff['removed'])}): " + ", ".join(f"`{x}`" for x in diff["removed"][:40]))
+        else:
+            W("## Package set changes")
+            if diff["added"]:
+                W(f"added ({len(diff['added'])}): " + ", ".join(f"`{x}`" for x in diff["added"][:40]))
+            if diff["removed"]:
+                W(f"removed ({len(diff['removed'])}): " + ", ".join(f"`{x}`" for x in diff["removed"][:40]))
         W("")
 
     silent = xc.get("silent_rebuilds") or []
     if xc.get("versions_known") is False and ldiff.get("changed_chunks"):
         ncpk = len(ldiff.get("changed_packages_from_chunks") or [])
-        W(f"## Chunks that moved, versions unknown ({len(ldiff['changed_chunks'])})"
-          f" / 发生变化的 chunk，版本未知（{len(ldiff['changed_chunks'])}）")
+        ch_cnt = len(ldiff['changed_chunks'])
+        if is_zh:
+            W(f"## 发生变化的 chunk，版本未知（{ch_cnt}）")
+            W("")
+            W(f"此模式下未拉取 `rpmdb.sqlite`，因此工具无法判断哪些软件包版本未变、"
+              f"哪些变了——所以它不做这种断言。下方 chunk 中约含 {ncpk} 个软件包。"
+              f"去掉 `--exact 0` 重新运行即可获得真实版本。")
+        else:
+            W(f"## Chunks that moved, versions unknown ({ch_cnt})")
+            W("")
+            W(f"In this mode no `rpmdb.sqlite` was fetched, so the tool cannot say which packages "
+              f"kept their version and which did not — it therefore makes no such claim. About "
+              f"{ncpk} packages sit in the chunks below. Re-run without `--exact 0` to get real "
+              f"versions.")
         W("")
-        W(f"In this mode no `rpmdb.sqlite` was fetched, so the tool cannot say which packages "
-          f"kept their version and which did not — it therefore makes no such claim. About "
-          f"{ncpk} packages sit in the chunks below. Re-run without `--exact 0` to get real "
-          f"versions. / 此模式下未拉取 `rpmdb.sqlite`，因此工具无法判断哪些软件包版本未变、"
-          f"哪些变了——所以它不做这种断言。下方 chunk 中约含 {ncpk} 个软件包。"
-          f"去掉 `--exact 0` 重新运行即可获得真实版本。")
-        W("")
+
     if silent:
-        W(f"## Rebuilt with the *same* version ({len(silent)})"
-          f" / 版本相同但被重建（{len(silent)}）")
+        if is_zh:
+            W(f"## 版本相同但被重建（{len(silent)}）")
+            W("")
+            W("这些 chunk 的字节变了，但软件包版本没变。通常是一次 secureblue 重建、工具链/macro 变化"
+              "或文件重排——会消耗下载量，却没有对应的上游更新日志。")
+            W("")
+            for n, s in silent[:20]:
+                W(f"- `{n}` — {human(s)}")
+            if len(silent) > 20:
+                W(f"- ……另有 {len(silent)-20} 个")
+        else:
+            W(f"## Rebuilt with the *same* version ({len(silent)})")
+            W("")
+            W("These chunks changed byte-for-byte while the package version did not. That is "
+              "usually a secureblue rebuild, a toolchain/macro change, or file re-ordering — "
+              "it costs download bytes but carries no upstream changelog entry.")
+            W("")
+            for n, s in silent[:20]:
+                W(f"- `{n}` — {human(s)}")
+            if len(silent) > 20:
+                W(f"- … and {len(silent)-20} more")
         W("")
-        W("These chunks changed byte-for-byte while the package version did not. That is "
-          "usually a secureblue rebuild, a toolchain/macro change, or file re-ordering — "
-          "it costs download bytes but carries no upstream changelog entry. / "
-          "这些 chunk 的字节变了，但软件包版本没变。通常是一次 secureblue 重建、工具链/macro 变化"
-          "或文件重排——会消耗下载量，却没有对应的上游更新日志。")
-        W("")
-        for n, s in silent[:20]:
-            W(f"- `{n}` — {human(s)}")
-        if len(silent) > 20:
-            W(f"- … and {len(silent)-20} more / ……另有 {len(silent)-20} 个")
-        W("")
+
     if xc.get("non_package_chunks"):
-        W("## Changes that are not packages / 非软件包的变更")
+        title = "## 非软件包的变更" if is_zh else "## Changes that are not packages"
+        W(title)
         W("")
         for ch in xc["non_package_chunks"]:
             W(f"- {human(ch['size'])} — {', '.join(c.replace('bigfiles/', '') for c in ch['components'])[:120]}")
         W("")
 
     if backlog:
-        W(f"## What your (current or new) image is still missing ({len(backlog)})"
-          f" / 你的（当前或新）镜像仍缺少的更新（{len(backlog)}）")
-        W("")
-        W("Published **stable** Fedora security updates whose build is newer than the one in "
-          "the image — i.e. exposure that skipping this update does not change, but that you "
-          "may want to know about. / "
-          "已发布的 **stable** Fedora 安全更新，其构建比镜像内的更新——"
-          "即无论是否跳过本次更新都存在的暴露面，但你应当知情。")
-        W("")
-        W("| package 软件包 | in image 镜像内 | newer stable build 新 stable 构建 | severity 严重度 | erratum 勘误 |")
-        W("|---|---|---|---|---|")
+        if is_zh:
+            W(f"## 你的（当前或新）镜像仍缺少的更新（{len(backlog)}）")
+            W("")
+            W("已发布的 **stable** Fedora 安全更新，其构建比镜像内的更新——"
+              "即无论是否跳过本次更新都存在的暴露面，但你应当知情。")
+            W("")
+            W("| 软件包 | 镜像内版本 | 新 stable 构建 | 严重度 | 勘误 |")
+            W("|---|---|---|---|---|")
+        else:
+            W(f"## What your (current or new) image is still missing ({len(backlog)})")
+            W("")
+            W("Published **stable** Fedora security updates whose build is newer than the one in "
+              "the image — i.e. exposure that skipping this update does not change, but that you "
+              "may want to know about.")
+            W("")
+            W("| package | in image | newer stable build | severity | erratum |")
+            W("|---|---|---|---|---|")
         for r in backlog[:25]:
-            W(f"| `{r['name']}` | {r['have']} | **{r['want']}** | {r['severity'] or '?'} "
-              f"| {r['alias']} |")
+            W(f"| `{r['name']}` | {r['have']} | **{r['want']}** | {r['severity'] or '?'} | {r['alias']} |")
         W("")
 
     if ldiff["changed_chunks"]:
-        W(f"## Chunks you would re-download ({len(ldiff['changed_chunks'])})"
-          f" / 需要重新下载的 chunk（{len(ldiff['changed_chunks'])}）")
+        ch_cnt = len(ldiff['changed_chunks'])
+        if is_zh:
+            W(f"## 需要重新下载的 chunk（{ch_cnt}）")
+            W("")
+            for ch in ldiff["changed_chunks"][:15]:
+                comps = [c.replace("rpm/", "").replace("bigfiles/", "≈") for c in ch["components"]][:5]
+                more = len(ch["components"]) - len(comps)
+                more_label = f" +{more} 个包" if more > 0 else ""
+                W(f"- {human(ch['size'])} — {', '.join(comps)}{more_label}")
+            if ch_cnt > 15:
+                W(f"- ……另有 {ch_cnt-15} 个更小的 chunk")
+        else:
+            W(f"## Chunks you would re-download ({ch_cnt})")
+            W("")
+            for ch in ldiff["changed_chunks"][:15]:
+                comps = [c.replace("rpm/", "").replace("bigfiles/", "≈") for c in ch["components"]][:5]
+                more = len(ch["components"]) - len(comps)
+                more_label = f" +{more} pkgs" if more > 0 else ""
+                W(f"- {human(ch['size'])} — {', '.join(comps)}{more_label}")
+            if ch_cnt > 15:
+                W(f"- … {ch_cnt-15} smaller chunks")
         W("")
-        for ch in ldiff["changed_chunks"][:15]:
-            comps = [c.replace("rpm/", "").replace("bigfiles/", "≈") for c in ch["components"]][:5]
-            more = len(ch["components"]) - len(comps)
-            W(f"- {human(ch['size'])} — {', '.join(comps)}"
-              + (f" +{more} pkgs/包" if more > 0 else ""))
-        if len(ldiff["changed_chunks"]) > 15:
-            W(f"- … {len(ldiff['changed_chunks'])-15} smaller chunks"
-              f" / ……另有 {len(ldiff['changed_chunks'])-15} 个更小的 chunk")
-        W("")
-    W("---")
-    W("Generated by `sbwatch`: registry manifests + the image's `rpmdb.sqlite` chunk only. "
-      "Nothing was pulled, and no credentials were used. / "
-      "由 `sbwatch` 生成：仅使用了 registry manifest 与镜像的 `rpmdb.sqlite` chunk。"
-      "未拉取完整镜像，也未使用任何凭据。")
-    return "\n".join(L) + "\n"
+
+    if is_zh:
+        W("由 `sbwatch` 生成：仅使用了 registry manifest 与镜像的 `rpmdb.sqlite` chunk。未拉取完整镜像，也未使用任何凭据。")
+    else:
+        W("Generated by `sbwatch`: registry manifests + the image's `rpmdb.sqlite` chunk only. Nothing was pulled, and no credentials were used.")
+
+    return "\n".join(L)
+
+
+def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog=None) -> str:
+    """Render markdown report: pure Chinese section first, followed by '---' separator, then pure English section."""
+    zh_part = _render_markdown_lang("zh", subject, a, b, diff, ldiff, verdict, notes, xc, backlog)
+    en_part = _render_markdown_lang("en", subject, a, b, diff, ldiff, verdict, notes, xc, backlog)
+    return f"{zh_part.strip()}\n\n---\n\n{en_part.strip()}\n"
+
 
 
 # --------------------------------------------------------------------------- #
