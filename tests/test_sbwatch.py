@@ -842,25 +842,45 @@ class TestRpmOstreeSeverityVocabulary(unittest.TestCase):
                            ("LOW", 1), ("Critical", 4)):
             self.assertEqual(S.rpmostree_str2severity(word), want, word)
 
-    def test_bodhi_vocabulary_is_invisible_to_rpmostree(self):
+    def test_raw_bodhi_words_are_invisible_to_rpmostree(self):
         """Bodhi's UpdateSeverity is unspecified/urgent/high/medium/low - none of
-        which str2severity() recognises, so all rank 0 -> 'unknown' upstream.
-        Folding them into SEV_RANK would predict an urgency the desktop never shows."""
+        which str2severity() recognises.  That is exactly why the severity must be
+        run through bodhi_severity_as_updateinfo() first: Bodhi translates its own
+        vocabulary to RHEL spellings when writing the updateinfo <severity> child
+        element, and THAT string is what rpm-ostree sees.  Feeding the raw API
+        word would under-predict 'urgent' (really Critical -> MAJOR) and
+        over-predict 'medium' (really Moderate -> silent)."""
         for word in ("urgent", "high", "medium", "unspecified", "", None):
             self.assertEqual(S.rpmostree_str2severity(word), 0, word)
 
-    def test_fedora_publishes_no_severity_at_all(self):
-        """Measured twice on the live mirrors: 0 of 2966 <update> tags in the F44
-        updates repo on 2026-09-23, 0 of 2979 on 2026-09-24, and 0 of 4308 in F43
-        carry a severity= attribute (attributes present are only
-        from/status/type/version). So dnf_advisory_get_severity() returns
-        NULL and str2severity() returns 0 - 'critical' is unreachable on Fedora."""
-        self.assertEqual(S.rpmostree_str2severity(None), 0)
-        # and a NULL severity must therefore land on upstream's 'unknown' arm,
+    def test_bodhi_words_map_to_rhel_spellings_like_bodhi_itself(self):
+        """Mirror of bodhi-server util.severity_updateinfo_str(), including the
+        get(value, 'None') fallback for missing/unknown severities."""
+        cases = {"unspecified": "None", "low": "Low", "medium": "Moderate",
+                 "high": "Important", "urgent": "Critical"}
+        for bodhi_word, published in cases.items():
+            self.assertEqual(S.bodhi_severity_as_updateinfo(bodhi_word), published, bodhi_word)
+        for absent in ("", None, "whatever-bodhi-adds-next"):
+            self.assertEqual(S.bodhi_severity_as_updateinfo(absent), "None", absent)
+
+    def test_fedora_publishes_severity_as_child_element(self):
+        """Measured on the live mirror 2026-09-24: all 2979 <update> entries in the
+        F44 updates repo carry a <severity> CHILD element (None=2326, Low=259,
+        Moderate=254, Important=125, Critical=15 - incl. chromium
+        FEDORA-2026-f910229c11 issued 2026-09-22) while 0 carry a severity=
+        ATTRIBUTE.  libsolv parses the child element (repo_updateinfoxml.c), so
+        dnf_advisory_get_severity() returns the real RHEL spelling and 'critical'
+        IS reachable - bodhi#2099 closed 2018-01-16.  Full chain, Bodhi word ->
+        published spelling -> rpm-ostree integer:"""
+        for bodhi_word, want in (("urgent", 4), ("high", 3), ("medium", 2),
+                                 ("low", 1), ("unspecified", 0)):
+            published = S.bodhi_severity_as_updateinfo(bodhi_word)
+            self.assertEqual(S.rpmostree_str2severity(published), want, bodhi_word)
+        # a security advisory with no severity at all lands on the 'unknown' arm,
         # which the NORMAL branch acts on - not on 'none'.
         n = S.secureblue_notification(
             {"changed": [{"name": "glibc", "src": "glibc", "dir": "upgrade"}]},
-            [{"src": "glibc", "has_security_erratum": True, "erratum_severity": ""}])
+            [{"src": "glibc", "has_security_erratum": True, "erratum_severity": "None"}])
         self.assertEqual(n["max_advisory_severity"], "unknown")
         self.assertEqual(n["level"], "normal")
 
@@ -933,23 +953,27 @@ class TestNoChangeNeedsAnEmptyPackageSet(unittest.TestCase):
 
 class TestDecisionTableMatchesUpstream(unittest.TestCase):
     """Cross-check secureblue_notification against the upstream `case` block,
-    transcribed from the shell script. (kernel, trivalent, advisory sev) -> level."""
+    transcribed from the shell script. (kernel, trivalent, advisory sev) -> level.
+
+    Severity fixtures use the updateinfo <severity> spelling, the string
+    classify_change() stores after bodhi_severity_as_updateinfo() - the jq in
+    the shell script sees rpm-ostree's integer for exactly that string."""
     TABLE = [
-        # kernel, trivalent, advisory severity -> expected
+        # kernel, trivalent, advisory severity int -> expected
         (False, False, None,        "none"),    # nothing relevant moved
         (True,  False, None,        "normal"),  # kernel alone always notifies
         (False, True,  None,        "major"),   # trivalent alone -> critical urgency
         (True,  True,  None,        "major"),   # elif: major wins
-        (False, False, 0,           "normal"),  # 0 -> 'unknown' arm (Fedora's only value)
+        (False, False, 0,           "normal"),  # 0 -> 'unknown' arm (Bodhi 'unspecified' -> 'None')
         (False, False, 1,           "none"),    # low: no notification
         (False, False, 2,           "none"),    # moderate: no notification
         (False, False, 3,           "normal"),  # important
-        (False, False, 4,           "major"),   # critical (unreachable on Fedora)
+        (False, False, 4,           "major"),   # critical (<- Bodhi 'urgent'; reachable on Fedora)
         (True,  False, 1,           "normal"),
         (False, True,  2,           "major"),
     ]
 
-    LABEL = {None: None, 0: "", 1: "low", 2: "moderate", 3: "important", 4: "critical"}
+    LABEL = {None: None, 0: "None", 1: "Low", 2: "Moderate", 3: "Important", 4: "Critical"}
 
     def test_table(self):
         for kernel, trivalent, sev, want in self.TABLE:
@@ -963,6 +987,25 @@ class TestDecisionTableMatchesUpstream(unittest.TestCase):
             got = S.secureblue_notification({"changed": changed}, groups)
             self.assertEqual(got["level"], want,
                              f"kernel={kernel} trivalent={trivalent} sev={sev}")
+
+    # Full chain for every Bodhi API word, through the same mapping Bodhi applies
+    # before publishing (kernel/trivalent untouched, one security erratum):
+    FULL_CHAIN = [
+        ("urgent",      "major"),   # -> Critical(4)  -> critical urgency popup
+        ("high",        "normal"),  # -> Important(3)
+        ("medium",      "none"),    # -> Moderate(2)  -> no case arm
+        ("low",         "none"),    # -> Low(1)       -> no case arm
+        ("unspecified", "normal"),  # -> None(0)      -> 'unknown' arm
+        ("",            "normal"),  # absent severity publishes as 'None' too
+    ]
+
+    def test_bodhi_word_full_chain(self):
+        for bodhi_word, want in self.FULL_CHAIN:
+            changed = [{"name": "nss", "src": "nss", "dir": "upgrade"}]
+            groups = [{"src": "nss", "has_security_erratum": True,
+                       "erratum_severity": S.bodhi_severity_as_updateinfo(bodhi_word)}]
+            got = S.secureblue_notification({"changed": changed}, groups)
+            self.assertEqual(got["level"], want, f"bodhi severity={bodhi_word!r}")
 
     def test_plain_bugfix_of_unimportant_package_is_silent(self):
         v = _verdict({"nano": pkg("nano", "8.0-1.fc44")}, {"nano": pkg("nano", "8.1-1.fc44")})
@@ -982,11 +1025,33 @@ class TestSecurityErratumFeedsTheRule(unittest.TestCase):
             c["cls"] = S.classify_change(c["old"], c["new"], "F44", FakeBodhi(ups))
         g = S.group_by_src(d["changed"])[0]
         self.assertTrue(g["has_security_erratum"])
-        self.assertEqual(g["erratum_severity"], "medium")
+        # stored in the updateinfo spelling, which is what rpm-ostree is fed:
+        # Bodhi 'medium' -> '<severity>Moderate</severity>' -> 2 -> no case arm
+        # -> the desktop stays SILENT (answering 'unknown' -> NORMAL would
+        # predict a popup that never appears)
+        self.assertEqual(g["erratum_severity"], "Moderate")
         n = S.secureblue_notification(d, [g])
-        # Bodhi's 'medium' is invisible to str2severity -> 0 -> 'unknown' -> NORMAL
-        self.assertEqual(n["max_advisory_severity"], "unknown")
-        self.assertEqual(n["level"], "normal")
+        self.assertEqual(n["max_advisory_severity"], "moderate")
+        self.assertEqual(n["level"], "none")
+
+    def test_urgent_security_erratum_is_major(self):
+        """Bodhi 'urgent' publishes as <severity>Critical</severity> -> 4 ->
+        'critical' arm -> MAJOR popup (and the verdict escalation applies).
+        trivalent is NOT the only major trigger on Fedora."""
+        old = pkg("nss", "4.39.0-4.fc44", "nss", [{"time": 1, "text": "- old"}])
+        new = pkg("nss", "4.39.0-5.fc44", "nss", [{"time": 2, "text": "- fix CVE-2026-9999"}])
+        ups = {"nss": [{"alias": "FEDORA-2026-z", "type": "security", "severity": "urgent",
+                        "status": "stable", "nvrs": ["nss-4.39.0-5.fc44"], "notes": "",
+                        "bugs": [], "title": "", "cves": []}]}
+        d = S.pkg_diff({"nss": old}, {"nss": new})
+        for c in d["changed"]:
+            c["cls"] = S.classify_change(c["old"], c["new"], "F44", FakeBodhi(ups))
+        g = S.group_by_src(d["changed"])[0]
+        self.assertEqual(g["erratum_severity"], "Critical")
+        n = S.secureblue_notification(d, [g])
+        self.assertEqual(n["max_advisory_severity"], "critical")
+        self.assertEqual(n["level"], "major")
+        self.assertEqual(n["message"], "A major security vulnerability has been patched")
 
     def test_old_build_only_erratum_does_not_trigger(self):
         """An erratum that shipped the OLD build is a fix already installed."""
