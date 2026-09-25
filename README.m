@@ -58,17 +58,27 @@ secureblue 更新后会弹通知，判定逻辑在一个 shell 脚本里
 
 ### 两个容易搞错的细节
 
-**1. Fedora 根本不发布 severity，所以「重大」只由 trivalent 触发。**
-`max_advisory_severity` 来自 rpm-ostree 的 `str2severity()`，它只认 RHEL 拼写
-`LOW/MODERATE/IMPORTANT/CRITICAL`，其它一律返回 `NONE(0)`；而 secureblue 的 `case`
-没有 `0` 的分支，0 落进 `*)` 变成 `unknown`。实测 Fedora 官方镜像的
-updateinfo.xml：F44 的 2979 条 `<update>` 标签中**带 `severity=` 属性的是 0 条**
-（只有 `from/status/type/version`），Bodhi 自己的枚举又是
-`unspecified/urgent/high/medium/low`——没有 `critical`。所以：
+**1. severity 有发布，只是不在属性里。**
+Fedora 的 updateinfo.xml 里 severity 不在 `<update>` 的**属性**里——grep `severity=`
+一条都没有，很容易误判成「Fedora 不发布 severity」——而是在**子元素**
+`<severity>` 里；libsolv 的 updateinfo 解析器（`repo_updateinfoxml.c`）读的正是子
+元素，rpm-ostree 的 `dnf_advisory_get_severity()` 拿到的就是真值。Bodhi 发布前还会
+先把自己的词映射成 RHEL 拼写（`bodhi/util.severity_updateinfo_str()`，
+bodhi#2099 早在 2018-01 就落地了）。实测 F44 updates 仓库（2026-09-24）：
+2979 条 `<update>` **全部**带 `<severity>` 子元素，其中 security 类含
+Important=112、**Critical=13**（含 2026-09-22 的 chromium）。
 
-- `critical` 在 Fedora 上**不可达**
-- 任何 security 勘误都落到 `unknown` → **普通**通知
-- `low`/`moderate` 单独出现时**不弹通知**（除非同时动了 kernel/trivalent）
+| Bodhi 勘误 severity | 发布为 | rpm-ostree → secureblue 分支 | 桌面行为 |
+|---|---|---|---|
+| `urgent` | `Critical` | 4 → `critical` | **重大** |
+| `high` | `Important` | 3 → `important` | 普通 |
+| `medium` | `Moderate` | 2 → `moderate`（无此分支） | **不弹** |
+| `low` | `Low` | 1 → `low`（无此分支） | **不弹** |
+| `unspecified`/缺失 | `None` | 0 → `*)` → `unknown` | 普通 |
+
+所以 `major` 有两条触发路径：**trivalent 升级**，或**存在 Bodhi `urgent` 级安全勘误**。
+`sbwatch` 存的就是映射后的拼写再喂 `rpmostree_str2severity()`（若直接喂 Bodhi 原词：
+`urgent` 会被低估成普通、`medium` 会被高估成普通——两个方向都错）。
 
 **2. trivalent 必须硬编码，靠 CVE 匹配永远抓不到它。**
 trivalent 是 secureblue 自己的包、无 dist tag，**结构上不可能匹配到任何 Bodhi 勘误**。
@@ -202,7 +212,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/test_sbwatch.py` 是 **83 项离线回归测试**，不需要网络、不访问 registry
+`tests/test_sbwatch.py` 是 **86 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -227,7 +237,7 @@ python3 -m unittest discover -s tests      # 或 python3 tests/test_sbwatch.py
 | E3 / E5 | 状态原子写入；`fedora_release` 由数据推导而非硬编码 |
 | E6 | `pkg_diff`：仅 epoch 变化（0:1.2-3 → 1:1.2-3）必须可见 |
 | E7 | `pick_tar_member`：活镜像 tar 内有两个 `rpmdb.sqlite`（92MiB 真库 + 0 字节占位），必须按大小选、与 tar 顺序无关 |
-| **F** | **secureblue 通知规则**：Bodhi 的 `urgent/high/medium` 在 rpm-ostree 词表下一律为 0（不得预测出桌面不会显示的紧急度）；Fedora 无 severity ⟹ 必须落 `unknown` 而非 `none`；trivalent 单独升级 ⟹ `major` 且把 verdict 抬到 `update-now`；kernel 靠**包 diff** 识别（`ostree.linux` 相同也要认出来）；kernel 降级不算升级；11 行真值表与上游 `case` 逐条对拍；仅匹配旧构建或未推送的勘误不得触发 |
+| **F** | **secureblue 通知规则**：severity 以 `<severity>` **子元素**（而非属性）发布；Bodhi 原词先经 `severity_updateinfo_str()` 映射成 RHEL 拼写再进 `str2severity`（`urgent→Critical(4)` 触发 `major`、`medium→Moderate(2)` **不弹**、raw Bodhi 词直接进词表一律为 0）；按 Bodhi 原词全链路对拍 + 11 行真值表与上游 `case` 逐条对拍；trivalent 单独升级 ⟹ `major` 且把 verdict 抬到 `update-now`；kernel 靠**包 diff** 识别（`ostree.linux` 相同也要认出来）；kernel 降级不算升级；仅匹配旧构建或未推送的勘误不得触发 |
 | **G** | **`no-change` 的判据**：inputhash 相同但包动了 ⟹ 不得判 `no-change`；`--exact 0` 未读版本 ⟹ 也不得判 `no-change`、不得声称"rpmdb 中无变化"；措辞不得再出现"逐字节一致"；`rpmdb_chunk()` 的选层规则必须与 `package_list()` 一致（否则快速路径会校验 A 层却读 B 层） |
 | **H** | **报告独立双语排版与决策修正**：报告输出格式改为纯中文在上、`---` 分割、纯英文在下，引入结构化双语处理防止含斜杠说明文本截断；trivalent 将判定从 `consider` 提升至 `update-now` 时剥离冲突的“可合理跳过”文案；`check --fast` 命中相同 rpmdb chunk 时端到端保留无变更确证，正确输出 `no-change` |
 
