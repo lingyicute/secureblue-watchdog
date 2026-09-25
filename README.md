@@ -131,13 +131,20 @@ sbwatch check                 # 有状态的 digest watch，用于 CI/cron -> re
 # A/B/ref 可以是：
 #   latest | 44 | 20260916 | 9ec80ca-44 | sha256:<digest>
 # 推荐用 digest，因为 dated tag 是可变的
-#
-# ⚠️ `diff A B` / `layers A B` 中的 A 必须是【较旧】的一方，B 是【较新】的一方。
-#    写反了会得出完全相反的结论（把新镜像里新增的 CVE 说成"本次更新移除的修复"）。
-#    工具现在会用 `org.opencontainers.image.created` 自动纠正顺序并在报告里说明；
-#    如需强制保持你给的顺序，加 --keep-order。
-# 先用 `sbwatch.py history` 或 `sbwatch.py tags` 确认哪个 tag 更新。
 ```
+
+>[!important]
+>
+> ⚠️ `diff A B` / `layers A B` 中的 A 必须是【较旧】的一方，B 是【较新】的一方。
+>
+> 写反了会得出完全相反的结论（把新镜像里新增的 CVE 说成"本次更新移除的修复"）。
+>
+> 工具现在会用 `org.opencontainers.image.created` 自动纠正顺序并在报告里说明；
+> 
+> 如需强制保持你给的顺序，加 --keep-order。
+
+>[!tip]
+> 先用 `sbwatch.py history` 或 `sbwatch.py tags` 确认哪个 tag 更新。
 
 ### 示例
 
@@ -195,12 +202,12 @@ python3 sbwatch.py backlog latest --max-bodhi 80
 `check` 默认带 `--fast`：当**两个镜像的 rpmdb chunk digest 相同**时，跳过 33MB 拉取、
 自动降级为 manifest-only。这是安全的——rpmdb.sqlite 逐字节相同 ⟹ 包集合必然没变。
 
+> [!important]
 > 早期版本用 `rpmostree.inputhash` 相同作为跳过依据，那是错的（见上文）。实测最近
 > 8 次构建的 7 对相邻组合：旧条件会跳过 **5 次**，而那 5 次的 rpmdb **全都不同**
 > （含 kernel 7.2.6→7.2.7 + trivalent 153→154 那次）；新条件跳过 **0 次**。
-> 代价是那 33MB 的节流在 secureblue 上基本不再触发——它几乎每次都重建了某个东西。
+> 代价是那 33MB 的节流在 secureblue 上基本不再触发 —— 它几乎每次都重建了某个东西。
 > 想强制精确对比加 `--no-fast`（或 workflow_dispatch 勾选 `force`）。
-
 
 ### 退出码
 
@@ -249,7 +256,7 @@ CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并�
 
 ## GitHub Action
 
-仓库自带 `.github/workflows/sbwatch.yml`，每小时跑一次：
+仓库自带 `.github/workflows/sbwatch.yml`，由 [wroker-cron](https://github.com/lingyicute/worker-cron) 驱动，每半小时就会跑一次：
 
 - cache `~/.cache/sbwatch` (pkglist + Bodhi + state.json)，按 image+arch 分命名空间，
   并有一个 prune 步骤只保留最近 7 份（否则 `state.json` 会被 LRU 挤掉，`check` 就失去基线）
