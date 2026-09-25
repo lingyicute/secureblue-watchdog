@@ -1127,10 +1127,13 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                 info["security"] = True
                 # Recorded separately from `security`: secureblue's rule keys off
                 # the *advisory kind* (DnfAdvisoryKind SECURITY == 1), not off
-                # changelog CVE mentions, and its urgency comes from this
-                # severity string run through rpm-ostree's str2severity().
+                # changelog CVE mentions, and its urgency comes from the advisory
+                # severity run through rpm-ostree's str2severity().  Stored in the
+                # updateinfo <severity> spelling (bodhi_severity_as_updateinfo),
+                # because that - not the Bodhi API word - is the string libsolv
+                # hands to rpm-ostree.
                 info["has_security_erratum"] = True
-                info["erratum_severity"] = (u.get("severity") or "").lower()
+                info["erratum_severity"] = bodhi_severity_as_updateinfo(u.get("severity"))
                 info["why"].append(
                     f"erratum/勘误 {u['alias']}: type=security severity={u.get('severity')} "
                     f"status={status}")
@@ -1285,30 +1288,58 @@ def fedora_release(pkgs: dict, image_version: str = "") -> str:
 # else, including NULL.  secureblue's `case` has no arm for 0, so 0 falls into
 # `*)` and becomes 'unknown' - which the NORMAL branch acts on.
 #
-# On Fedora that 0 is not a corner case, it is the only value: Fedora's
-# updateinfo.xml publishes no `severity` attribute at all (measured twice on the
-# live dl.fedoraproject.org mirrors: 0 of 2966 <update> tags in the F44 updates
-# repo on 2026-09-23 and 0 of 2979 on 2026-09-24, likewise 0 of 4308 in F43; the
-# only attributes present are from/status/type/version), and Bodhi's own
-# UpdateSeverity enum is unspecified/urgent/high/medium/low - it has no
-# 'critical' and no 'important'.  So dnf_advisory_get_severity() returns NULL,
-# str2severity() returns 0, and:
-#   * max_advisory_severity == 'critical'  is UNREACHABLE, and
-#   * any security advisory on a changed package lands on 'unknown' -> NORMAL.
-# Net effect: on Fedora the MAJOR notification fires if and only if `trivalent`
-# was upgraded, and NORMAL fires for a kernel upgrade or any security advisory.
-# (Should Fedora ever start publishing severities, the mapping below still
-# tracks upstream, because it uses upstream's own str2severity() vocabulary
-# rather than Bodhi's.)
+# The severity input is NOT the Bodhi API word (unspecified/low/medium/high/
+# urgent - none of which str2severity() recognises).  Bodhi already translates
+# it before publishing: metadata.py writes the updateinfo <severity> *child
+# element* via util.severity_updateinfo_str() ({unspecified: None, low: Low,
+# medium: Moderate, high: Important, urgent: Critical} - exactly str2severity()'s
+# vocabulary), and libsolv's updateinfo parser reads that child element
+# (ext/repo_updateinfoxml.c: { STATE_UPDATE, "severity", STATE_SEVERITY, 1 }).
+# The earlier "Fedora publishes no severity" conclusion came from counting
+# `severity=` *attributes* - attributes are indeed absent, but the value lives
+# in the child element, and the child element is what dnf_advisory_get_severity()
+# returns.  Measured on the live mirror 2026-09-24: all 2979 <update> entries in
+# the F44 updates repo carry a <severity> child (None=2326, Low=259,
+# Moderate=254, Important=125, Critical=15; among type=security: Important=112,
+# Moderate=165, Low=58, None=38, Critical=13, incl. chromium
+# FEDORA-2026-f910229c11 issued 2026-09-22) - and bodhi#2099 ("Include update
+# severity level in updateinfo.xml") has been closed since 2018-01-16.  So on
+# Fedora the effective table is:
+#   urgent      -> Critical(4)  -> MAJOR    (trivalent is NOT the only trigger)
+#   high        -> Important(3) -> 'important' -> NORMAL
+#   medium      -> Moderate(2)  -> 'moderate' -> no case arm -> SILENT
+#   low         -> Low(1)       -> 'low'      -> no case arm -> SILENT
+#   unspecified -> None(0)      -> 'unknown'  -> NORMAL
 RPMOSTREE_SEVERITY = {"low": 1, "moderate": 2, "important": 3, "critical": 4}
+
+# bodhi-server/bodhi/server/util.py: severity_updateinfo_str() - the translation
+# Bodhi applies when writing the updateinfo <severity> child element.  This is
+# the string libsolv, and therefore rpm-ostree, actually sees; the get(...,
+# "None") fallback matches Bodhi's own severity_map.get(value, "None").
+BODHI_TO_UPDATEINFO_SEVERITY = {"unspecified": "None", "low": "Low",
+                                "medium": "Moderate", "high": "Important",
+                                "urgent": "Critical"}
+
+
+def bodhi_severity_as_updateinfo(s) -> str:
+    """The updateinfo <severity> spelling for a Bodhi API severity word.
+
+    Feeding the raw Bodhi word into rpmostree_str2severity() instead would
+    mis-predict in both directions: 'urgent' (in reality Critical -> MAJOR)
+    would under-predict to 'unknown' -> NORMAL, and 'medium' (in reality
+    Moderate -> no case arm -> silent) would over-predict to 'unknown' ->
+    NORMAL.
+    """
+    return BODHI_TO_UPDATEINFO_SEVERITY.get(str(s or "").strip().lower(), "None")
 
 
 def rpmostree_str2severity(s) -> int:
     """rpm-ostree str2severity(): RHEL spellings only, everything else -> 0.
 
-    Deliberately NOT SEV_RANK: Bodhi's 'high'/'medium'/'urgent' mean nothing to
-    rpm-ostree, and folding them in would predict an urgency the desktop never
-    shows.
+    Deliberately NOT SEV_RANK, and deliberately fed the *updateinfo* spelling
+    (bodhi_severity_as_updateinfo), never the raw Bodhi API word: 'urgent' /
+    'high' / ... mean nothing to rpm-ostree, but Bodhi never shows rpm-ostree
+    those words - it publishes the RHEL spellings, which DO rank.
     """
     if not s:
         return 0
@@ -1318,9 +1349,9 @@ def rpmostree_str2severity(s) -> int:
 def _sev_rank_for_upstream(s) -> int:
     """str2severity() with a distinct floor for 'nothing recorded yet'.
 
-    Every spelling Fedora and Bodhi can actually produce ranks 0 under
-    str2severity(), so picking a max with 0 as the empty-set value would never
-    record the first advisory's severity.
+    A group starts at "" and 'None' ranks 0, so picking a max with 0 as the
+    empty-set value would let the untouched "" tie against the first recorded
+    'None' and later severities would never replace it.
     """
     return -1 if not s else rpmostree_str2severity(s)
 
@@ -1759,16 +1790,17 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             msg_str = (f" — \"{_sbn['message']}\"") if _sbn.get("message") else ""
             W(f"- 预测弹窗: {_badge}{msg_str}")
             reasons = _sbn.get("why_zh") or _sbn.get("why") or []
-            W(f"- 触发条件: {', '.join(reasons) or '—'}")
+            W(f"- 触发条件: {'，'.join(reasons) or '—'}")
             k_up = "是" if _sbn.get("kernel_updated") else "否"
             t_up = "是" if _sbn.get("trivalent_updated") else "否"
             W(f"- 内核已升级: {k_up} · trivalent 已升级: {t_up} · "
               f"最高勘误等级 (rpm-ostree 体系): `{_sbn.get('max_advisory_severity')}`")
             W("")
             W("> 依据 secureblue 的 `security-update-notification` 脚本：`trivalent` 升级 → 重大通知；"
-              "`kernel` 升级或存在安全勘误 → 普通通知。Fedora 的 updateinfo.xml 不发布 severity 属性，"
-              "因此 rpm-ostree 的等级恒为 0（落在 `unknown` 分支），"
-              "`critical` 等级在 Fedora 上不可达——重大通知实际上只由 trivalent 触发。")
+              "`kernel` 升级或最高勘误等级为 important/unknown → 普通通知。勘误等级取自 updateinfo 的 "
+              "`<severity>` 子元素（Bodhi 已映射为 RHEL 拼写：urgent→Critical、high→Important、"
+              "medium→Moderate、low→Low、unspecified→None），因此 `urgent` 级安全勘误同样会触发重大通知，"
+              "而 `medium`/`low` 级单独出现时不弹通知。")
             W("")
         else:
             _badge = {"major": "**MAJOR** (urgency=critical)",
@@ -1786,9 +1818,10 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               f"max advisory severity (rpm-ostree scale): `{_sbn.get('max_advisory_severity')}`")
             W("")
             W("> Based on secureblue's `security-update-notification` script: `trivalent` upgraded → major notification; "
-              "`kernel` upgraded or security advisory present → normal notification. Fedora's updateinfo.xml does not publish "
-              "severity attributes, so rpm-ostree's severity is always 0 (falling into the `unknown` case) — "
-              "`critical` severity is unreachable on Fedora, meaning major notifications are effectively only triggered by trivalent.")
+              "`kernel` upgraded or max advisory severity important/unknown → normal notification. The severity comes "
+              "from the updateinfo `<severity>` child element (Bodhi maps its own words to RHEL spellings before "
+              "publishing: urgent→Critical, high→Important, medium→Moderate, low→Low, unspecified→None), so an "
+              "`urgent` security advisory triggers a MAJOR notification too, while `medium`/`low` alone stay silent.")
             W("")
 
     if is_zh:
@@ -1865,6 +1898,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
     g_lost = [g for g in groups if g["dropped"]]
     g_sec = [g for g in groups if g["security"] and not g["downgrade"]]
     g_imp = [g for g in groups if g["important"] and not g["security"] and not g["downgrade"]]
+    # identity, not equality: two source groups can compare == and silently drop out
     _tagged = {id(g) for g in g_sec + g_imp + g_down + g_lost}
     g_other = [g for g in groups if id(g) not in _tagged]
 
@@ -3163,8 +3197,9 @@ def main(argv=None):
                    help="build refs to scan when searching for a baseline / newer builds "
                         "(0 = skip) / 搜索基线或新构建时扫描的构建数（0 = 跳过）")
     p.add_argument("--no-fast", dest="fast", action="store_false",
-                   help="always do the exact rpmdb diff, even when inputhash is unchanged / "
-                        "即使 inputhash 未变也始终执行精确 rpmdb 差异")
+                   help="always fetch and diff the rpmdb exactly, even when both images' "
+                        "rpmdb chunks are byte-identical / "
+                        "即使两个镜像的 rpmdb chunk 逐字节相同，也始终拉取并精确对比 rpmdb")
     p.set_defaults(fast=True)
     p.add_argument("--no-audit", dest="audit", action="store_false",
                    help="skip the 'behind on stable security updates' check / "
