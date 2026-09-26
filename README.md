@@ -42,6 +42,17 @@ secureblue 更新后会弹通知，判定逻辑在一个 shell 脚本里
 
 `sbwatch` 按同一条规则预测，结果放在 `verdict.secureblue_notification`（报告里是「secureblue notification 桌面通知预测」小节）：
 
+> [!tip]
+> **severity 只取「精确 EVR 命中」。** rpm-ostree 用
+> `dnf_package_get_advisories(pkg, HY_EQ)` 填充 `.advisories`，libdnf 只在
+> `pool_evrcmp(勘误 EVR, 包 EVR) == 0` 时才认（`libdnf/sack/query.cpp`，
+> `Query::getAdvisoryPkgs`）——release 字符串参与比较。
+> 所以 secureblue 自建的内核 `7.2.8-200.secureblue.1.fc44` **不会**因为 Fedora 有
+> `7.2.8-200.fc44` 的勘误而弹窗。`sbwatch` 现在同样处理：这类命中标为
+> 「对应 Fedora 勘误（归一化匹配）」，**计入报告与 CVE 判定，但不计入通知预测**；
+> 反过来，`.advisories` 覆盖「新部署里所有变化的包」，**包含本次新增的包**，
+> 所以新增包上的勘误也会驱动预测。
+
 ```json
 {
   "level": "major",
@@ -126,6 +137,7 @@ sbwatch layers A B            # chunk 级别 diff + 预估下载大小
 sbwatch pkgs A                # 某个镜像的精确包列表
 sbwatch diff A B              # 精确包 diff + CVE 分类
 sbwatch backlog [ref]         # 这个镜像还缺哪些已发布的 stable 安全更新
+                              #   --backlog-candidates N：审计最多看多少个候选源码包（默认 45）
 sbwatch check                 # 有状态的 digest watch，用于 CI/cron -> report.md + verdict + $GITHUB_OUTPUT
 
 # A/B/ref 可以是：
@@ -160,7 +172,8 @@ python3 sbwatch.py diff 20260916 latest --exact 0
 #    manifest-only 模式：只对比 OCI manifest 的层清单与 chunkah 注解。
 #    能得到：下载量、chunk 复用率、哪些【包名】落在变化的 chunk 里。
 #    得不到：任何版本号 —— 因此没有包 diff、不做 CVE/勘误匹配、
-#            无法判断 kernel/trivalent 是否升级，通知预测只能给 unknown。
+#            无法判断 kernel/trivalent 是否升级；通知预测与 verdict 级别本身
+#            都是 unknown（该模式不会给出 skip 之类的建议）。
 #    实测同一对镜像：--exact 0 说"241 个包位于变化的 chunk 中"，
 #    --exact 1 才知道真正变的只有 8 个。报告里会明确声明未读版本。
 
@@ -169,6 +182,9 @@ python3 sbwatch.py diff 20260916 latest --cosign-pub ./cosign.pub --require-cosi
 
 # 5. CI 模式：只有 tag 移动时才做重活
 python3 sbwatch.py check --image secureblue/silverblue-main-hardened --to latest --report report.md
+# check 的 --audit（默认开）与 diff 共用同一个 Bodhi 调用预算和同一份答案缓存：
+# --max-bodhi 10 就是最多 10 次调用，不会再被内部悄悄放大到 45 次；候选上限用
+# --backlog-candidates 单独控制
 
 # 6. 看这个镜像还落后多少安全更新
 python3 sbwatch.py backlog latest --max-bodhi 80
@@ -183,19 +199,40 @@ python3 sbwatch.py backlog latest --max-bodhi 80
 | `skip` | 常规 churn，无 CVE，无 security erratum | 可跳过 |
 | `no-change` | **rpmdb 里没有任何软件包发生变化**（且确实读过版本），chunk 只是重发 | 跳过，更新无意义 |
 | `no-update` | registry digest 未变 | 无新构建 |
+| `unknown` | 未读取包版本（`--exact 0`）或无法得出结论 | 需要更多信息，不能据此跳过 |
 
 > `no-change` 的判据是**包集合为空**，不是 `rpmostree.inputhash` 相同——后者继承自
 > Fedora base，相同也不能证明没变化（见上文）。`--exact 0` 未读版本时同样不会给出
-> `no-change`，因为那时"没有包变化"无从证实。
+> `no-change`，因为那时"没有包变化"无从证实；该模式的 `level` 会直接是 `unknown`
+> （详见下面「`--exact 0` 的 verdict 语义」）。
+
+每个级别都会带一句机器可读的 `verdict.level_basis`（英文），说明是什么把级别定下来
+（例如 `the kernel moved`、`a released security erratum ranks 4/4`、
+`secureblue's own notification rule classifies this as major`），
+以及逐包的 `verdict.security_basis`，区分「安全勘误」「对应 Fedora 勘误（归一化匹配）」
+与「更新日志 CVE」。
 
 
 报告里会包含：
 - 下载量：`download_bytes / total_size_b / download_pct`
 - `secureblue_notification`：桌面会弹哪个通知 + 触发原因（见上文）
 - `silent_rebuilds`：版本没变但 chunk 变了（工具链/macro/文件重排）
-- `downgrades` / `cves_dropped`：这次更新回退了已发布修复
+- `downgrades`：这次更新把某个包**降级**了（真证据，会抬高级别）；`cves_dropped`：
+  新版更新日志不再提到的 CVE 编号（通常是日志被编辑，只作提示、不再抬高级别）
 - `backlog`：即使跳过，你仍暴露在多少已发布 stable 安全更新之外
 - `same_inputhash_but_packages_moved`：inputhash 相同但包确实动了（显式告警，别拿 inputhash 当无变化的证据）
+
+### `--exact 0` 的 verdict 语义
+
+manifest-only 模式只读 manifest，**没有任何软件包版本被读过**，所以它可以描述 chunk
+变化与下载量，但不能给出建议：
+
+- `verdict.level` = `unknown`（以前会是 `skip`，报告里显示「可跳过」徽章——一个从未
+  读过任何包版本的运行不该看起来像一条建议）；
+- `verdict.level_basis` 写明原因；headline 保留 chunk 级结论（几个 chunk 变了、多少包
+  落在变化的 chunk 里、要下载多少）；
+- `check` 默认 `--exact 1`；`--fast` 只在两个镜像的 **rpmdb chunk digest 相同** 时才
+  降级为 manifest-only，此时 db 逐字节相同，结论依然成立。
 
 ### `check --fast` 与 manifest-only
 
@@ -219,7 +256,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/test_sbwatch.py` 是 **86 项离线回归测试**，不需要网络、不访问 registry
+`tests/test_sbwatch.py` 是 **114 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -247,6 +284,10 @@ python3 -m unittest discover -s tests      # 或 python3 tests/test_sbwatch.py
 | **F** | **secureblue 通知规则**：severity 以 `<severity>` **子元素**（而非属性）发布；Bodhi 原词先经 `severity_updateinfo_str()` 映射成 RHEL 拼写再进 `str2severity`（`urgent→Critical(4)` 触发 `major`、`medium→Moderate(2)` **不弹**、raw Bodhi 词直接进词表一律为 0）；按 Bodhi 原词全链路对拍 + 11 行真值表与上游 `case` 逐条对拍；trivalent 单独升级 ⟹ `major` 且把 verdict 抬到 `update-now`；kernel 靠**包 diff** 识别（`ostree.linux` 相同也要认出来）；kernel 降级不算升级；仅匹配旧构建或未推送的勘误不得触发 |
 | **G** | **`no-change` 的判据**：inputhash 相同但包动了 ⟹ 不得判 `no-change`；`--exact 0` 未读版本 ⟹ 也不得判 `no-change`、不得声称"rpmdb 中无变化"；措辞不得再出现"逐字节一致"；`rpmdb_chunk()` 的选层规则必须与 `package_list()` 一致（否则快速路径会校验 A 层却读 B 层） |
 | **H** | **报告独立双语排版与决策修正**：报告输出格式改为纯中文在上、`---` 分割、纯英文在下，引入结构化双语处理防止含斜杠说明文本截断；trivalent 将判定从 `consider` 提升至 `update-now` 时剥离冲突的“可合理跳过”文案；`check --fast` 命中相同 rpmdb chunk 时端到端保留无变更确证，正确输出 `no-change` |
+| **I** | **勘误附着语义**：剥离 `.secureblue.N` 后的命中要报告（`advisory_corresponding`），但**不得**计入 `has_security_erratum` / 通知预测；精确命中的严重度照旧驱动 `major`；**新增包**上的安全勘误同样驱动预测 |
+| **J** | **manifest-only 不得给建议**：`--exact 0` 的 `level` 必须是 `unknown`、并给出 `level_basis`；`no-change` 分支不得吞掉后面的 backlog/告警说明；`silent_important` 不再只看前 60 个重建项 |
+| **K** | 静默/致命缺陷：`tag_exists` 只对 404 沉默、其它状态码要告警；backlog 严重度序（`medium` 不得排在 `low` 之后）；Bodhi `nvr=null` 不再崩溃；`coverage_line` 容忍缺键；`group_by_src` 不再要求 `dir`；缺 `ostree.linux` 不再渲染成 `None`；multilib 同名包被记录而非静默丢弃；`read_header` 统计并披露解析失败；报告写入改为原子 |
+| **L** | **CI 供应链**：所有 action 钉到 commit SHA；cosign 公钥入库并校验 sha256（运行时不再联网取钥）；`actions: write` 只给需要的 job；`push` 只触发 main；结论为 `unknown` 的运行不再「绿」 |
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
@@ -265,6 +306,11 @@ CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并�
   见上文「`check --fast` 与 manifest-only」）
 - 若 verdict 不是 `no-update`/`no-change`/`unknown`，会评论到 sticky issue
   `secureblue update watch`
+- **结论为 `unknown` 的运行会失败**（红色）：`unknown` 意味着"没得出结论"
+  （没有可比基线、registry 探测失败等）。过去它和"这周很安静"长得一模一样，
+  监控悄悄失效也发现不了。报告仍会照常上传为 artifact
+- cosign 公钥 `cosign.pub` **入库**并校验 sha256（`COSIGN_PUB_SHA256`），
+  运行时不再从网络取钥；上游换钥会在这里失败，而不是静默改变"已验证"的含义
 - 若配置了 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` secrets，推送到 Telegram
 
 环境变量（workflow_dispatch 输入）：
