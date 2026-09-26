@@ -33,6 +33,9 @@ at the regression it guards:
          multilib collisions, read_header stats, atomic report writes
   L      workflow: every action pinned to a SHA, cosign.pub vendored + hashed,
          write permissions scoped, an inconclusive run is not green
+  M      no silent truncation: every capped list/string states - and counts - what
+         it dropped; a security table elides CVE ids only into a complete listing
+         below it; payload lists (cves/aliases/dropped) are never sliced at all
 """
 import io
 import json
@@ -106,6 +109,73 @@ NSS_UPDATES = {
          "bugs": [], "title": "", "cves": []},
     ],
 }
+
+
+# The live FEDORA-2026-40db9b80a2 bug list (webkitgtk-2.54.0-2.fc44 -> 113 ids).
+# `sorted()` puts the oldest first, so the security table's [:6] used to show the
+# six 2023/2024 leftovers and hide every 2026 id - the report read as "WebKit is
+# patching 2023 CVEs" while 107 current ones were invisible.
+WEBKITGTK_113 = [
+    "CVE-2023-4860", "CVE-2024-7966", "CVE-2024-8193", "CVE-2024-8198",
+    "CVE-2024-8636", "CVE-2024-9123", "CVE-2025-0436", "CVE-2025-0444",
+    "CVE-2026-3538", "CVE-2026-3909", "CVE-2026-3931", "CVE-2026-4460",
+    "CVE-2026-5870", "CVE-2026-6298", "CVE-2026-6364", "CVE-2026-7353",
+    "CVE-2026-7920", "CVE-2026-7923", "CVE-2026-7949", "CVE-2026-8510",
+    "CVE-2026-8579", "CVE-2026-9892", "CVE-2026-9893", "CVE-2026-9909",
+    "CVE-2026-9923", "CVE-2026-9981", "CVE-2026-9983", "CVE-2026-9998",
+    "CVE-2026-10009", "CVE-2026-10011", "CVE-2026-10012", "CVE-2026-10020",
+    "CVE-2026-10925", "CVE-2026-10941", "CVE-2026-10977", "CVE-2026-10985",
+    "CVE-2026-10993", "CVE-2026-11024", "CVE-2026-11039", "CVE-2026-11057",
+    "CVE-2026-11099", "CVE-2026-11121", "CVE-2026-11124", "CVE-2026-11159",
+    "CVE-2026-11663", "CVE-2026-11675", "CVE-2026-13781", "CVE-2026-13820",
+    "CVE-2026-13841", "CVE-2026-13885", "CVE-2026-13971", "CVE-2026-14387",
+    "CVE-2026-14389", "CVE-2026-14410", "CVE-2026-14414", "CVE-2026-14419",
+    "CVE-2026-14427", "CVE-2026-14429", "CVE-2026-15766", "CVE-2026-15774",
+    "CVE-2026-16417", "CVE-2026-17653", "CVE-2026-17702", "CVE-2026-17712",
+    "CVE-2026-17745", "CVE-2026-17757", "CVE-2026-17771", "CVE-2026-17914",
+    "CVE-2026-17992", "CVE-2026-19154", "CVE-2026-19160", "CVE-2026-19161",
+    "CVE-2026-19173", "CVE-2026-19176", "CVE-2026-43804", "CVE-2026-64713",
+    "CVE-2026-64715", "CVE-2026-64728", "CVE-2026-64730", "CVE-2026-64753",
+    "CVE-2026-64757", "CVE-2026-64778", "CVE-2026-64779", "CVE-2026-64780",
+    "CVE-2026-64782", "CVE-2026-64783", "CVE-2026-64784", "CVE-2026-65331",
+    "CVE-2026-65332", "CVE-2026-65333", "CVE-2026-65334", "CVE-2026-65335",
+    "CVE-2026-65336", "CVE-2026-65337", "CVE-2026-65338", "CVE-2026-65340",
+    "CVE-2026-65341", "CVE-2026-65351", "CVE-2026-76041", "CVE-2026-78376",
+    "CVE-2026-78914", "CVE-2026-78958", "CVE-2026-79020", "CVE-2026-79112",
+    "CVE-2026-79144", "CVE-2026-79147", "CVE-2026-83596", "CVE-2026-84359",
+    "CVE-2026-84635", "CVE-2026-85049", "CVE-2026-91733", "CVE-2026-91740",
+    "CVE-2026-91747",
+]
+
+
+def webkitgtk_report():
+    """Render a report for the live webkitgtk case: 2.52.5 -> 2.54.0, one erratum
+    carrying all 113 ids. Returns (markdown, zh_part, en_part, diff)."""
+    old = pkg("webkitgtk", "2.52.5-1.fc44", "webkitgtk",
+              [{"time": 1, "text": "- 2.52.5"}])
+    new = pkg("webkitgtk", "2.54.0-2.fc44", "webkitgtk",
+              [{"time": 2, "text": "- Update to 2.54.0"}])
+    ups = {"webkitgtk": [{"alias": "FEDORA-2026-40db9b80a2", "type": "security",
+                          "severity": "high", "status": "stable",
+                          "nvrs": ["webkitgtk-2.54.0-2.fc44"],
+                          "notes": "WebKit Security fixes. " + " ".join(WEBKITGTK_113),
+                          "bugs": [], "title": "", "cves": []}]}
+    d = S.pkg_diff({"webkitgtk": old}, {"webkitgtk": new})
+    for c in d["changed"]:
+        c["cls"] = S.classify_change(c["old"], c["new"], "F44", FakeBodhi(ups))
+    ld = {"download_bytes": 796 * 1024 * 1024, "total_size_b": 4 * 1024 ** 3,
+          "chunks_changed": 15, "chunks_reused": 113, "chunks_a": 128, "chunks_b": 128,
+          "changed_chunks": [{"size": 1024, "components": ["rpm/webkitgtk"]}],
+          "changed_packages_from_chunks": ["webkitgtk"], "download_pct": 21.0}
+    meta = {"kernel_a": "k", "kernel_b": "k", "inputhash_a": "h", "inputhash_b": "h"}
+    v = S.verdict_of(d, ld, meta, {})
+    ia = {"ref": "a", "digest": "sha256:" + "1" * 64,
+          "annotations": {"rpmostree.inputhash": "h"}}
+    ib = {"ref": "b", "digest": "sha256:" + "2" * 64,
+          "annotations": {"rpmostree.inputhash": "h"}}
+    md = S.render_markdown("s", ia, ib, d, ld, v, [])
+    zh, en = md.split("\n\n---\n\n")
+    return md, zh, en, d
 
 
 # --------------------------------------------------------------------------- #
@@ -501,18 +571,37 @@ class TestBodhiCache(unittest.TestCase):
             b = S.Bodhi(cache_dir=d, max_calls=3)
             cf = b._cf("rpm-F44")
             with open(cf, "w") as fh:
-                json.dump({"total": 1, "truncated": False,
+                json.dump({"cache_version": S.BODHI_CACHE_VERSION, "total": 1,
+                           "truncated": False,
                            "updates": [{"alias": "FEDORA-2026-1"}]}, fh)
             self.assertEqual(b.updates_for_src("rpm", "F44"),
                              [{"alias": "FEDORA-2026-1"}])
             self.assertEqual(b.truncated_src, set())
+
+    def test_cache_without_the_version_marker_is_refetched_not_trusted(self):
+        """v1 caches stored bug titles clipped to 200 chars *before* the CVE ids
+        were extracted from them, so they can be missing CVEs outright. A cache
+        that cannot prove it is v2 must be ignored, not read."""
+        with tempfile.TemporaryDirectory() as d:
+            b = S.Bodhi(cache_dir=d, max_calls=0)      # 0 calls => provably offline
+            cf = b._cf("webkitgtk-F44")
+            payload = [{"alias": "FEDORA-2026-40db9b80a2", "type": "security",
+                        "status": "stable", "severity": "high", "nvrs": [],
+                        "notes": "", "bugs": [], "title": "",
+                        "cves": ["CVE-2023-4860"]}]
+            with open(cf, "w") as fh:
+                json.dump({"total": 1, "truncated": False, "updates": payload}, fh)
+            self.assertIsNone(b._read_cache_entry(cf))
+            self.assertEqual(b.updates_for_src("webkitgtk", "F44"), [])   # not the cache
+            self.assertEqual(b.skipped, 1)             # it went for a refetch instead
 
     def test_truncated_cache_marks_the_source(self):
         with tempfile.TemporaryDirectory() as d:
             b = S.Bodhi(cache_dir=d, max_calls=3)
             cf = b._cf("kernel-F44")
             with open(cf, "w") as fh:
-                json.dump({"total": 999, "truncated": True, "updates": []}, fh)
+                json.dump({"cache_version": S.BODHI_CACHE_VERSION, "total": 999,
+                           "truncated": True, "updates": []}, fh)
             b.updates_for_src("kernel", "F44")
             self.assertEqual(b.truncated_src, {"kernel"})
 
@@ -1637,6 +1726,133 @@ class TestFixesThatUsedToBeSilent(unittest.TestCase):
         new = dict(old, version="2", changelog=[{"time": 5, "who": "a", "text": "- x"}])
         info = S.classify_change(old, new, "F44", None)
         self.assertEqual(info["changelog_scan"]["new_total"], 0)
+
+
+# --------------------------------------------------------------------------- #
+# M - no silent truncation
+# --------------------------------------------------------------------------- #
+class TestNoSilentTruncation(unittest.TestCase):
+    """A cut that is not marked and counted is a lie by omission: the reader
+    cannot tell 2 dropped entries from 200. Every one of these used to be silent."""
+
+    def test_clip_helpers_mark_and_count_what_they_drop(self):
+        self.assertEqual(S.clip_list(["a", "b"], 5), "a, b")
+        self.assertEqual(S.clip_list(["a", "b", "c"], 2), "a, b (+1 more not shown)")
+        self.assertEqual(S.clip_list(range(113), 6, lang="zh", joiner="，"),
+                         "0，1，2，3，4，5（另有 107 个未显示）")
+        self.assertEqual(S.clip_list(["a", "b", "c"], 2, lang="both"),
+                         "a, b (+1 more not shown / 另有 1 个未显示)")
+        self.assertEqual(S.clip_text("short", 90), "short")
+        self.assertIn("(+5 chars not shown)", S.clip_text("x" * 95, 90))
+        self.assertIn("另有 5 个字符未显示", S.clip_text("x" * 95, 90, lang="zh"))
+        self.assertEqual(S.clip_col("short", 15), "short")
+        self.assertEqual(S.clip_col("x" * 40, 15), "x" * 14 + "…")
+        self.assertEqual(S.clip_hash("sha256:" + "a" * 64, 19), "sha256:" + "a" * 12 + "…")
+
+    def test_security_table_says_how_many_cves_it_elided(self):
+        """The reported bug: 113 ids, table showed 6, nothing said the other 107
+        existed (and because sorted() leads with the oldest, they were the 2026 ones)."""
+        md, zh, en, _ = webkitgtk_report()
+        self.assertIn("CVE-2023-4860", md)          # the ids that were shown before
+        self.assertIn("(+107 more not shown)", en)
+        self.assertIn("（另有 107 个未显示）", zh)
+
+    def test_no_cve_is_dropped_from_the_report_anywhere(self):
+        """Not just marked - still present. The elided ids get their own section,
+        so the report never loses one."""
+        md, _, _, _ = webkitgtk_report()
+        for cve in WEBKITGTK_113:
+            self.assertIn(cve, md, f"{cve} is missing from the report")
+        self.assertIn("## CVEs the table above could not fit", md)
+        self.assertIn("113 CVE(s)", md)
+
+    def test_headline_counts_the_cves_and_groups_it_leaves_out(self):
+        md, zh, en, _ = webkitgtk_report()
+        self.assertIn("(+111 more not shown)", en)      # 113 - HEADLINE_CVE_CAP(2)
+        self.assertIn("（另有 111 个未显示）", zh)
+        # and the group cap is stated too when more than 4 source packages moved
+        many = {}
+        for i in range(6):
+            many[f"p{i}"] = (pkg(f"p{i}", "1.0-1.fc44"), pkg(f"p{i}", "1.1-1.fc44", changelog=[
+                {"time": 2, "text": f"Fix CVE-2026-90{i:03d}"}]))
+        pa = {k: v[0] for k, v in many.items()}
+        pb = {k: v[1] for k, v in many.items()}
+        d = S.pkg_diff(pa, pb)
+        for c in d["changed"]:
+            c["cls"] = S.classify_change(c["old"], c["new"], "F44", None)
+        v = S.verdict_of(d, {"download_bytes": 1, "total_size_b": 1, "chunks_changed": 1,
+                             "chunks_reused": 1, "chunks_a": 1, "chunks_b": 1,
+                             "changed_chunks": [], "changed_packages_from_chunks": [],
+                             "download_pct": 1.0},
+                         {"kernel_a": "k", "kernel_b": "k"}, {})
+        self.assertIn("(+2 more not shown)", v["headline"])
+        self.assertIn("（另有 2 个未显示）", v["headline_zh"])
+
+    def test_added_and_removed_lists_disclose_the_remainder(self):
+        pa = {"keep": pkg("keep", "1.0-1.fc44")}
+        pb = {"keep": pkg("keep", "1.0-1.fc44")}
+        for i in range(45):
+            pb[f"new{i}"] = pkg(f"new{i}", "1.0-1.fc44")
+        d = S.pkg_diff(pa, pb)
+        ld = {"download_bytes": 1, "total_size_b": 1, "chunks_changed": 0,
+              "chunks_reused": 1, "chunks_a": 1, "chunks_b": 1, "changed_chunks": [],
+              "changed_packages_from_chunks": [], "download_pct": 0.0}
+        v = S.verdict_of(d, ld, {"kernel_a": "k", "kernel_b": "k"}, {})
+        md = S.render_markdown("s", {"ref": "a", "digest": "sha256:" + "1" * 64,
+                                     "annotations": {"rpmostree.inputhash": "h"}},
+                               {"ref": "b", "digest": "sha256:" + "2" * 64,
+                                "annotations": {"rpmostree.inputhash": "h"}},
+                               d, ld, v, [])
+        zh, en = md.split("\n\n---\n\n")
+        self.assertIn("(+5 more not shown)", en)
+        self.assertIn("（另有 5 个未显示）", zh)
+
+    def test_backlog_table_discloses_hidden_rows(self):
+        rows = [{"name": f"pkg{i}", "have": "1-1", "want": "1-2",
+                 "severity": "high", "alias": f"FEDORA-2026-{i}"} for i in range(30)]
+        pa = {"a": pkg("a", "1.0-1.fc44")}
+        pb = {"a": pkg("a", "1.1-1.fc44")}
+        d = S.pkg_diff(pa, pb)
+        for c in d["changed"]:
+            c["cls"] = S.classify_change(c["old"], c["new"], "F44", None)
+        ld = {"download_bytes": 1, "total_size_b": 1, "chunks_changed": 1,
+              "chunks_reused": 1, "chunks_a": 1, "chunks_b": 1,
+              "changed_chunks": [], "changed_packages_from_chunks": [], "download_pct": 1.0}
+        v = S.verdict_of(d, ld, {"kernel_a": "k", "kernel_b": "k"}, {})
+        md = S.render_markdown("s", {"ref": "a", "digest": "sha256:" + "1" * 64,
+                                     "annotations": {"rpmostree.inputhash": "h"}},
+                               {"ref": "b", "digest": "sha256:" + "2" * 64,
+                                "annotations": {"rpmostree.inputhash": "h"}},
+                               d, ld, v, [], backlog=rows)
+        self.assertIn("the JSON output always carries all 30", md)
+        self.assertIn("另有 5 行未显示", md)
+
+    def test_no_join_of_a_sliced_list_is_left_unmarked(self):
+        """Source tripwire: the exact shape of the reported bug was
+        `", ".join(g["cves"][:6])` - a join over a sliced list with no marker."""
+        path = os.path.join(os.path.dirname(HERE), "sbwatch.py")
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+        for i, line in enumerate(lines):
+            if "join(" not in line or not re.search(r"\[:\s*\d+\]", line):
+                continue
+            window = line + (lines[i + 1] if i + 1 < len(lines) else "")
+            self.assertTrue(
+                re.search(r"另|more|\+\{|…|\+\d", window),
+                f"sbwatch.py:{i+1} joins a sliced list without saying what it cut: "
+                f"{line.strip()}")
+
+    def test_payload_lists_are_never_sliced(self):
+        """cves / aliases / dropped / security_pkgs are the payload a reader acts
+        on; every one of these slices was silent, so there must be none left."""
+        path = os.path.join(os.path.dirname(HERE), "sbwatch.py")
+        with open(path, encoding="utf-8") as fh:
+            src = fh.read()
+        for name in ("cves", "aliases", "dropped", "security_pkgs", "cves_dropped",
+                     "added_packages_with_advisories"):
+            self.assertIsNone(
+                re.search(r'\["' + name + r'"\]\s*\[:', src),
+                f'["{name}"][:...] is back: slice it through clip_list() instead')
 
 
 # --------------------------------------------------------------------------- #

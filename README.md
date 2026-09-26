@@ -214,6 +214,8 @@ python3 sbwatch.py backlog latest --max-bodhi 80
 
 
 报告里会包含：
+- **截断披露**：任何被砍掉的列表/文本都会写明「另有 N 个未显示」；安全表的 CVE 列超长时，
+  紧随其后的小节会列出**全部**编号；`--json-out` 与 GITHUB_OUTPUT 始终是完整数据（另附计数）
 - 下载量：`download_bytes / total_size_b / download_pct`
 - `secureblue_notification`：桌面会弹哪个通知 + 触发原因（见上文）
 - `silent_rebuilds`：版本没变但 chunk 变了（工具链/macro/文件重排）
@@ -256,7 +258,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/test_sbwatch.py` 是 **114 项离线回归测试**，不需要网络、不访问 registry
+`tests/test_sbwatch.py` 是 **123 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -288,6 +290,7 @@ python3 -m unittest discover -s tests      # 或 python3 tests/test_sbwatch.py
 | **J** | **manifest-only 不得给建议**：`--exact 0` 的 `level` 必须是 `unknown`、并给出 `level_basis`；`no-change` 分支不得吞掉后面的 backlog/告警说明；`silent_important` 不再只看前 60 个重建项 |
 | **K** | 静默/致命缺陷：`tag_exists` 只对 404 沉默、其它状态码要告警；backlog 严重度序（`medium` 不得排在 `low` 之后）；Bodhi `nvr=null` 不再崩溃；`coverage_line` 容忍缺键；`group_by_src` 不再要求 `dir`；缺 `ostree.linux` 不再渲染成 `None`；multilib 同名包被记录而非静默丢弃；`read_header` 统计并披露解析失败；报告写入改为原子 |
 | **L** | **CI 供应链**：所有 action 钉到 commit SHA；cosign 公钥入库并校验 sha256（运行时不再联网取钥）；`actions: write` 只给需要的 job；`push` 只触发 main；结论为 `unknown` 的运行不再「绿」 |
+| **M** | **不得静默截断**：每一处「砍掉一部分」的渲染都必须写明并给出被省略的数量（headline 的源码包/CVE、安全表 CVE 列、已拥有/未推送勘误、增删包列表、backlog 行、chunk 列表、CLI 各列…）；安全表放不下的 CVE 必须有**完整清单**小节，一条不丢；`cves`/`aliases`/`dropped`/`security_pkgs` 等载荷列表**禁止**直接切片；Bodhi 缓存中用于提取 CVE 的 `title`/`notes` 不得先截断（v1 缓存会因此丢 CVE，读到旧格式必须重取）；GITHUB_OUTPUT 输出完整内容并附计数 |
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
