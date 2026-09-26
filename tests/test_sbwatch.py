@@ -19,14 +19,25 @@ at the regression it guards:
   B1     Bodhi cache poisoning / CVEs that only live in bugs[].title
   C1     backlog coverage must be reported; pool entries must be real source names
   C2     backlog matching: source-NVR builds, epoch blindness, release marker
-  D      dead code must stay dead (incl. Bodhi._read_cache, Registry.__enter__)
+  D      dead code must stay dead (incl. Bodhi._read_cache, Registry.__enter__, ICON)
   E3     state writes are atomic
   E6     pkg_diff: epoch-only changes must be visible
   E7     pick_tar_member: largest match wins, tar order must not matter
+  I      advisory attachment: an erratum matched only after stripping
+         `.secureblue.N` is reported but never drives the notification prediction;
+         advisories on *added* packages do
+  J      manifest-only (--exact 0) runs answer `unknown`, never a recommendation;
+         level_basis is machine-readable; no-change keeps its late annotations
+  K      silent/fatal failures: tag probes, backlog severity order, null Bodhi
+         nvr, coverage_line, dir-less change entries, missing kernel annotation,
+         multilib collisions, read_header stats, atomic report writes
+  L      workflow: every action pinned to a SHA, cosign.pub vendored + hashed,
+         write permissions scoped, an inconclusive run is not green
 """
 import io
 import json
 import os
+import re
 import sys
 import tarfile
 import tempfile
@@ -704,6 +715,10 @@ class TestDeadCodeRemoved(unittest.TestCase):
         self.assertNotIn(1006, S.RPMTAG)
         self.assertEqual(S.RPMTAG[1007], "buildhost")
 
+    def test_merged_icon_dict_is_gone(self):
+        # ICON was a merged-bilingual fallback that ICON_ZH/ICON_EN made unreachable
+        self.assertFalse(hasattr(S, "ICON"))
+
     def test_group_by_src_has_no_dead_field(self):
         g = S.group_by_src([{"name": "a", "src": "a", "dir": "upgrade",
                              "old": pkg("a", "1-1"), "new": pkg("a", "1-2"),
@@ -1343,3 +1358,320 @@ class TestRebuildNotCountedAsUpgraded(unittest.TestCase):
         n = S.secureblue_notification(d)
         self.assertFalse(n["kernel_updated"])
 
+
+
+# --------------------------------------------------------------------------- #
+# I - secureblue's kernel is a rebuild of Fedora's, and rpm-ostree never attaches
+#     Fedora's advisory to it. Everything below locks down that distinction.
+# --------------------------------------------------------------------------- #
+SEC_UPD = {"alias": "FEDORA-2026-abcd", "type": "security", "severity": "urgent",
+           "status": "stable", "title": "kernel: important fix",
+           "notes": "Fixes CVE-2026-1111", "date_approved": "2026-09-20",
+           "date_stable": "2026-09-21", "bugs": [],
+           "nvrs": ["kernel-7.2.8-200.fc44"]}
+
+
+def _upd_for(nvr, sev="urgent", status="stable", alias="FEDORA-2026-abcd"):
+    return dict(SEC_UPD, alias=alias, severity=sev, status=status, nvrs=[nvr])
+
+
+class TestAdvisoryAttachment(unittest.TestCase):
+    """has_security_erratum must mean exactly what rpm-ostree's HY_EQ means."""
+
+    def test_secureblue_release_erratum_is_corresponding_not_attached(self):
+        # secureblue's kernel really is a rebuild of Fedora's build, and Fedora
+        # publishes an erratum for that build - but pool_evrcmp() compares the
+        # release strings too, so rpm-ostree attaches nothing to this package.
+        new = pkg("kernel", "7.2.8-200.secureblue.1.fc44")
+        info = S.classify_change(None, new, "F44", FakeBodhi({"kernel": [SEC_UPD]}))
+        self.assertTrue(info["security"])              # the fix content is real
+        self.assertTrue(info["advisory_corresponding"])
+        self.assertFalse(info["has_security_erratum"])  # but not an advisory of this build
+        self.assertEqual(info["erratum"]["matched_nvr"], "kernel-7.2.8-200.fc44")
+
+    def test_exact_release_is_attached(self):
+        new = pkg("kernel", "7.2.8-200.fc44")
+        info = S.classify_change(None, new, "F44", FakeBodhi({"kernel": [SEC_UPD]}))
+        self.assertTrue(info["has_security_erratum"])
+        self.assertFalse(info["advisory_corresponding"])
+        self.assertEqual(info["erratum_severity"], "Critical")
+
+    def test_corresponding_erratum_cannot_forge_a_major_notification(self):
+        new = pkg("kernel", "7.2.8-200.secureblue.1.fc44")
+        old = pkg("kernel", "7.2.7-200.secureblue.1.fc44")
+        c = {"name": "kernel", "old": old, "new": new, "src": "kernel", "dir": "upgrade",
+             "cls": S.classify_change(old, new, "F44", FakeBodhi({"kernel": [SEC_UPD]}))}
+        groups = S.group_by_src([c])
+        sbn = S.secureblue_notification({"changed": [c]}, groups)
+        # kernel really moved, so a NORMAL notification is expected - but the
+        # Critical severity (which rpm-ostree would never see) must not turn it
+        # into a MAJOR one.
+        self.assertEqual(sbn["level"], "normal")
+        self.assertEqual(sbn["max_advisory_severity"], "none")
+        self.assertEqual(sbn["security_advisory_count"], 0)
+
+    def test_exact_erratum_still_forges_the_major_notification(self):
+        new, old = pkg("curl", "8.1-1.fc44"), pkg("curl", "8.0-1.fc44")
+        ups = [_upd_for("curl-8.1-1.fc44")]
+        c = {"name": "curl", "old": old, "new": new, "src": "curl", "dir": "upgrade",
+             "cls": S.classify_change(old, new, "F44", FakeBodhi({"curl": ups}))}
+        sbn = S.secureblue_notification({"changed": [c]}, S.group_by_src([c]))
+        self.assertEqual(sbn["level"], "major")
+        self.assertEqual(sbn["max_advisory_severity"], "critical")
+
+    def test_added_package_advisory_also_drives_the_prediction(self):
+        # rpmostree_advisories_variant() sees every package that is *new* in the
+        # deployment, including added ones - predicting "none" here was wrong.
+        new = pkg("cups", "2.4.16-1.fc44")
+        added_cls = {"cups": S.classify_change(None, new, "F44",
+                                               FakeBodhi({"cups": [_upd_for("cups-2.4.16-1.fc44")]}))}
+        diff = {"added": ["cups"], "removed": [], "changed": []}
+        sbn = S.secureblue_notification(diff, [], added_cls)
+        self.assertEqual(sbn["level"], "major")
+        self.assertEqual(sbn["added_packages_with_advisories"], ["cups"])
+
+
+# --------------------------------------------------------------------------- #
+# J - verdict plumbing: a mode that read nothing must not recommend anything
+# --------------------------------------------------------------------------- #
+LD_SMALL = {"download_bytes": 900 * 1024 * 1024, "total_size_b": 4 * 1024 ** 3,
+            "chunks_a": 130, "chunks_b": 132, "chunks_changed": 40, "chunks_reused": 92,
+            "changed_chunks": [], "changed_packages_from_chunks": [f"p{i}" for i in range(241)]}
+DIFF_MANIFEST_ONLY = {"added": [], "removed": [], "downgrades": [], "changed": [],
+                      "count_a": "?", "count_b": "?", "same_rpmdb": False}
+
+
+class TestManifestOnlyVerdict(unittest.TestCase):
+    def test_level_is_unknown_not_skip(self):
+        xc = S.crosscheck_chunks(LD_SMALL, DIFF_MANIFEST_ONLY, versions_known=False)
+        v = S.verdict_of(DIFF_MANIFEST_ONLY, LD_SMALL, {"kernel_a": "7.2.6", "kernel_b": "7.2.6"}, xc)
+        # verdict_of itself still says "skip": it was handed an empty package diff and
+        # has no way to know why. do_diff knows, and downgrades it.
+        self.assertEqual(v["level"], "skip")
+        v = S.degrade_manifest_only_verdict(v, LD_SMALL)
+        self.assertEqual(v["level"], "unknown")
+        self.assertIn("241", v["headline"])
+        self.assertIn("NOT read", v["headline"])
+        self.assertIn("未读取", v["headline_zh"])
+        self.assertIn("--exact 0", v["level_basis"])
+
+    def test_level_basis_is_machine_readable_for_every_regular_level(self):
+        base = {"added": [], "removed": [], "downgrades": [], "changed": []}
+        meta = {"kernel_a": "1", "kernel_b": "1"}
+        v = S.verdict_of(dict(base, count_a=1, count_b=1), LD_FIX, meta,
+                         S.crosscheck_chunks(LD_FIX, base, {}))
+        self.assertEqual(v["level"], "no-change")
+        self.assertIn("no package", v["level_basis"])
+
+    def test_no_change_still_carries_the_backlog_note(self):
+        # The no-change branch used to `return` before everything below it ran, so
+        # the backlog note (and every other late annotation) vanished.
+        base = {"added": [], "removed": [], "downgrades": [], "changed": []}
+        backlog = [{"name": "openssl", "severity": "important", "want": "3.1-2",
+                    "have": "3.1-1", "src": "openssl", "alias": "FEDORA-2026-x", "cves": []}]
+        v = S.verdict_of(dict(base, count_a=1, count_b=1), LD_FIX,
+                         {"kernel_a": "1", "kernel_b": "1"},
+                         S.crosscheck_chunks(LD_FIX, base, {}), backlog)
+        self.assertEqual(v["level"], "no-change")          # backlog must not raise it
+        self.assertIn("still misses 1 published stable", v["headline"])
+
+    def test_silent_rebuild_scan_is_not_capped_at_60(self):
+        silent = [(f"pkg{i:03d}", 1000) for i in range(70)] + [("kernel", 5)]
+        xc = {"silent_rebuilds": silent, "non_package_bytes": 0, "versions_known": True}
+        d = {"added": [], "removed": [], "downgrades": [], "changed": [],
+             "count_a": 5, "count_b": 5}
+        v = S.verdict_of(d, LD_FIX, {"kernel_a": "1", "kernel_b": "1"}, xc)
+        self.assertIn("kernel", v["silent_important"])
+
+
+# --------------------------------------------------------------------------- #
+# K - smaller failures that used to be silent or fatal
+# --------------------------------------------------------------------------- #
+class _BoomRegistry:
+    """Registry whose only manifest probe raises what _open() would raise."""
+
+    def __init__(self, code):
+        self.code = code
+
+    def _open(self, path, accept):
+        raise S.RegistryError("boom", http_code=self.code)
+
+
+class TestFixesThatUsedToBeSilent(unittest.TestCase):
+    def test_tag_exists_is_quiet_for_404_only(self):
+        self.assertIsNone(S.tag_exists(_BoomRegistry(404), "20260913"))
+        warn = []
+        self.assertIsNone(S.tag_exists(_BoomRegistry(503), "20260914", warn=warn))
+        self.assertEqual(len(warn), 1)
+        self.assertIn("503", warn[0])
+        self.assertIn("20260914", warn[0])
+        warn = []
+        self.assertIsNone(S.tag_exists(_BoomRegistry(None), "20260915", warn=warn))
+        self.assertIn("network error", warn[0])
+
+    def test_backlog_severity_order_places_medium_above_low(self):
+        class B:
+            failed = 0
+            skipped = 0
+
+            def updates_for_src(self, src, rel):
+                sev = {"kernel": "low", "glibc": "medium"}[src]
+                return [dict(SEC_UPD, severity=sev, nvrs=[f"{src}-2.0-1.fc44"])]
+
+        pkgs = {"kernel": pkg("kernel", "1.0-1.fc44"), "glibc": pkg("glibc", "1.0-1.fc44")}
+        rows, _ = S.security_backlog(pkgs, "F44", B(), limit=5)
+        # "medium" is Bodhi's own word; the table used to know only "moderate", so
+        # a medium erratum sorted below low (rank 0 < 1).
+        self.assertEqual([r["name"] for r in rows], ["glibc", "kernel"])
+
+    def test_null_bodhi_build_nvr_is_skipped(self):
+        class B:
+            failed = 0
+            skipped = 0
+
+            def updates_for_src(self, src, rel):
+                return [dict(SEC_UPD, nvrs=[None, "kernel-2.0-1.fc44"])]
+
+        rows, _ = S.security_backlog({"kernel": pkg("kernel", "1.0-1.fc44")}, "F44", B(), limit=3)
+        self.assertEqual([r["want"] for r in rows], ["2.0-1.fc44"])
+
+    def test_coverage_line_tolerates_the_dict_do_diff_actually_builds(self):
+        # do_diff initialises coverage without skipped_names; coverage_line used to
+        # KeyError on it the moment anything was truncated.
+        cov = {"candidates": 9, "checked": 3, "skipped": 6, "failed": 0,
+               "pool_missing": [], "pool_size": 0}
+        self.assertIn("6", str(S.coverage_line(cov)))
+
+    def test_group_by_src_accepts_entries_without_dir(self):
+        g = S.group_by_src([{"name": "foo", "src": "foo", "cls": {},
+                             "old": {"evr": "1-1"}, "new": {"evr": "2-1"}}])
+        self.assertEqual(g[0]["src"], "foo")
+        self.assertFalse(g[0]["downgrade"])
+
+    def test_missing_kernel_annotation_is_not_rendered_as_None(self):
+        d = {"added": [], "removed": [], "downgrades": [],
+             "changed": [{"name": "curl", "src": "curl", "dir": "upgrade",
+                          "old": {"evr": "8.0-1"}, "new": {"evr": "8.1-1"}}],
+             "count_a": 5, "count_b": 5}
+        v = S.verdict_of(d, LD_FIX, {"kernel_a": "7.2.6-200.fc44.x86_64", "kernel_b": None},
+                         S.crosscheck_chunks(LD_FIX, d, {"curl": "curl"}))
+        self.assertNotIn("None", v["headline"])
+        self.assertIn("→ ?", v["headline"])
+
+    def test_multilib_collision_is_recorded_not_dropped(self):
+        pkgs = S.PackageTable()
+        S.table_put(pkgs, {"name": "foo", "arch": "i686", "evr": "1-1", "version": "1",
+                           "release": "1", "epoch": ""})
+        S.table_put(pkgs, {"name": "foo", "arch": "x86_64", "evr": "2-1", "version": "2",
+                           "release": "1", "epoch": ""})
+        self.assertEqual(pkgs["foo"]["arch"], "x86_64")
+        self.assertEqual(len(pkgs.collisions), 1)
+        self.assertEqual(pkgs.collisions[0]["shadowed_arch"], "i686")
+
+    def test_read_header_reports_what_it_could_not_parse(self):
+        import struct as _struct
+        stats = {}
+        # size fields that cannot add up
+        self.assertEqual(S.read_header(_struct.pack(">II", 4, 4096), stats), {})
+        self.assertEqual(stats["headers_rejected"], 1)
+        # a string field with no NUL terminator
+        hdr = _struct.pack(">II", 1, 3) + _struct.pack(">IIII", 1000, 6, 0, 1) + b"abc"
+        stats = {}
+        self.assertEqual(S.read_header(hdr, stats), {})
+        self.assertEqual(stats.get("fields_skipped"), 1)
+
+    def test_atomic_write_text_leaves_no_partial_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "report.md")
+            S._atomic_write_text(path, "hello\n")
+            self.assertEqual(open(path).read(), "hello\n")
+            self.assertEqual([f for f in os.listdir(d) if "tmp" in f], [])
+
+    def test_bodhi_unavailable_is_not_blamed_on_no_bodhi(self):
+        d = {"added": [], "removed": [], "downgrades": [], "changed": [],
+             "count_a": 5, "count_b": 5}
+        v = S.verdict_of(d, LD_FIX, {"kernel_a": "1", "kernel_b": "1"},
+                         S.crosscheck_chunks(LD_FIX, d, {}), None, {"unavailable": 1})
+        self.assertIn("no Fedora release", v["headline"])
+        self.assertNotIn("--no-bodhi", v["headline"])
+
+    def test_downgrade_alone_raises_the_level(self):
+        d = {"added": [], "removed": [], "downgrades": [{"name": "foo"}],
+             "changed": [{"name": "foo", "src": "foo", "dir": "downgrade",
+                          "old": {"evr": "2-1"}, "new": {"evr": "1-1"}}],
+             "count_a": 5, "count_b": 5}
+        v = S.verdict_of(d, LD_FIX, {"kernel_a": "1", "kernel_b": "1"},
+                         S.crosscheck_chunks(LD_FIX, d, {"foo": "foo"}))
+        self.assertEqual(v["level"], "consider")
+
+    def test_changelog_cves_dropped_no_longer_escalates(self):
+        d = {"added": [], "removed": [], "downgrades": [],
+             "changed": [{"name": "foo", "src": "foo", "dir": "upgrade",
+                          "old": {"evr": "1-1"}, "new": {"evr": "2-1"},
+                          "cls": {"cves": [], "cves_dropped": ["CVE-2019-0001"],
+                                  "security": False, "important_src": False,
+                                  "has_security_erratum": False, "aliases": [],
+                                  "already_had": [], "not_pushed": [], "why": [],
+                                  "erratum": None, "erratum_severity": "", "sev_rank": 0}}],
+             "count_a": 5, "count_b": 5}
+        v = S.verdict_of(d, LD_FIX, {"kernel_a": "1", "kernel_b": "1"},
+                         S.crosscheck_chunks(LD_FIX, d, {"foo": "foo"}))
+        self.assertEqual(v["level"], "skip")
+        self.assertIn("changelog", v["headline"])
+        self.assertIn("CVE-2019-0001", v["headline"])
+
+    def test_changelog_diff_sees_entries_added_in_the_same_second(self):
+        old = {"name": "foo", "src": "foo", "version": "1", "release": "1", "epoch": "",
+               "changelog": [{"time": 1000, "who": "a", "text": "- fix CVE-2020-0001"}]}
+        new = dict(old, version="2", changelog=[
+            {"time": 1000, "who": "a", "text": "- fix CVE-2020-0001"},
+            {"time": 1000, "who": "a", "text": "- Fix CVE-2026-9999"}])
+        info = S.classify_change(old, new, "F44", None)
+        # keyed by timestamp alone, the second entry was "already there"
+        self.assertEqual(info["changelog_scan"]["new_total"], 1)
+        self.assertEqual(info["cves"], ["CVE-2026-9999"])
+
+    def test_duplicate_identical_entries_are_not_counted_as_new(self):
+        old = {"name": "foo", "src": "foo", "version": "1", "release": "1", "epoch": "",
+               "changelog": [{"time": 5, "who": "a", "text": "- x"}]}
+        new = dict(old, version="2", changelog=[{"time": 5, "who": "a", "text": "- x"}])
+        info = S.classify_change(old, new, "F44", None)
+        self.assertEqual(info["changelog_scan"]["new_total"], 0)
+
+
+# --------------------------------------------------------------------------- #
+# L - the workflow's own supply chain
+# --------------------------------------------------------------------------- #
+class TestWorkflowHygiene(unittest.TestCase):
+    REPO = os.path.dirname(HERE)
+
+    def _workflow(self):
+        return open(os.path.join(self.REPO, ".github", "workflows", "sbwatch.yml")).read()
+
+    def test_every_action_is_pinned_to_a_commit_sha(self):
+        wf = self._workflow()
+        uses = re.findall(r"uses:\s*(\S+)", wf)
+        self.assertTrue(uses)
+        for u in uses:
+            self.assertRegex(u, r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$",
+                             f"{u} is not pinned to a 40-hex commit")
+
+    def test_cosign_pub_is_vendored_and_its_hash_is_enforced(self):
+        wf = self._workflow()
+        with open(os.path.join(self.REPO, "cosign.pub"), "rb") as fh:
+            digest = __import__("hashlib").sha256(fh.read()).hexdigest()
+        self.assertIn(digest, wf)
+        # the key must not be fetched at run time any more
+        self.assertNotIn("curl -fsSL -o cosign.pub", wf)
+
+    def test_write_permissions_are_scoped_to_the_watch_job(self):
+        wf = self._workflow()
+        self.assertIn("permissions:\n  contents: read\n", wf)
+        head = wf.split("jobs:")[0]
+        self.assertNotIn("actions: write", head)
+        self.assertNotIn("issues: write", head)
+
+    def test_an_inconclusive_run_is_not_green(self):
+        wf = self._workflow()
+        self.assertIn("steps.check.outputs.verdict == 'unknown'", wf)
+        self.assertIn("exit 1", wf)
