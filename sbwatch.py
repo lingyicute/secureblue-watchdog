@@ -89,6 +89,18 @@ MAX_TAR_FILE_SIZE = 256 * 1024 * 1024       # 256 MiB single file inside tar
 BODHI_PAGE_SIZE = 100                       # Bodhi's max rows_per_page
 MAX_BODHI_PAGES = 10                        # 1000 errata/src is far beyond any real case
 NEW_LOG_CAP = 40    # changelog entries (new in this build) scanned for CVE mentions
+# Display caps. These are the only places allowed to shorten a rendered list, and
+# each one must go through clip_list()/clip_text() so the loss is stated and
+# counted. The full data always survives in the JSON outputs.
+HEADLINE_GROUP_CAP = 4   # source packages named in the verdict headline
+HEADLINE_CVE_CAP = 2     # CVE ids named per source package in the headline
+CVE_CELL_CAP = 6         # CVE ids per row in the security table (rest listed in full below)
+EV_CELL_CAP = 190        # characters of evidence per row in the security table
+WHY_CAP = 160            # characters of evidence per row in the sensitive-bump table
+PKG_LIST_CAP = 40        # package names per line in the package-set-change section
+BODHI_CACHE_VERSION = 2  # v1 clipped bug titles (200) and notes (1500) BEFORE
+#                          extracting CVE ids from them, so a v1 cache can be
+#                          missing CVEs. A cache without this marker is refetched.
 OLD_LOG_CAP = 40    # changelog entries (dropped by this build) scanned for lost fixes
 TAG_LIST_RETRIES = 4                        # ghcr is flaky on tags/list pagination
 MANIFEST_ACCEPT = ",".join([
@@ -160,6 +172,63 @@ def human(nbytes) -> str:
             return f"{n:.1f} {unit}"
         n /= 1024.0
     return f"{n:.1f} TiB"
+
+
+# --------------------------------------------------------------------------- #
+# Truncation disclosure / 截断披露
+# --------------------------------------------------------------------------- #
+# Every cut is marked AND counted. A silent cut is how an erratum carrying 113
+# CVEs read as one carrying 6 (sorted() puts the oldest ids first, so the six
+# shown were 2023/2024 leftovers while 107 ids - every 2026 one - vanished), and
+# how a bare "…" left the reader unable to tell 2 dropped entries from 200.
+# Nothing here may shorten output without saying how much it dropped.
+def _more_marker(extra: int, lang: str) -> str:
+    if lang == "zh":
+        return f"（另有 {extra} 个未显示）"
+    if lang == "both":                     # a string shown in both halves at once
+        return f" (+{extra} more not shown / 另有 {extra} 个未显示)"
+    return f" (+{extra} more not shown)"
+
+
+def clip_list(items, n: int, *, lang: str = "en", joiner: str = ", ",
+              render=None) -> str:
+    """Join at most `n` items, then state exactly how many were left out."""
+    items = list(items)
+    shown = [render(x) if render else str(x) for x in items[:n]]
+    extra = len(items) - len(shown)
+    body = joiner.join(shown)
+    return body + _more_marker(extra, lang) if extra > 0 else body
+
+
+def clip_text(s, n: int, *, lang: str = "en") -> str:
+    """Keep the first `n` characters and say how many characters were dropped."""
+    s = "" if s is None else str(s)
+    if len(s) <= n:
+        return s
+    dropped = len(s) - n
+    tail = (f"…（另有 {dropped} 个字符未显示）" if lang == "zh"
+            else f"… (+{dropped} chars not shown)")
+    return s[:n] + tail
+
+
+def clip_col(s, n: int) -> str:
+    """Fixed-width column clip: marks the cut so a clipped cell is never read as
+    a complete value."""
+    s = "" if s is None else str(s)
+    return s if len(s) <= n else s[:max(1, n - 1)] + "…"
+
+
+def clip_hash(s, n: int) -> str:
+    """Shorten a digest/identifier to `n` chars, always marked as truncated."""
+    s = str(s or "")
+    return s if len(s) <= n else s[:n] + "…"
+
+
+def ts_short(s) -> str:
+    """Timestamp to whole seconds. Fractional seconds carry nothing the report
+    compares on (builds are identified by digest), so only they are dropped -
+    everything else is kept, and no marker is needed for that one loss."""
+    return str(s or "")[:19]
 
 
 def _safe_read_limited(resp, limit: int) -> bytes:
@@ -274,9 +343,9 @@ def verify_cosign_image(full_ref: str, pubkey_path: str, require: bool = False) 
                   f"  cosign 校验成功：{full_ref}"))
             return True
         else:
-            err = (res.stderr or res.stdout)[:500]
-            msg = T(f"cosign verify FAILED for {full_ref}: {err}",
-                    f"cosign 校验失败：{full_ref}：{err}")
+            raw = res.stderr or res.stdout
+            msg = T(f"cosign verify FAILED for {full_ref}: {clip_text(raw, 500)}",
+                    f"cosign 校验失败：{full_ref}：{clip_text(raw, 500, lang='zh')}")
             if require:
                 raise SystemExit(msg)
             log(f"  ! {msg}")
@@ -615,6 +684,8 @@ class Registry:
             ann.update(dict((cfg.get("config") or {}).get("Labels") or {}))
         out["config"] = cfg
         out["annotations"] = ann
+        # RFC3339 with nanoseconds -> whole seconds + zone. Only the fractional
+        # part goes, and nothing downstream compares finer than a second.
         out["created"] = (cfg.get("created") or ann.get("org.opencontainers.image.created")
                           or "")[:20]
         out["layers"] = []
@@ -634,7 +705,7 @@ class Registry:
         Nothing is ever held fully in memory: a chunk is read, decompressed and
         written 1 MiB at a time, and either cap aborts as soon as it is crossed.
         """
-        d = digest[:19]
+        d = clip_hash(digest, 19)
         with self._open(f"blobs/{digest}", "application/octet-stream") as r:
             cl = r.headers.get("Content-Length")
             if cl and cl.isdigit() and int(cl) > MAX_BLOB_BYTES:
@@ -671,7 +742,7 @@ class Registry:
         The tar is walked lazily, so MAX_TAR_MEMBERS is enforced *while* parsing
         instead of after every member object has already been built in memory.
         """
-        d = layer["digest"][:19]
+        d = clip_hash(layer["digest"], 19)
         tmp = self._tmpdir()
         blob_path = os.path.join(tmp, re.sub(r"\W+", "_", layer["digest"]) + ".blob")
         self.fetch_blob(layer["digest"], blob_path)
@@ -981,6 +1052,11 @@ class Bodhi:
             if isinstance(data, list):
                 return {"total": None, "truncated": False, "updates": data}
             if isinstance(data, dict) and isinstance(data.get("updates"), list):
+                # A cache written before BODHI_CACHE_VERSION carried clipped bug
+                # titles / notes, i.e. it can be missing CVE ids. Refetching costs
+                # one request; trusting it costs a wrong verdict.
+                if data.get("cache_version") != BODHI_CACHE_VERSION:
+                    return None
                 return data
             return None
         except Exception as e:
@@ -1043,14 +1119,19 @@ class Bodhi:
                 # Bodhi's /updates/ payload has NO "cves" key (verified against the
                 # live API); CVE ids live in the notes text and in bugs[].title,
                 # e.g. "CVE-2026-2673 openssl: TLS 1.3 server may choose ...".
+                # Neither field is clipped: Bodhi's payload has no "cves" key,
+                # so these ARE the CVE source, and a 200-character title cap
+                # silently dropped ids from any longer one (Fedora's webkitgtk
+                # errata carry 113 of them). Display-side clipping is marked and
+                # counted instead - see clip_text()/clip_list().
                 bugs = [{"bug_id": bg.get("bug_id"),
-                         "title": (bg.get("title") or "")[:200],
+                         "title": bg.get("title") or "",
                          "security": bool(bg.get("security"))}
                         for bg in (u.get("bugs") or []) if isinstance(bg, dict)]
                 res.append({
                     "alias": u.get("alias"), "type": u.get("type"),
                     "severity": u.get("severity"), "status": u.get("status"),
-                    "title": u.get("title"), "notes": (u.get("notes") or "")[:1500],
+                    "title": u.get("title"), "notes": u.get("notes") or "",
                     "cves": sorted(set(CVE_RE.findall(u.get("notes") or ""))
                                    | {m for bg in bugs
                                       for m in CVE_RE.findall(bg["title"])}),
@@ -1075,7 +1156,8 @@ class Bodhi:
             self.truncated_src.add(src)
         # never cache a failed query: an empty answer would blind later runs
         if cf and ok:
-            _atomic_write_json(cf, {"total": total, "truncated": truncated,
+            _atomic_write_json(cf, {"cache_version": BODHI_CACHE_VERSION,
+                                    "total": total, "truncated": truncated,
                                     "updates": res})
         self._mem[key] = {"total": total, "truncated": truncated, "updates": res}
         return res
@@ -1198,7 +1280,8 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
         add_cves(c["text"])
         if SEC_WORDS_RE.search(c["text"] or ""):
             first = (c["text"] or "").strip().splitlines()
-            info["why"].append("changelog/更新日志: " + (first[0][:90] if first else ""))
+            info["why"].append("changelog/更新日志: "
+                               + (clip_text(first[0], 90, lang="both") if first else ""))
     # fixes that the new image *loses* (downgrade / rebuild without the patch)
     dropped_entries = _missing_entries(old_log, new_log)
     for c in dropped_entries[:OLD_LOG_CAP]:
@@ -1210,9 +1293,11 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
     }
     if info["cves"]:
         info["security"] = True
-        info["why"].insert(0, "changelog CVEs/更新日志中的 CVE: " + ", ".join(sorted(info["cves"])[:8]))
+        info["why"].insert(0, "changelog CVEs/更新日志中的 CVE: "
+                           + clip_list(sorted(info["cves"]), 8, lang="both"))
     if info["cves_dropped"]:
-        info["why"].insert(0, "DROPS fixes/丢失的修复: " + ", ".join(sorted(info["cves_dropped"])[:8]))
+        info["why"].insert(0, "DROPS fixes/丢失的修复: "
+                           + clip_list(sorted(info["cves_dropped"]), 8, lang="both"))
 
     # (b) the Fedora erratum that shipped the new build
     exact_new, norm_new = nvr_candidates_split(new)
@@ -1267,7 +1352,8 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                                "approved": u.get("date_approved"),
                                "attached": attached,
                                "matched_nvr": sorted(hit_attached or hit_corresponding)[0],
-                               "notes": (u.get("notes") or "")[:300]}
+                               # kept whole: this is parsed for CVE ids elsewhere
+                               "notes": u.get("notes") or ""}
             if u["type"] == "security":
                 info["security"] = True
                 # Recorded separately from `security`: secureblue's rule keys off
@@ -1700,13 +1786,21 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                             f"不会带来新的软件包内容")
     elif sec:
         v["level"] = "update-now"
-        top = ", ".join(f"{g['src']} ({', '.join(g['cves'][:2]) or _evidence(g)})"
-                        for g in sec[:4])
+        # Two separate renderings: the trivia (", " vs "，", the count wording)
+        # differ per language, and a shared string could only ever be right for one.
+        top_en = clip_list(
+            sec, HEADLINE_GROUP_CAP,
+            render=lambda g: f"{g['src']} "
+                             f"({clip_list(g['cves'], HEADLINE_CVE_CAP) or _evidence(g)})")
+        top_zh = clip_list(
+            sec, HEADLINE_GROUP_CAP, joiner="，", lang="zh",
+            render=lambda g: f"{g['src']} "
+                             f"（{clip_list(g['cves'], HEADLINE_CVE_CAP, lang='zh') or _evidence(g)}）")
         v["headline"] = (f"{plural(len(sec), 'source package')} "
-                         f"{'gains' if len(sec) == 1 else 'gain'} security fixes: {top}"
+                         f"{'gains' if len(sec) == 1 else 'gain'} security fixes: {top_en}"
                          + (f" — {len(cves)} CVE(s) total" if cves else "")
                          + (". Kernel version also changed" if kernel_moved else ""))
-        v["headline_zh"] = (f"{len(sec)} 个源码包获得安全修复：{top}"
+        v["headline_zh"] = (f"{len(sec)} 个源码包获得安全修复：{top_zh}"
                             + (f" —— 共 {len(cves)} 个 CVE" if cves else "")
                             + ("；内核版本也已变化" if kernel_moved else ""))
         if sev >= 3:
@@ -1729,12 +1823,15 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             bits.append(ktxt)
             bits_zh.append(ktxt_zh)
         if imp:
+            imp_names = [g["src"] for g in imp]
             bits.append("version bump in security-sensitive packages: "
-                        + ", ".join(g["src"] for g in imp[:5]))
-            bits_zh.append("安全敏感软件包版本升级：" + ", ".join(g["src"] for g in imp[:5]))
+                        + clip_list(imp_names, 5))
+            bits_zh.append("安全敏感软件包版本升级："
+                           + clip_list(imp_names, 5, lang="zh", joiner="，"))
         if silent_key:
-            bits.append("rebuilt (identical version): " + ", ".join(silent_key[:5]))
-            bits_zh.append("重建（版本相同）：" + ", ".join(silent_key[:5]))
+            bits.append("rebuilt (identical version): " + clip_list(silent_key, 5))
+            bits_zh.append("重建（版本相同）："
+                           + clip_list(silent_key, 5, lang="zh", joiner="，"))
         v["headline"] = ("no CVE/erratum found for this delta, but " + "; ".join(bits)
                          + ". Reasonable to skip if the download matters to you")
         v["headline_zh"] = ("此差异未发现 CVE/勘误，但涉及：" + "；".join(bits_zh)
@@ -1801,10 +1898,13 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         v["headline_zh"] += (f" ｜ 注意：两个镜像的 rpmostree.inputhash 相同，却有 {n_bin} 个"
                              "软件包发生了变化——不要拿 inputhash 当作「无变化」的证据")
     if down:
-        dl_txt = ", ".join(f"{g['src']} ({g['old_evr']} → {g['new_evr']})"
-                           for g in down[:3])
+        def _dl(g):
+            return f"{g['src']} ({g['old_evr']} → {g['new_evr']})"
+
+        dl_txt = clip_list(down, 3, render=_dl)
+        dl_txt_zh = clip_list(down, 3, render=_dl, lang="zh", joiner="，")
         v["headline"] += (" | WARNING: this update downgrades " + dl_txt)
-        v["headline_zh"] += (" ｜ 警告：此次更新会降级 " + dl_txt)
+        v["headline_zh"] += (" ｜ 警告：此次更新会降级 " + dl_txt_zh)
         # A version that went backwards is evidence (the rpmdb says so). The
         # changelog-based `cves_dropped` below is not, which is why only this one
         # is allowed to raise the level.
@@ -1838,7 +1938,8 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             if v["level"] == "skip":
                 v["level"] = "consider"
     if v["cves_dropped"]:
-        drop_txt = ", ".join(v["cves_dropped"][:6])
+        drop_txt = clip_list(v["cves_dropped"], 6)
+        drop_txt_zh = clip_list(v["cves_dropped"], 6, lang="zh", joiner="，")
         # CVE ids that were in the old changelog and are not in the new one usually
         # mean the maintainer (or Fedora's changelog trimming) removed the entry -
         # the version still moved forward. Reporting it is useful; treating it as
@@ -1846,7 +1947,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         v["headline"] += (" | note: these CVE ids are no longer mentioned by the new "
                           "changelogs: " + drop_txt + " (usually a changelog edit rather "
                           "than a lost fix - a real revert shows up as a downgrade)")
-        v["headline_zh"] += (" ｜ 提示：以下 CVE 编号在新版更新日志中不再出现：" + drop_txt
+        v["headline_zh"] += (" ｜ 提示：以下 CVE 编号在新版更新日志中不再出现：" + drop_txt_zh
                              + "（通常是更新日志被编辑，而非修复被移除——真正的回退会表现为降级）")
     # One machine-readable sentence on why this level was chosen. The prose
     # headline explains it too, but consumers of report.md.json / GITHUB_OUTPUT
@@ -2061,7 +2162,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               f"最高勘误等级 (rpm-ostree 体系): `{_sbn.get('max_advisory_severity')}`")
             if _sbn.get("added_packages_with_advisories"):
                 W(f"- 本次新增且自带安全勘误的包: "
-                  f"{', '.join(_sbn['added_packages_with_advisories'][:8])}")
+                  f"{clip_list(_sbn['added_packages_with_advisories'], 8, lang='zh', joiner='，')}")
             W("")
             W("> 这里的 severity 只取 *精确* EVR 命中：rpm-ostree 用 "
               "`dnf_package_get_advisories(pkg, HY_EQ)` 填充 `.advisories`，"
@@ -2092,7 +2193,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               f"max advisory severity (rpm-ostree scale): `{_sbn.get('max_advisory_severity')}`")
             if _sbn.get("added_packages_with_advisories"):
                 W(f"- newly added packages that carry a security advisory: "
-                  f"{', '.join(_sbn['added_packages_with_advisories'][:8])}")
+                  f"{clip_list(_sbn['added_packages_with_advisories'], 8)}")
             W("")
             W("> The severity used here only counts *exact* EVR hits: rpm-ostree fills "
               "`.advisories` via `dnf_package_get_advisories(pkg, HY_EQ)`, and libdnf "
@@ -2132,8 +2233,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W(f"| 镜像版本 | {a['annotations'].get('org.opencontainers.image.version', '?')} | {b['annotations'].get('org.opencontainers.image.version', '?')} |")
         W(f"| 构建时间 (UTC) | {a.get('created') or '?'} | {b.get('created') or '?'} |")
         W(f"| 内核 | {a['annotations'].get('ostree.linux', '?')} | {b['annotations'].get('ostree.linux', '?')} |")
-        W(f"| rpm-ostree 输入哈希 | `{(a['annotations'].get('rpmostree.inputhash') or '')[:12]}` | `{(b['annotations'].get('rpmostree.inputhash') or '')[:12]}` |")
-        W(f"| ostree 提交 | `{(a['annotations'].get('ostree.commit') or '—')[:12]}` | `{(b['annotations'].get('ostree.commit') or '—')[:12]}` |")
+        W(f"| rpm-ostree 输入哈希 | `{clip_hash(a['annotations'].get('rpmostree.inputhash'), 12)}` | `{clip_hash(b['annotations'].get('rpmostree.inputhash'), 12)}` |")
+        W(f"| ostree 提交 | `{clip_hash(a['annotations'].get('ostree.commit') or '—', 12)}` | `{clip_hash(b['annotations'].get('ostree.commit') or '—', 12)}` |")
         W(f"| 镜像摘要 (manifest) | `{a['digest'][:19]}…` | `{b['digest'][:19]}…` |")
         W(f"| 镜像内软件包数 | {diff.get('count_a', '?')} | {diff.get('count_b', '?')} |")
     else:
@@ -2143,8 +2244,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W(f"| image version | {a['annotations'].get('org.opencontainers.image.version', '?')} | {b['annotations'].get('org.opencontainers.image.version', '?')} |")
         W(f"| built (UTC) | {a.get('created') or '?'} | {b.get('created') or '?'} |")
         W(f"| kernel | {a['annotations'].get('ostree.linux', '?')} | {b['annotations'].get('ostree.linux', '?')} |")
-        W(f"| rpm-ostree inputhash | `{(a['annotations'].get('rpmostree.inputhash') or '')[:12]}` | `{(b['annotations'].get('rpmostree.inputhash') or '')[:12]}` |")
-        W(f"| ostree.commit | `{(a['annotations'].get('ostree.commit') or '—')[:12]}` | `{(b['annotations'].get('ostree.commit') or '—')[:12]}` |")
+        W(f"| rpm-ostree inputhash | `{clip_hash(a['annotations'].get('rpmostree.inputhash'), 12)}` | `{clip_hash(b['annotations'].get('rpmostree.inputhash'), 12)}` |")
+        W(f"| ostree.commit | `{clip_hash(a['annotations'].get('ostree.commit') or '—', 12)}` | `{clip_hash(b['annotations'].get('ostree.commit') or '—', 12)}` |")
         W(f"| manifest digest | `{a['digest'][:19]}…` | `{b['digest'][:19]}…` |")
         W(f"| packages in image | {diff.get('count_a', '?')} | {diff.get('count_b', '?')} |")
     W("")
@@ -2195,7 +2296,10 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         for g in g_down:
             pkgs_label = f"{len(g['pkgs'])} 个包" if is_zh else f"{len(g['pkgs'])} package(s)"
             if g["security"]:
-                rev = f" — 这会*回退*已发布的勘误: {', '.join(g['aliases'][:2])}" if is_zh else f" — this *reverts* a published erratum: {', '.join(g['aliases'][:2])}"
+                rev = (f" — 这会*回退*已发布的勘误: "
+                       f"{clip_list(g['aliases'], 2, lang='zh', joiner='，')}" if is_zh
+                       else f" — this *reverts* a published erratum: "
+                            f"{clip_list(g['aliases'], 2)}")
             else:
                 rev = ""
             W(f"- **{g['src']}**: {g['old_evr']} → {g['new_evr']} ({pkgs_label}){rev}")
@@ -2206,12 +2310,13 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W(f"## 本次更新会移除的修复（{len(g_lost)}）")
             W("")
             for g in g_lost:
-                W(f"- `{g['src']}`: 不再提及 {', '.join(g['dropped'][:8])}")
+                W(f"- `{g['src']}`: 不再提及 "
+                  f"{clip_list(g['dropped'], 8, lang='zh', joiner='，')}")
         else:
             W(f"## Fixes that this update REMOVES ({len(g_lost)})")
             W("")
             for g in g_lost:
-                W(f"- `{g['src']}`: no longer mentions {', '.join(g['dropped'][:8])}")
+                W(f"- `{g['src']}`: no longer mentions {clip_list(g['dropped'], 8)}")
         W("")
 
     if g_sec:
@@ -2226,26 +2331,50 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("| source package | old → new | CVEs | errata / evidence |")
             W("|---|---|---|---|")
         for g in g_sec:
-            ev = "; ".join(g["why"])[:190] or ", ".join(g["aliases"]) or "—"
-            cve_str = ", ".join(g["cves"][:6]) or "—"
+            ev = (clip_text("; ".join(g["why"]), EV_CELL_CAP, lang=lang)
+                  or ", ".join(g["aliases"]) or "—")
+            cve_str = clip_list(g["cves"], CVE_CELL_CAP, lang=lang) or "—"
             pkg_col = fmt_pkgs(g, "zh" if is_zh else "en")
             W(f"| {pkg_col} ({g['src']}) | {g['old_evr']} → **{g['new_evr']}** | {cve_str} | {ev} |")
         W("")
+        # A security report is the one place where an elided id is unacceptable:
+        # the table cell cannot hold 113 of them, so the rest get a section of
+        # their own rather than a "…".
+        elided = [g for g in g_sec if len(g["cves"]) > CVE_CELL_CAP]
+        if elided:
+            if is_zh:
+                W(f"## 上表未列全的 CVE：完整清单（{len(elided)} 个源码包）")
+                W("")
+                W(f"安全表的 CVE 列最多显示 {CVE_CELL_CAP} 个编号（单元格宽度），"
+                  f"以下是被省略的每一个编号，无一遗漏。")
+            else:
+                W(f"## CVEs the table above could not fit: the complete list "
+                  f"({len(elided)} source package(s))")
+                W("")
+                W(f"The security table's CVE column shows at most {CVE_CELL_CAP} ids "
+                  f"(cell width). Here is every id it left out - none are dropped.")
+            W("")
+            for g in elided:
+                W(f"- `{g['src']}` — {len(g['cves'])} CVE(s): " + ", ".join(g["cves"]))
+            W("")
 
     if g_imp:
         if is_zh:
             W(f"## 安全敏感包版本升级、未提及 CVE（{len(g_imp)}）")
             W("")
             for g in g_imp:
-                extra = f"（勘误: {', '.join(g['aliases'][:2])}）" if g["aliases"] else ""
-                why_desc = "; ".join(g["why"])[:160] or "无安全相关更新日志"
+                extra = (f"（勘误: {clip_list(g['aliases'], 2, lang='zh', joiner='，')}）"
+                         if g["aliases"] else "")
+                why_desc = clip_text("; ".join(g["why"]), WHY_CAP, lang="zh") \
+                    or "无安全相关更新日志"
                 W(f"- `{g['src']}` {g['old_evr']} → {g['new_evr']} — {len(g['pkgs'])} 个包{extra}; {why_desc}")
         else:
             W(f"## Bumps in security-sensitive packages, no CVE mentioned ({len(g_imp)})")
             W("")
             for g in g_imp:
-                extra = f" (errata: {', '.join(g['aliases'][:2])})" if g["aliases"] else ""
-                why_desc = "; ".join(g["why"])[:160] or "no security changelog entry"
+                extra = f" (errata: {clip_list(g['aliases'], 2)})" if g["aliases"] else ""
+                why_desc = clip_text("; ".join(g["why"]), WHY_CAP) \
+                    or "no security changelog entry"
                 W(f"- `{g['src']}` {g['old_evr']} → {g['new_evr']} — {len(g['pkgs'])} pkg(s){extra}; {why_desc}")
         W("")
 
@@ -2274,7 +2403,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               "其严重度也**没有**被计入上面的结论。")
             W("")
             for g in g_had:
-                al = ", ".join(x["alias"] for x in g["already_had"][:4])
+                al = clip_list((x["alias"] for x in g["already_had"]), 4,
+                               lang="zh", joiner="，")
                 W(f"- `{g['src']}`（停留在 {g['old_evr']}）: {al}")
         else:
             W(f"## Errata you already had before this update ({len(g_had)})")
@@ -2284,7 +2414,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               "above.")
             W("")
             for g in g_had:
-                al = ", ".join(x["alias"] for x in g["already_had"][:4])
+                al = clip_list((x["alias"] for x in g["already_had"]), 4)
                 W(f"- `{g['src']}` (staying at {g['old_evr']}): {al}")
         W("")
 
@@ -2297,7 +2427,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               "与 `security_backlog` 只统计已推送勘误的口径一致。")
             W("")
             for g in g_un:
-                W(f"- `{g['src']}`: {', '.join(x['alias'] + ' (' + str(x['status']) + ')' for x in g['unreleased'][:4])}")
+                W(f"- `{g['src']}`: "
+                  f"{clip_list(g['unreleased'], 4, lang='zh', joiner='，', render=lambda x: x['alias'] + ' (' + str(x['status']) + ')')}")
         else:
             W(f"## Errata that exist but are not pushed yet ({len(g_un)})")
             W("")
@@ -2305,7 +2436,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               "weight here - matching `security_backlog`, which only counts pushed errata.")
             W("")
             for g in g_un:
-                W(f"- `{g['src']}`: {', '.join(x['alias'] + ' (' + str(x['status']) + ')' for x in g['unreleased'][:4])}")
+                W(f"- `{g['src']}`: "
+                  f"{clip_list(g['unreleased'], 4, render=lambda x: x['alias'] + ' (' + str(x['status']) + ')')}")
         W("")
 
     if not changed and (isinstance(diff.get("count_a"), int) or diff.get("same_rpmdb")):
@@ -2324,15 +2456,21 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         if is_zh:
             W("## 软件包集合变更")
             if diff["added"]:
-                W(f"新增 ({len(diff['added'])}): " + ", ".join(f"`{x}`" for x in diff["added"][:40]))
+                W(f"新增 ({len(diff['added'])}): "
+                  + clip_list(diff["added"], PKG_LIST_CAP, lang="zh", joiner="，",
+                              render=lambda x: f"`{x}`"))
             if diff["removed"]:
-                W(f"移除 ({len(diff['removed'])}): " + ", ".join(f"`{x}`" for x in diff["removed"][:40]))
+                W(f"移除 ({len(diff['removed'])}): "
+                  + clip_list(diff["removed"], PKG_LIST_CAP, lang="zh", joiner="，",
+                              render=lambda x: f"`{x}`"))
         else:
             W("## Package set changes")
             if diff["added"]:
-                W(f"added ({len(diff['added'])}): " + ", ".join(f"`{x}`" for x in diff["added"][:40]))
+                W(f"added ({len(diff['added'])}): "
+                  + clip_list(diff["added"], PKG_LIST_CAP, render=lambda x: f"`{x}`"))
             if diff["removed"]:
-                W(f"removed ({len(diff['removed'])}): " + ", ".join(f"`{x}`" for x in diff["removed"][:40]))
+                W(f"removed ({len(diff['removed'])}): "
+                  + clip_list(diff["removed"], PKG_LIST_CAP, render=lambda x: f"`{x}`"))
         W("")
 
     silent = xc.get("silent_rebuilds") or []
@@ -2383,7 +2521,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W(title)
         W("")
         for ch in xc["non_package_chunks"]:
-            W(f"- {human(ch['size'])} — {', '.join(c.replace('bigfiles/', '') for c in ch['components'])[:120]}")
+            W(f"- {human(ch['size'])} — "
+              f"{clip_text(', '.join(c.replace('bigfiles/', '') for c in ch['components']), 120)}")
         W("")
 
     if backlog:
@@ -2406,6 +2545,15 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("|---|---|---|---|---|")
         for r in backlog[:25]:
             W(f"| `{r['name']}` | {r['have']} | **{r['want']}** | {r['severity'] or '?'} | {r['alias']} |")
+        if len(backlog) > 25:
+            # --audit raises this cap; say what was cut instead of just ending the table
+            if is_zh:
+                W(f"- ……另有 {len(backlog)-25} 行未显示（提高 --backlog-candidates 可全部显示；"
+                  f"JSON 输出中始终包含全部 {len(backlog)} 行）")
+            else:
+                W(f"- … and {len(backlog)-25} more row(s) not shown (raise "
+                  f"--backlog-candidates to see them; the JSON output always carries "
+                  f"all {len(backlog)})")
         W("")
 
     if ldiff["changed_chunks"]:
@@ -2563,11 +2711,13 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi, limit: int = 45) -> tup
                         best = cand
                 if best is None:
                     continue
+                # full lists: the CLI preview and the report both clip *with a
+                # stated count*, and the JSON export must stay complete
                 rows.append({"name": n, "src": src, "have": p["evr"],
                              "want": f"{best['version']}-{best['release']}",
                              "alias": u["alias"], "severity": u.get("severity"),
-                             "cves": (u.get("cves") or [])[:6],
-                             "notes": (u.get("notes") or "")[:200]})
+                             "cves": u.get("cves") or [],
+                             "notes": u.get("notes") or ""})
                 done = True
             if done:
                 break
@@ -2588,15 +2738,13 @@ def coverage_line(cov: dict) -> str:
     en = (f"backlog audit coverage: {cov['checked']} of {cov['candidates']} candidate source "
           f"packages in the image were queried"
           + (f", {cov['skipped']} were cut off by --max-bodhi "
-             f"({', '.join(cov.get('skipped_names', [])[:6])}"
-             f"{'…' if len(cov.get('skipped_names', [])) > 6 else ''})"
+             f"({clip_list(cov.get('skipped_names', []), 6)})"
              if cov.get("skipped") else "")
           + (f"; {cov['pool_missing'] and len(cov['pool_missing'])} BACKLOG_POOL entries are not "
              f"in this image" if cov.get("pool_missing") else ""))
     zh = (f"backlog 审计覆盖率：镜像内 {cov['candidates']} 个候选源码包中查询了 {cov['checked']} 个"
           + (f"，{cov['skipped']} 个因 --max-bodhi 上限被截断"
-             f"（{', '.join(cov.get('skipped_names', [])[:6])}"
-             f"{'…' if len(cov.get('skipped_names', [])) > 6 else ''}）"
+             f"（{clip_list(cov.get('skipped_names', []), 6, lang='zh', joiner='，')}）"
              if cov.get("skipped") else "")
           + (f"；BACKLOG_POOL 中有 {len(cov['pool_missing'])} 个条目不在此镜像内"
              if cov.get("pool_missing") else ""))
@@ -2626,7 +2774,10 @@ def cmd_backlog(args):
         print(f"  {r['name']:28} {r['have']:>26}  ->  {r['want']:<26} "
               f"{(r['severity'] or '?'):9} {r['alias']}")
         if r["notes"]:
-            print(f"  {'':28}{'':26}     {r['notes'].splitlines()[0][:110]}")
+            _lines = r["notes"].splitlines() or [""]
+            _rest = f" (+{len(_lines)-1} more line(s) / 另有 {len(_lines)-1} 行)" \
+                if len(_lines) > 1 else ""
+            print(f"  {'':28}{'':26}     {clip_text(_lines[0], 110)}{_rest}")
     if not rows:
         # state the scope explicitly: this is only ever as good as `checked`
         print(f"  none among the {cov['checked']} source package(s) queried — not a claim "
@@ -2825,7 +2976,8 @@ def cmd_history(args):
         ld = r.get("from_prev") or {}
         cost = human(ld.get("download_bytes", 0)) if ld else "—"
         ch = f"{ld.get('chunks_changed', '?')}/{ld.get('chunks_b', '?')}" if ld else "—"
-        refs = ",".join(r["tags"][:2]) or f"sha256:{r['digest'].split(':')[1][:12]}"
+        refs = ",".join(r["tags"][:2]) + (f"+{len(r['tags'])-2}" if len(r["tags"]) > 2 else "")
+        refs = refs or clip_hash("sha256:" + r["digest"].split(":")[1], 19)
         mark = ""
         if r.get("same_input_as_prev"):
             dup += 1
@@ -2835,9 +2987,9 @@ def cmd_history(args):
                     "base - NOT proof that nothing changed) / 与上次构建 inputhash 相同"
                     "（继承自 Fedora 基础镜像——不能证明没有变化）")
         cur = " *CURRENT/当前" if r["tags"] and args.to in r["tags"] else ""
-        print(f"  {(r.get('created') or '?')[:19]:19} {str(r['version'])[:15]:15} "
-              f"{str(r['inputhash'])[:10]:11} {ch:8} {cost:>9}  "
-              f"{str(r['kernel'])[:22]:22} {refs[:40]}{cur}{mark}")
+        print(f"  {ts_short(r.get('created') or '?'):19} {clip_col(r['version'], 15):15} "
+              f"{clip_col(r['inputhash'], 10):11} {clip_col(ch, 8):8} {cost:>9}  "
+              f"{clip_col(r['kernel'], 22):22} {clip_col(refs, 40)}{cur}{mark}")
     for w in hist_warnings:
         print("\n  ! " + str(w))
     if dup:
@@ -2964,7 +3116,12 @@ def cmd_layers(args):
         print("     -", p)
     print(T("  biggest chunks to re-download:", "需要重新下载的最大 chunk："))
     for ch in ld["changed_chunks"][:12]:
-        print(f"     {human(ch['size']):>9}  {' '.join(ch['components'])[:100]}")
+        print(f"     {human(ch['size']):>9}  {clip_text(' '.join(ch['components']), 100)}")
+    if len(ld["changed_chunks"]) > 12:
+        print(T(f"     … and {len(ld['changed_chunks'])-12} more chunk(s) not shown "
+                f"(the download total above includes them all)",
+                f"     ……另有 {len(ld['changed_chunks'])-12} 个 chunk 未显示"
+                f"（上面的下载总量已包含它们）"))
     return 0
 
 
@@ -3226,7 +3383,7 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
                        f"警告：{bstate['failed']} 次 Bodhi 勘误查询失败；"
                        f"这些软件包仅依据更新日志中的 CVE 判断"))
     if bstate.get("truncated"):
-        tr = ", ".join(bstate["truncated"][:8])
+        tr = clip_list(bstate["truncated"], 8)
         notes.append(T(
             f"WARNING: could not read every erratum for: {tr} - their verdict is based on "
             f"the first {MAX_BODHI_PAGES * BODHI_PAGE_SIZE} only, so 'no security fix' for "
@@ -3290,7 +3447,7 @@ def cmd_diff(args):
                                     "aliases": (c.get("cls") or {}).get("aliases", []),
                                     "already_had": (c.get("cls") or {}).get("already_had", []),
                                     "not_pushed": (c.get("cls") or {}).get("not_pushed", []),
-                                    "why": (c.get("cls") or {}).get("why", [])[:3]}
+                                    "why": (c.get("cls") or {}).get("why", [])}
                                    for c in res["diff"]["changed"]],
                        "silent_rebuilds": xc.get("silent_rebuilds", []),
                        "behind_stable_security": res.get("backlog", []),
@@ -3387,17 +3544,19 @@ def cmd_check(args):
             hist = build_history(reg, scan=args.scan, days=0, to=args.to,
                                  warn=hist_warnings)
         except Exception as e:
-            log(T(f"  ! history scan failed: {str(e)[:80]}",
-                  f"  ！历史扫描失败：{str(e)[:80]}"))
+            log(T(f"  ! history scan failed: {clip_text(e, 80)}",
+                  f"  ！历史扫描失败：{clip_text(e, 80, lang='zh')}"))
             hist_warnings.append(T(
-                f"the build history could not be scanned ({str(e)[:60]}), so the baseline "
+                f"the build history could not be scanned ({clip_text(e, 60)}), so the baseline "
                 f"was chosen from the state file / dated tags only",
-                f"无法扫描构建历史（{str(e)[:60]}），因此基线只能取自状态文件 / 日期标签"))
+                f"无法扫描构建历史（{clip_text(e, 60, lang='zh')}），"
+                f"因此基线只能取自状态文件 / 日期标签"))
 
     ref_a, label_a = args.a, args.a
     if not ref_a and state.get("digest") and state["digest"] != cur["digest"]:
         ref_a = state["digest"]
-        label_a = str(state.get("version") or state.get("created") or state["digest"])[:26]
+        label_a = clip_text(state.get("version") or state.get("created") or state["digest"],
+                            26, lang="both")
     if not ref_a and hist:
         # build_history rows carry the *index* digest in "digest"; comparing that
         # against cur["digest"] (the platform digest) never matched, so the current
@@ -3407,7 +3566,7 @@ def cmd_check(args):
             pd = r.get("platform_digest") or r["digest"]
             if pd != cur["digest"] and (r.get("created") or "9") <= (cur.get("created") or "9"):
                 ref_a = pd
-                label_a = f"{r['version']} @ {str(r['created'])[:16]}"
+                label_a = f"{r['version']} @ {ts_short(r['created'])}"
                 break
     if not ref_a:
         now = time.time()
@@ -3500,13 +3659,14 @@ def cmd_check(args):
         if uniq:
             res["notes"].append(T(
                 f"this image is not the only new one: {len(uniq)} build(s) were pushed after "
-                f"the build you last looked at ({seen[:16]}) — "
-                + ", ".join(str(r["created"])[:16] for r in uniq)
+                f"the build you last looked at ({clip_text(seen, 16, lang='both')}) — "
+                + ", ".join(ts_short(r["created"]) for r in uniq)
                 + " (UTC). Tags like `20260910` or `<sha>-44` are mutable and only point at "
                   "the newest build of a day, so the comparison below is by digest: your last "
                   "image -> current image, i.e. the full delta of skipping them all.",
-                f"这不是唯一的新镜像：在你上次查看的构建（{seen[:16]}）之后还推送了 {len(uniq)} 次构建 —— "
-                + ", ".join(str(r["created"])[:16] for r in uniq)
+                f"这不是唯一的新镜像：在你上次查看的构建（{clip_text(seen, 16, lang='zh')}）"
+                f"之后还推送了 {len(uniq)} 次构建 —— "
+                + "，".join(ts_short(r["created"]) for r in uniq)
                 + " (UTC)。`20260910`、`<sha>-44` 之类的标签是可变的，只指向当天最新构建，"
                   "因此下方对比按 digest 进行：你的上一版镜像 -> 当前镜像，"
                   "即跳过它们全部时的完整差异。"))
@@ -3540,9 +3700,11 @@ def cmd_check(args):
     if v["level"] == "update-now":
         reasons = []
         if v["cves"]:
-            reasons.append("CVEs: " + ",".join(v["cves"][:10]))
+            reasons.append(f"CVEs ({len(v['cves'])}): "
+                           + clip_list(v["cves"], 10, joiner=","))
         if v["security_pkgs"]:
-            reasons.append("security packages: " + ",".join(v["security_pkgs"][:10]))
+            reasons.append(f"security packages ({len(v['security_pkgs'])}): "
+                           + clip_list(v["security_pkgs"], 10, joiner=","))
         if sbn_lvl == "major":
             reasons.append("secureblue treats this update as major")
         fail_reason = "; ".join(reasons) or "update-now with no CVE/erratum attributed"
@@ -3550,8 +3712,13 @@ def cmd_check(args):
         fail_reason = ""
     gh_outputs({"verdict": v["level"], "digest": cur["digest"], "version": ver,
                 "download_bytes": res["layers"]["download_bytes"], "summary": summary,
-                "report": report, "cves": ",".join(v["cves"][:25]),
-                "security_packages": ",".join(v["security_pkgs"][:25]),
+                "report": report,
+                # complete, not clipped: a workflow consumer must never see a
+                # silently shortened CVE list (the counts make the length explicit)
+                "cves": ",".join(v["cves"]),
+                "cves_count": len(v["cves"]),
+                "security_packages": ",".join(v["security_pkgs"]),
+                "security_packages_count": len(v["security_pkgs"]),
                 "changed_count": v["changed_pkg_count"], "fail_reason": fail_reason})
     if args.fail_on == "security" and v["level"] == "update-now":
         return 10
