@@ -2,6 +2,7 @@ name: secureblue update watch
 
 on:
   push:
+    branches: [main]
   schedule:
     - cron: '20 * * * *'
   workflow_dispatch:
@@ -24,10 +25,11 @@ on:
         type: boolean
         default: false
 
+# Least privilege at the workflow level; `test` needs nothing beyond a readable
+# checkout, and only the `watch` job needs issues:write (sticky issue) and
+# actions:write (cache pruning).
 permissions:
   contents: read
-  issues: write
-  actions: write        # needed only by the "prune old caches" step
 
 env:
   SB_IMAGE: ${{ inputs.image || 'secureblue/silverblue-main-hardened' }}
@@ -44,6 +46,11 @@ env:
   # push never fired before.
   TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
   TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+  # sha256 of the committed cosign.pub. The key is the only trust anchor this
+  # workflow has, so it is vendored in the repo and its hash is checked before it
+  # is handed to `cosign verify --key`. A rotated upstream key fails the run here
+  # instead of silently changing what "verified" means.
+  COSIGN_PUB_SHA256: "9cbd48de48d467f86e0f31f9454c6e0bb663f3d033ecd92143f62577eb1cb5eb"
 
 concurrency:
   group: sbwatch-${{ inputs.image || 'secureblue/silverblue-main-hardened' }}-${{ inputs.arch || 'amd64' }}
@@ -56,19 +63,19 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.13'
 
-      # Offline: 86 tests, no registry or Bodhi access (the build-history test
-      # stubs list_tags, so nothing here touches the network). NOTE: the watch
-      # job runs independently of this one - a regression in rpmvercmp /
-      # classify_change shows up here but does NOT block the hourly watch.
+      # Offline: no registry or Bodhi access (the build-history test stubs
+      # list_tags, so nothing here touches the network). NOTE: the watch job runs
+      # independently of this one - a regression in rpmvercmp / classify_change
+      # shows up here but does NOT block the hourly watch.
       - name: Run the offline test suite
         run: python3 -m unittest discover -s tests -v
 
@@ -81,27 +88,37 @@ jobs:
     name: Update watch
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    permissions:
+      contents: read
+      issues: write   # sticky issue comment
+      actions: write  # pruning old caches via the API
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
 
       - name: Install cosign
         # Pinned by commit SHA, not by tag: the `# pin:` comment next to a mutable
         # tag documents an intention it does not enforce.
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v2.4.1
         with:
           cosign-release: 'v2.4.1'
 
-      - name: Download secureblue cosign.pub
+      - name: Verify the committed cosign.pub
         run: |
           set -euo pipefail
-          curl -fsSL -o cosign.pub https://raw.githubusercontent.com/secureblue/secureblue/live/cosign.pub
-          ls -l cosign.pub
-          # The key must be the ECDSA P-256 one secureblue publishes; a truncated or
-          # replaced file should fail here rather than at verification time.
+          # No download here on purpose: a key fetched at run time from somewhere
+          # else would be a trust anchor nobody audits. The file is in the repo,
+          # and this is the hash that was reviewed.
+          test -f cosign.pub
+          actual=$(sha256sum cosign.pub | awk '{print $1}')
+          if [ "$actual" != "$COSIGN_PUB_SHA256" ]; then
+            echo "::error::cosign.pub hash mismatch (expected $COSIGN_PUB_SHA256, got $actual) - refusing to verify signatures against an unexpected key"
+            exit 1
+          fi
           head -1 cosign.pub | grep -q 'BEGIN PUBLIC KEY'
+          echo "cosign.pub OK: $actual"
 
       - name: Derive a cache namespace from the image name
         id: ns
@@ -111,7 +128,7 @@ jobs:
           echo "ns=$ns" >> "$GITHUB_OUTPUT"
 
       - name: Restore sbwatch cache (package lists per image, Bodhi answers, last digest)
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/sbwatch
           # Scoped per image *and* arch: a shared prefix let an amd64 run evict the
@@ -149,14 +166,14 @@ jobs:
 
       - name: Save sbwatch cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/sbwatch
           key: sbwatch-${{ steps.ns.outputs.ns }}-${{ env.SB_ARCH }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Prune old sbwatch caches
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           NS: ${{ steps.ns.outputs.ns }}
         with:
@@ -168,19 +185,30 @@ jobs:
             // reporting success.
             const prefix = `sbwatch-${process.env.NS}-${process.env.SB_ARCH}-`;
             const keep = 7;                                  // newest entries to keep
-            const res = await github.rest.actions.getActionsCacheList({
-              owner: context.repo.owner, repo: context.repo.repo,
-              per_page: 100, key: prefix,
-              sort: 'last_accessed_at', direction: 'desc',
-            });
-            const caches = (res.data.actions_caches || []).slice(keep);
+            // One page holds at most 100 caches; at ~24 runs/day x 7 kept, the
+            // interesting entries are always on the first page, but paging keeps
+            // this correct if the retention window is ever raised.
+            let page = 1;
+            const all = [];
+            while (true) {
+              const res = await github.rest.actions.getActionsCacheList({
+                owner: context.repo.owner, repo: context.repo.repo,
+                per_page: 100, page, key: prefix,
+                sort: 'last_accessed_at', direction: 'desc',
+              });
+              const batch = res.data.actions_caches || [];
+              all.push(...batch);
+              if (batch.length < 100) break;
+              page += 1;
+            }
+            const caches = all.slice(keep);
             for (const c of caches) {
               await github.rest.actions.deleteActionsCacheById({
                 owner: context.repo.owner, repo: context.repo.repo, cache_id: c.id,
               });
               core.info(`deleted cache ${c.id} (${c.key})`);
             }
-            core.info(`pruned ${caches.length} old cache entr(ies), kept ${keep}`);
+            core.info(`pruned ${caches.length} old cache entr(ies) of ${all.length}, kept ${keep}`);
 
       - name: Append build history (several pushes a day share one version string)
         if: steps.check.outputs.verdict != 'no-update' && steps.check.outputs.verdict != 'no-change' && steps.check.outputs.verdict != '' && steps.check.outputs.verdict != 'unknown'
@@ -199,7 +227,7 @@ jobs:
       # report worth keeping as an artifact, while re-listing the build history
       # for it adds nothing.
       - name: Upload report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always() && steps.check.outputs.verdict != 'no-update' && steps.check.outputs.verdict != '' && steps.check.outputs.verdict != 'unknown'
         with:
           name: update-watch-${{ github.run_number }}
@@ -227,10 +255,12 @@ jobs:
         if: steps.notify.outputs.post == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FAIL_REASON: ${{ steps.check.outputs.fail_reason }}
         run: |
           title="secureblue update watch"
           {
             printf '> 🤖 update-watch · %s · verdict: **%s**\n\n' "$(date -u +%F)" "${{ steps.notify.outputs.verdict }}"
+            if [ -n "${FAIL_REASON:-}" ]; then printf '> fail-on-security trigger: %s\n\n' "$FAIL_REASON"; fi
             if [ -f report.md ]; then cat report.md; else echo "_no report_"; fi
           } > body.md
           num=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
@@ -270,5 +300,17 @@ jobs:
       - name: Red run when security fixes are waiting
         if: env.FAIL_ON_SECURITY == 'true' && steps.check.outputs.fail_on_security == 'true'
         run: |
-          echo "::error::new image has security fixes -> rpm-ostree upgrade && systemctl reboot"
+          echo "::error::new image has security fixes (${{ steps.check.outputs.fail_reason }}) -> rpm-ostree upgrade && systemctl reboot"
           exit 10
+
+      # `unknown` means the watch could not conclude anything: no baseline image
+      # to diff against, an unusable tag/digest, or a probe that could not reach
+      # the registry. It is deliberately NOT a notification trigger, but leaving
+      # it as a green run made a monitoring job that stopped monitoring look
+      # exactly like a quiet week. The report is already uploaded above, so
+      # failing here still leaves the evidence in place.
+      - name: Fail when the watch could not conclude anything
+        if: steps.check.outputs.verdict == 'unknown'
+        run: |
+          echo "::error::verdict 'unknown' - the watch did not establish anything (no baseline image, or the registry could not be probed). See the run log and the uploaded report."
+          exit 1
