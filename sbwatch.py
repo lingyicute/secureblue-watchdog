@@ -3746,7 +3746,11 @@ def cmd_check(args):
                             "src": c["src"], "dir": c["dir"],
                             "security": bool(c.get("cls", {}).get("security")),
                             "cves": c.get("cls", {}).get("cves", [])}
-                           for c in res["diff"]["changed"]]})
+                           for c in res["diff"]["changed"]],
+               # complete: the report's backlog table stops at 25 rows and refers
+               # to the JSON output for the rest - for `check`, that is this file
+               "behind_stable_security": res.get("backlog") or [],
+               "backlog_coverage": res.get("backlog_coverage")})
     save_state({"prev_digest": res["a"]["digest"], "prev_label": label_a,
                 "last_verdict": v["level"]})
     # Why `--fail-on security` trips, in the CI outputs: `update-now` is also
