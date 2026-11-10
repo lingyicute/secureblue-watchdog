@@ -1747,7 +1747,10 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     # The whole list, not the first 60 entries: silent_rebuilds is sorted by chunk
     # size, and the packages that matter here (kernel, glibc, ...) are exactly the
     # ones a truncation drops.
-    silent_key = [n for n, _ in silent if n.startswith("kernel") or n in IMPORTANT_SRC]
+    # _src_matches_pool, not a bare `in`: a chunk is named after its source
+    # package, so the interpreter arrives here as python3.14, not python3.
+    silent_key = [n for n, _ in silent
+                  if n.startswith("kernel") or _src_matches_pool(n, IMPORTANT_SRC)]
     n_bin = len(diff["changed"])
     v = {"level": "skip", "headline": "", "headline_zh": "", "changed_src_count": len(groups),
          "changed_pkg_count": n_bin, "security_src": [g["src"] for g in sec],
