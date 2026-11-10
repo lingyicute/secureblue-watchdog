@@ -2755,5 +2755,21 @@ class TestMagicPrefixedRpmHeader(unittest.TestCase):
         self.assertEqual(stats["headers_rejected"], 1)
 
 
+class TestRpmHeaderIndexMustFit(unittest.TestCase):
+    def test_an_index_running_past_the_blob_is_rejected_not_a_crash(self):
+        import struct
+        # two index entries are announced (32 bytes) but only 24 follow; hlen = 0
+        # keeps the old "+40 slack" test happy, and the unguarded entry unpack
+        # then raised struct.error out of the whole package-list parse
+        blob = struct.pack(">II", 2, 0) + struct.pack(">IIII", 1000, 6, 0, 1) + b"\0" * 8
+        stats = {}
+        self.assertEqual(S.read_header(blob, stats), {})
+        self.assertEqual(stats["headers_rejected"], 1)
+
+    def test_a_complete_index_with_a_short_store_still_gets_the_slack(self):
+        blob = rpm_header([(1000, 6, b"foo\0")])
+        self.assertEqual(S.read_header(blob)["name"], "foo")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
