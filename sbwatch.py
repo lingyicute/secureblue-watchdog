@@ -3658,7 +3658,9 @@ def cmd_check(args):
             d.update(extra)
         _atomic_write_json(state_path, d)      # a crash mid-write must not corrupt state
 
-    if state.get("digest") == cur["digest"] and not args.force:
+    # An explicit --a (the workflow's `from_tag`) asks for that comparison; "no
+    # new build since the last look" does not answer it, so it must not skip it.
+    if state.get("digest") == cur["digest"] and not args.force and not args.a:
         msg = T(f"no new build for {args.image}:{args.to} - still {ver} "
                 f"({cur['digest'][:19]}...), nothing to download",
                 f"{args.image}:{args.to} 无新构建——仍为 {ver}"
@@ -3984,8 +3986,10 @@ def main(argv=None):
     add_common(p)
     p.add_argument("--to", default="latest", help="tag to watch / 要监控的标签")
     p.add_argument("--a", default=None,
-                   help="compare against this tag (default: state/recent tag) / 与该标签对比"
-                        "（默认：状态文件/近期标签）")
+                   help="compare against this tag (default: state/recent tag); an explicit "
+                        "--a always runs the comparison, even if the digest is unchanged / "
+                        "与该标签对比（默认：状态文件/近期标签）；显式指定 --a 时，"
+                        "即使 digest 未变也会执行对比")
     p.add_argument("--state", default=None, help="state json path / 状态 json 路径")
     p.add_argument("--report", default=None, help="markdown report path / Markdown 报告路径")
     p.add_argument("--force", action="store_true",

@@ -2503,5 +2503,60 @@ class TestPackageListStreamsTheRpmdb(unittest.TestCase):
         self.assertTrue(spy.closed)
 
 
+class TestExplicitFromTagRunsOnAnUnchangedDigest(unittest.TestCase):
+    """The workflow's `from_tag` is passed as `--a`: it asks for that comparison,
+    which "no new build since the last look" does not answer."""
+
+    class _Reached(Exception):
+        pass
+
+    def _check(self, a):
+        import contextlib
+        import types
+        cur = {"ref": "latest", "digest": "sha256:" + "a" * 64,
+               "index_digest": "sha256:" + "b" * 64, "created": "2026-01-01T00:00:00Z",
+               "annotations": {"org.opencontainers.image.version": "44.20260101.0"},
+               "layers": []}
+        reached = []
+
+        def fake_diff(*args, **kw):
+            reached.append(args[1])
+            raise self._Reached()
+
+        saved = S._registry, S.resolve, S.do_diff
+        saved_env = {k: os.environ.pop(k, None) for k in ("GITHUB_OUTPUT", "GITHUB_ACTIONS")}
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S.resolve = lambda reg, ref, light=False: dict(cur, ref=ref)
+        S.do_diff = fake_diff
+        try:
+            with tempfile.TemporaryDirectory() as d, \
+                    contextlib.redirect_stderr(io.StringIO()), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                state = os.path.join(d, "state.json")
+                with open(state, "w") as fh:
+                    json.dump({"digest": cur["digest"], "created": cur["created"]}, fh)
+                args = types.SimpleNamespace(
+                    image="x/y", arch="amd64", to="latest", a=a, scan=0, force=False, fast=False,
+                    state=state, report=os.path.join(d, "report.md"))
+                try:
+                    rc = S.cmd_check(args)
+                except self._Reached:
+                    rc = "diff"
+        finally:
+            S._registry, S.resolve, S.do_diff = saved
+            os.environ.update({k: v for k, v in saved_env.items() if v is not None})
+        return rc, reached
+
+    def test_explicit_a_runs_the_comparison(self):
+        rc, reached = self._check("20251231")
+        self.assertEqual(rc, "diff")
+        self.assertEqual(reached, ["20251231"])
+
+    def test_without_a_an_unchanged_digest_is_still_skipped(self):
+        rc, reached = self._check(None)
+        self.assertEqual(rc, 0)
+        self.assertEqual(reached, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
