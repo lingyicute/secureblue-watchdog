@@ -605,6 +605,23 @@ class TestBodhiCache(unittest.TestCase):
             b.updates_for_src("kernel", "F44")
             self.assertEqual(b.truncated_src, {"kernel"})
 
+    def test_repeat_lookup_is_served_from_memory_not_reread_from_disk(self):
+        """classify_change() asks once per binary package, so every kernel
+        subpackage asks for `kernel`: the answer already in memory must be
+        reused instead of re-reading and re-parsing the cache file each time."""
+        with tempfile.TemporaryDirectory() as d:
+            b = S.Bodhi(cache_dir=d, max_calls=0)      # 0 calls => provably offline
+            cf = b._cf("kernel-F44")
+            payload = [{"alias": "FEDORA-2026-1"}]
+            with open(cf, "w") as fh:
+                json.dump({"cache_version": S.BODHI_CACHE_VERSION, "total": 1,
+                           "truncated": False, "updates": payload}, fh)
+            self.assertEqual(b.updates_for_src("kernel", "F44"), payload)
+            with open(cf, "w") as fh:                  # a re-read would trip on this
+                fh.write("{ not json")
+            self.assertEqual(b.updates_for_src("kernel", "F44"), payload)
+            self.assertTrue(os.path.exists(cf), "the cache file was re-read")
+
 
 class TestBodhiPagination(unittest.TestCase):
     """Bodhi paginates; reading only page 1 silently dropped 27 of the F44

@@ -1079,6 +1079,13 @@ class Bodhi:
         instead of quietly claiming completeness.
         """
         key = f"{src}-{release}"
+        # Memory first. classify_change() asks once per *binary* package, so every
+        # subpackage of kernel, linux-firmware, ... arrives with the same key, and
+        # checking the disk first re-read and re-parsed the whole cache file for
+        # each of them - right after a fetch too, as the file just written won.
+        if key in self._mem:
+            ent = self._mem[key]
+            return ent["updates"] if isinstance(ent, dict) else ent
         cf = self._cf(key)
         if cf and os.path.exists(cf) and time.time() - os.path.getmtime(cf) < self.ttl:
             cached = self._read_cache_entry(cf)
@@ -1087,9 +1094,6 @@ class Bodhi:
                 if cached.get("truncated"):
                     self.truncated_src.add(src)
                 return cached["updates"]
-        if key in self._mem:
-            ent = self._mem[key]
-            return ent["updates"] if isinstance(ent, dict) else ent
         if self.calls >= self.max_calls:
             self.skipped += 1
             return []
