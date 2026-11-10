@@ -2815,5 +2815,41 @@ class TestHistorySkipsPushesWithoutTheArch(unittest.TestCase):
         self.assertEqual(warns, [], "a push without this arch is not a probe failure")
 
 
+class TestCorruptGzipBlobIsACleanError(unittest.TestCase):
+    """A gzip stream with a valid header but a damaged deflate body raises
+    zlib.error, which is neither OSError nor BadGzipFile: fetch_blob() let it
+    escape as a raw traceback instead of its bilingual SystemExit."""
+
+    def test_damaged_deflate_body_exits_with_a_message(self):
+        import gzip
+        import types
+        good = bytearray(gzip.compress(os.urandom(4096) * 4))
+        for i in range(20, 60):
+            good[i] ^= 0xFF
+        body = bytes(good)
+
+        class Resp:
+            headers = {}
+
+            def __init__(self):
+                self._i = 0
+
+            def read(self, n=-1):
+                chunk, self._i = body[self._i:self._i + n], self._i + n
+                return chunk
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        reg = types.SimpleNamespace(_open=lambda path, accept: Resp())
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(SystemExit) as cm:
+                S.Registry.fetch_blob(reg, "sha256:" + "a" * 64, os.path.join(d, "x"))
+        self.assertIn("failed to read/decompress layer", str(cm.exception))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
