@@ -1485,7 +1485,9 @@ def _evr_tuple(e: dict) -> tuple:
 
 def pkg_diff(pa: dict, pb: dict) -> dict:
     changed = []
-    for n in sorted(set(pa) & set(pb)):
+    keys_a, keys_b = set(pa), set(pb)
+    common = keys_a & keys_b
+    for n in sorted(common):
         x, y = pa[n], pb[n]
         if _evr_tuple(x) == _evr_tuple(y):
             continue
@@ -1496,12 +1498,12 @@ def pkg_diff(pa: dict, pb: dict) -> dict:
         changed.append({"name": n, "old": x, "new": y, "src": y["src"],
                         "dir": "downgrade" if d > 0 else "upgrade" if d < 0 else "rebuild"})
     return {
-        "added": sorted(set(pb) - set(pa)),
-        "removed": sorted(set(pa) - set(pb)),
+        "added": sorted(keys_b - keys_a),
+        "removed": sorted(keys_a - keys_b),
         "changed": changed,
         "downgrades": [c for c in changed if c["dir"] == "downgrade"],
         "count_a": len(pa), "count_b": len(pb),
-        "unchanged_count": len(set(pa) & set(pb)) - len(changed),
+        "unchanged_count": len(common) - len(changed),
     }
 
 
