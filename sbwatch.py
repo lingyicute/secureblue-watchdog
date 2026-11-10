@@ -3204,7 +3204,9 @@ def _atomic_write_text(path: str, text: str) -> None:
     """
     tmp = path + f".tmp.{os.getpid()}"
     try:
-        with open(tmp, "w") as f:
+        # explicit: the report is bilingual (CJK), and open() would otherwise
+        # follow the locale - a non-UTF-8 one could not write it at all
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
