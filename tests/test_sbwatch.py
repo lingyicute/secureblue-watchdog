@@ -934,10 +934,6 @@ class TestPickTarMember(unittest.TestCase):
             tf.close()
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
-
 # --------------------------------------------------------------------------- #
 # F - secureblue's own notification rule must be reproduced, not approximated
 #
@@ -2029,3 +2025,7 @@ class TestWorkflowHygiene(unittest.TestCase):
         wf = self._workflow()
         self.assertIn("steps.check.outputs.verdict == 'unknown'", wf)
         self.assertIn("exit 1", wf)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
