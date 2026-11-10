@@ -918,18 +918,20 @@ def read_header(blob: bytes, stats: dict | None = None) -> dict:
     if stats is None:
         stats = {}
     if blob[:3] == b"\x8e\xad\xe8":          # legacy header w/ magic + reserved
-        if len(blob) < 20:
+        # magic(3) + version(1) + reserved(4) = 8 bytes, then nindex and hlen:
+        # the same four words rpm's hdrblobRead() reads before the index
+        if len(blob) < 16:
             stats["headers_rejected"] = stats.get("headers_rejected", 0) + 1
             return {}
-        nindex, hlen = struct.unpack(">II", blob[12:20])
-        base = 20
+        nindex, hlen = struct.unpack(">II", blob[8:16])
+        base = 16
     else:                                    # rpm>=4.16 ndb blob: nindex, hlen, ...
         if len(blob) < 8:
             stats["headers_rejected"] = stats.get("headers_rejected", 0) + 1
             return {}
         nindex, hlen = struct.unpack(">II", blob[:8])
         base = 8
-    # `base`, not a hard-coded 8: the legacy layout puts the index at offset 20.
+    # `base`, not a hard-coded 8: the legacy layout puts the index at offset 16.
     if base + 16 * nindex + hlen > len(blob) + 40:
         stats["headers_rejected"] = stats.get("headers_rejected", 0) + 1
         return {}

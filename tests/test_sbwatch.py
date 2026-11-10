@@ -2724,5 +2724,36 @@ class TestStickyIssueBodyLimit(unittest.TestCase):
             self.assertIn(f"+{n - 64800} chars", out)
 
 
+def rpm_header(entries, magic=False):
+    """Build an rpm header blob: (tag, type, bytes) entries, optionally with the
+    8-byte magic/version/reserved prefix (8e ad e8 01 00 00 00 00)."""
+    import struct
+    store, index = b"", b""
+    for tag, typ, val in entries:
+        index += struct.pack(">IIII", tag, typ, len(store), 1)
+        store += val
+    body = struct.pack(">II", len(entries), len(store)) + index + store
+    return (b"\x8e\xad\xe8\x01\x00\x00\x00\x00" + body) if magic else body
+
+
+class TestMagicPrefixedRpmHeader(unittest.TestCase):
+    """magic(3) + version(1) + reserved(4) is 8 bytes, then nindex and hlen: the
+    index starts at 16, not at 20."""
+
+    ENTRIES = [(1000, 6, b"foo\0"), (1001, 6, b"1.2\0")]
+
+    def test_magic_prefixed_header_parses_like_the_bare_one(self):
+        bare = S.read_header(rpm_header(self.ENTRIES))
+        self.assertEqual(bare, {"name": "foo", "version": "1.2"})
+        stats = {}
+        self.assertEqual(S.read_header(rpm_header(self.ENTRIES, magic=True), stats), bare)
+        self.assertEqual(stats, {})
+
+    def test_a_truncated_magic_prefix_is_rejected_and_counted(self):
+        stats = {}
+        self.assertEqual(S.read_header(b"\x8e\xad\xe8\x01\x00\x00\x00\x00\x00\x00", stats), {})
+        self.assertEqual(stats["headers_rejected"], 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
