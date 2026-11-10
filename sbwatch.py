@@ -2058,6 +2058,23 @@ ICON_EN = {"update-now": "[!] UPDATE NOW",
            "unknown": "[?] UNKNOWN"}
 
 
+def _build_evr(p: dict) -> str:
+    """version-release of the source build a binary package came from.
+
+    A group is labelled with its source package, so it has to show that build's
+    version, not whatever the alphabetically first subpackage calls itself. Some
+    subpackages carry a Version of their own: nspr 4.39.0 is built from nss
+    3.131.0 and sorts first, so an nss update was reported under nspr's numbers
+    (likewise device-mapper for lvm2, brlapi for brltty and libdhash for
+    ding-libs on the live F45 image). `srpm` is "<src>-<version>-<release>";
+    package_list() strips `.src.rpm`, but not the `.nosrc.rpm` of a NoSource build.
+    """
+    src, srpm = p.get("src") or "", p.get("srpm") or ""
+    if src and srpm.startswith(src + "-"):
+        return srpm[len(src) + 1:].removesuffix(".nosrc.rpm").removesuffix(".src.rpm")
+    return p.get("evr", "?")
+
+
 def group_by_src(changed: list) -> list:
     """Collapse binary subpackages that come from the same source build."""
     groups: dict = {}
@@ -2118,7 +2135,7 @@ def group_by_src(changed: list) -> list:
         g["cves"] = sorted(g["cves"])
         g["dropped"] = sorted(g["dropped"])
         o, n = g["pkgs"][0]["old"], g["pkgs"][0]["new"]
-        g["old_evr"], g["new_evr"] = o.get("evr", "?"), n.get("evr", "?")
+        g["old_evr"], g["new_evr"] = _build_evr(o), _build_evr(n)
     return out
 
 

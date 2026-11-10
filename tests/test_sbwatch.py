@@ -2200,5 +2200,28 @@ class TestTagListCapIsReported(unittest.TestCase):
         self.assertIn("capped at 3 pages", err.getvalue())
 
 
+class TestGroupShowsTheSourceBuildVersion(unittest.TestCase):
+    @staticmethod
+    def _nss(name, evr, build):
+        p = pkg(name, evr, "nss")
+        p["srpm"] = "nss-" + build          # as package_list() stores it
+        return p
+
+    def test_subpackage_with_its_own_version_does_not_stand_in_for_the_source(self):
+        # nspr is built from nss, carries its own Version and sorts first
+        pa = {"nspr": self._nss("nspr", "4.38.0-9.fc45", "3.130.0-1.fc45"),
+              "nss": self._nss("nss", "3.130.0-1.fc45", "3.130.0-1.fc45")}
+        pb = {"nspr": self._nss("nspr", "4.39.0-9.fc45", "3.131.0-1.fc45"),
+              "nss": self._nss("nss", "3.131.0-1.fc45", "3.131.0-1.fc45")}
+        g = S.group_by_src(S.pkg_diff(pa, pb)["changed"])[0]
+        self.assertEqual([p["name"] for p in g["pkgs"]], ["nspr", "nss"])
+        self.assertEqual((g["old_evr"], g["new_evr"]), ("3.130.0-1.fc45", "3.131.0-1.fc45"))
+
+    def test_entry_without_a_source_rpm_falls_back_to_its_own_evr(self):
+        old, new = {"name": "x", "evr": "1-1"}, {"name": "x", "evr": "1-2"}
+        g = S.group_by_src([{"name": "x", "src": "x", "old": old, "new": new}])[0]
+        self.assertEqual((g["old_evr"], g["new_evr"]), ("1-1", "1-2"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
