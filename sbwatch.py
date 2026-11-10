@@ -2113,7 +2113,7 @@ def split_bilingual(s: str) -> tuple[str, str]:
 
 
 def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
-                           xc=None, backlog=None) -> str:
+                           xc=None, backlog=None, groups=None) -> str:
     xc = xc or {}
     L = []
     W = L.append
@@ -2278,7 +2278,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W("")
 
     changed = diff["changed"]
-    groups = group_by_src(changed)
+    if groups is None:
+        groups = group_by_src(changed)
     g_down = [g for g in groups if g["downgrade"]]
     g_lost = [g for g in groups if g["dropped"]]
     g_sec = [g for g in groups if g["security"] and not g["downgrade"]]
@@ -2590,8 +2591,13 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
 
 def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog=None) -> str:
     """Render markdown report: pure Chinese section first, followed by '---' separator, then pure English section."""
-    zh_part = _render_markdown_lang("zh", subject, a, b, diff, ldiff, verdict, notes, xc, backlog)
-    en_part = _render_markdown_lang("en", subject, a, b, diff, ldiff, verdict, notes, xc, backlog)
+    # Both halves list the same source-package groups: build them once instead of
+    # re-aggregating every changed package for each language.
+    groups = group_by_src(diff["changed"])
+    zh_part = _render_markdown_lang("zh", subject, a, b, diff, ldiff, verdict, notes, xc, backlog,
+                                    groups)
+    en_part = _render_markdown_lang("en", subject, a, b, diff, ldiff, verdict, notes, xc, backlog,
+                                    groups)
     return f"{zh_part.strip()}\n\n---\n\n{en_part.strip()}\n"
 
 
