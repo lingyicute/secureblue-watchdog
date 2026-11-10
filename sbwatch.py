@@ -2471,7 +2471,11 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                   f"{clip_list(g['unreleased'], 4, render=lambda x: x['alias'] + ' (' + str(x['status']) + ')')}")
         W("")
 
-    if not changed and (isinstance(diff.get("count_a"), int) or diff.get("same_rpmdb")):
+    # "every package has the same NEVRA" also needs an unchanged package *set*:
+    # an update that only added or removed packages used to be told it was
+    # entirely rebuilt content.
+    if (not changed and not diff["added"] and not diff["removed"]
+            and (isinstance(diff.get("count_a"), int) or diff.get("same_rpmdb"))):
         if is_zh:
             W("## 没有任何软件包版本发生变化")
             W("")

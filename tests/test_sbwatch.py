@@ -1467,6 +1467,23 @@ class TestRenderMarkdownNotesWithSlash(unittest.TestCase):
         self.assertIn("更新日志扫描上限为每包 40 条新增 / 30 条丢失条目；更多", zh_part)
         self.assertNotIn("dropped entries", zh_part)
 
+    def _render(self, diff, notes=()):
+        img_a = {"ref": "a", "digest": "sha256:1111111111111111111", "annotations": {}}
+        img_b = {"ref": "b", "digest": "sha256:2222222222222222222", "annotations": {}}
+        ldiff = {"download_bytes": 0, "total_size_b": 1000, "chunks_changed": 0,
+                 "chunks_reused": 1, "chunks_b": 1, "changed_chunks": [], "download_pct": 0.0}
+        verdict = {"level": "skip", "headline": "ok", "headline_zh": "正常",
+                   "security_pkgs": []}
+        return S.render_markdown("s", img_a, img_b, diff, ldiff, verdict, list(notes))
+
+    def test_added_packages_are_not_reported_as_identical_nevras(self):
+        diff = {"added": ["newpkg"], "removed": [], "downgrades": [], "changed": [],
+                "count_a": 10, "count_b": 11}
+        md = self._render(diff)
+        self.assertIn("`newpkg`", md)
+        self.assertNotIn("same NEVRA", md)
+        self.assertNotIn("NEVRA 完全一致", md)
+
 
 class TestRebuildNotCountedAsUpgraded(unittest.TestCase):
     def test_rebuild_excluded_from_upgraded(self):
