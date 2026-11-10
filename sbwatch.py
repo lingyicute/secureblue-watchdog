@@ -62,6 +62,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 
 # make bilingual (CJK) output safe even under a C/POSIX locale
 for _stream in (sys.stdout, sys.stderr):
@@ -776,7 +777,7 @@ class Registry:
                         o.write(chunk)
             except SystemExit:
                 raise
-            except (OSError, gzip.BadGzipFile, EOFError) as e:
+            except (OSError, gzip.BadGzipFile, EOFError, zlib.error) as e:
                 raise SystemExit(T(f"failed to read/decompress layer {d}: {e}",
                                    f"读取/解压层 {d} 失败：{e}")) from None
         return dest
