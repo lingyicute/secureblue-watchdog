@@ -1745,6 +1745,24 @@ class TestFixesThatUsedToBeSilent(unittest.TestCase):
         self.assertEqual(S.read_header(hdr, stats), {})
         self.assertEqual(stats.get("fields_skipped"), 1)
 
+    def test_report_is_written_as_utf8_whatever_the_locale(self):
+        # open() follows the locale, and the report is bilingual: under a
+        # non-UTF-8 locale it could not be written at all
+        seen = []
+        real_open = open
+
+        def spy(path, mode="r", *a, **kw):
+            seen.append(kw.get("encoding"))
+            return real_open(path, mode, *a, **kw)
+
+        with tempfile.TemporaryDirectory() as d:
+            S.open = spy
+            try:
+                S._atomic_write_text(os.path.join(d, "report.md"), "结论 / Verdict\n")
+            finally:
+                del S.open
+        self.assertEqual(seen, ["utf-8"])
+
     def test_atomic_write_text_leaves_no_partial_file(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "report.md")
