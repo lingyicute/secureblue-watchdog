@@ -2694,5 +2694,35 @@ class TestTelegramReplyLogging(unittest.TestCase):
         self.assertNotIn("Telegram push failed", err)
 
 
+class TestStickyIssueBodyLimit(unittest.TestCase):
+    """GitHub refuses an issue/comment body over 65536 characters; the step used to
+    fail on a big update and took the Telegram push after it down too."""
+
+    def _trim(self, body):
+        code = workflow_python("Comment on (or open) a sticky issue")
+        cwd = os.getcwd()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                os.chdir(d)
+                with open("body.md", "w", encoding="utf-8") as fh:
+                    fh.write(body)
+                exec(compile(code, "issue-step", "exec"), {"__name__": "__main__"})
+                with open("body.md", encoding="utf-8") as fh:
+                    return fh.read()
+        finally:
+            os.chdir(cwd)
+
+    def test_a_body_under_the_limit_is_untouched(self):
+        body = "更" * 65000
+        self.assertEqual(self._trim(body), body)
+
+    def test_an_oversized_body_is_cut_under_the_limit_and_says_so(self):
+        for n in (65001, 70000, 300000):
+            out = self._trim("更" * n)
+            self.assertLessEqual(len(out), 65536, n)
+            self.assertIn("chars not shown", out)
+            self.assertIn(f"+{n - 64800} chars", out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

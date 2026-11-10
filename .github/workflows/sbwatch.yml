@@ -263,6 +263,17 @@ jobs:
             if [ -n "${FAIL_REASON:-}" ]; then printf '> fail-on-security trigger: %s\n\n' "$FAIL_REASON"; fi
             if [ -f report.md ]; then cat report.md; else echo "_no report_"; fi
           } > body.md
+          # GitHub refuses an issue/comment body over 65536 characters, and a big
+          # update (a Fedora rebase moves ~1100 source packages, tabled in both
+          # languages) exceeds that on its own: the step failed and took the
+          # Telegram push after it down too.
+          python3 - <<'PY'
+          s = open("body.md", encoding="utf-8").read()
+          if len(s) > 65000:
+              s = s[:64800] + (f"\n\n… (+{len(s) - 64800} chars not shown: GitHub caps a comment at "
+                               "65536 characters - the full report is in the run summary and artifact)\n")
+              open("body.md", "w", encoding="utf-8").write(s)
+          PY
           num=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
                   --search "in:title $title" --json number --jq '.[0].number // empty')
           if [ -n "$num" ]; then
