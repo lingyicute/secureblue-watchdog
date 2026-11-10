@@ -1727,6 +1727,30 @@ class TestFixesThatUsedToBeSilent(unittest.TestCase):
             S.load_pkglist = orig
         self.assertFalse([n for n in res["notes"] if "backlog audit coverage" in n])
 
+    def test_multilib_note_counts_what_it_leaves_out(self):
+        # a bare " …" cannot tell 1 hidden collision from 100 (see clip_list)
+        import types
+
+        class Reg:
+            def _token(self):
+                return None
+
+        pb = S.PackageTable({"nano": pkg("nano", "8.0-1.fc44")})
+        pb.collisions = [{"name": f"lib{i}", "kept_arch": "x86_64", "kept_evr": "1-1",
+                          "shadowed_arch": "i686", "shadowed_evr": "1-1"} for i in range(6)]
+        args = types.SimpleNamespace(exact=1, keep_order=True, no_bodhi=True, audit=False,
+                                     max_bodhi=0, cache_dir=None, cosign_pub=None)
+        img = {"ref": "a", "digest": "sha256:" + "1" * 64, "annotations": {}, "layers": []}
+        orig = S.load_pkglist
+        S.load_pkglist = lambda *a: pb
+        try:
+            res = S.do_diff(args, "a", "b", images=(img, dict(img, ref="b")), reg=Reg())
+        finally:
+            S.load_pkglist = orig
+        note = next(n for n in res["notes"] if "multilib" in n)
+        self.assertIn("+2 more not shown", note.en)
+        self.assertIn("另有 2 个未显示", note.zh)
+
     def test_group_by_src_accepts_entries_without_dir(self):
         g = S.group_by_src([{"name": "foo", "src": "foo", "cls": {},
                              "old": {"evr": "1-1"}, "new": {"evr": "2-1"}}])

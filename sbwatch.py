@@ -3381,14 +3381,17 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
             f"准确性（epoch、更新日志/CVE 扫描）"))
     if getattr(pb, "collisions", None):
         _c = pb.collisions
-        _ex = ", ".join(f"{x['name']}.{x['shadowed_arch']} ({x['shadowed_evr']})"
-                        for x in _c[:4])
+
+        def _shadowed(x):
+            return f"{x['name']}.{x['shadowed_arch']} ({x['shadowed_evr']})"
+
         notes.append(T(
             f"{len(_c)} package name(s) exist in more than one architecture in this image "
-            f"(multilib); the table is name-keyed, so the lower EVR is not diffed: {_ex}"
-            f"{' …' if len(_c) > 4 else ''}",
+            f"(multilib); the table is name-keyed, so the lower EVR is not diffed: "
+            f"{clip_list(_c, 4, render=_shadowed)}",
             f"此镜像中有 {len(_c)} 个包名存在多个架构（multilib）；本表以包名为键，"
-            f"因此较低 EVR 的那一个不参与 diff：{_ex}{' …' if len(_c) > 4 else ''}"))
+            f"因此较低 EVR 的那一个不参与 diff："
+            f"{clip_list(_c, 4, lang='zh', joiner='，', render=_shadowed)}"))
     # disclose changelog-scan truncation: a cap nobody reports is how "no CVE
     # found" silently becomes "no CVE read"
     trunc = []
@@ -3401,11 +3404,11 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
         notes.append(T(
             f"changelog scan capped at {NEW_LOG_CAP} new / {OLD_LOG_CAP} dropped entries "
             f"per package; {len(trunc)} package(s) had more and were only partially read "
-            f"({', '.join(sorted(trunc)[:6])}{'…' if len(trunc) > 6 else ''}) - CVE mentions "
+            f"({clip_list(sorted(trunc), 6)}) - CVE mentions "
             f"beyond the cap were NOT read for them",
             f"更新日志扫描上限为每包 {NEW_LOG_CAP} 条新增 / {OLD_LOG_CAP} 条丢失条目；"
             f"{len(trunc)} 个软件包超出上限、只被部分读取"
-            f"（{', '.join(sorted(trunc)[:6])}{'…' if len(trunc) > 6 else ''}）——"
+            f"（{clip_list(sorted(trunc), 6, lang='zh', joiner='，')}）——"
             f"超出部分的 CVE 提及未被读取"))
     xc = crosscheck_chunks(ld, diff, {n: p["src"] for n, p in pb.items()})
     backlog, coverage = [], {"candidates": 0, "checked": 0, "skipped": 0, "failed": 0,
