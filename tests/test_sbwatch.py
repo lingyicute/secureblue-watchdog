@@ -2612,5 +2612,76 @@ class TestClipTextHonoursBoth(unittest.TestCase):
         self.assertNotIn("clip_text(seen, 16, lang='both')", src)
 
 
+WORKFLOW = os.path.join(os.path.dirname(HERE), ".github", "workflows", "sbwatch.yml")
+
+
+def workflow_python(step):
+    """The first `python3 - <<'PY'` heredoc of the named workflow step, dedented."""
+    import textwrap
+    with open(WORKFLOW, encoding="utf-8") as fh:
+        wf = fh.read()
+    start = wf.index(f"- name: {step}")
+    end = wf.find("\n      - name:", start + 1)
+    block = wf[start:end if end != -1 else len(wf)]
+    m = re.search(r"python3 - <<'PY'\n(.*?)\n\s*PY\n", block, re.S)
+    return textwrap.dedent(m.group(1))
+
+
+class TestTelegramPush(unittest.TestCase):
+    """Telegram answers HTTP 400 to a text over 4096 characters. The report is
+    bilingual and a busy update's summary alone is long, so a fixed slice of the
+    report plus the summary could cross the limit."""
+
+    def _push(self, report, summary="[UPDATE-NOW] summary", reply=b'{"ok":true}'):
+        import contextlib
+        code = workflow_python("Push to Telegram")
+        sent = {}
+
+        class Resp:
+            def read(self_inner):
+                return reply
+
+        def fake_urlopen(req, timeout=None):
+            sent.update(json.loads(req.data.decode("utf-8")))
+            return Resp()
+
+        saved = S.urllib.request.urlopen
+        saved_env = dict(os.environ)
+        cwd = os.getcwd()
+        S.urllib.request.urlopen = fake_urlopen
+        os.environ.update({"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "1",
+                           "SUMMARY": summary})
+        err = io.StringIO()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                os.chdir(d)
+                with open("report.md", "w", encoding="utf-8") as fh:
+                    fh.write(report)
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                    exec(compile(code, "telegram-step", "exec"), {"__name__": "__main__"})
+        finally:
+            os.chdir(cwd)
+            S.urllib.request.urlopen = saved
+            os.environ.clear()
+            os.environ.update(saved_env)
+        return sent.get("text"), err.getvalue()
+
+    def test_a_long_report_is_cut_to_fit_and_says_so(self):
+        text, _ = self._push("更新" * 6000, summary="S" * 1500)
+        self.assertLessEqual(len(text), 4096)
+        self.assertTrue(text.startswith("S" * 1500), "the summary must always survive")
+        self.assertIn("full report in the run summary", text)
+
+    def test_a_report_that_fits_is_sent_whole(self):
+        body = "x" * 4000
+        text, _ = self._push(body, summary="sum")
+        self.assertEqual(text, "sum\n\n" + body)
+
+    def test_a_missing_report_is_not_fatal(self):
+        text, err = self._push("", summary="sum")
+        self.assertEqual(text, "sum\n\n")
+        self.assertNotIn("failed", err)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
