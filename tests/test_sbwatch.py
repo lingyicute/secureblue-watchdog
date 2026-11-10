@@ -2898,5 +2898,19 @@ class TestIdenticalRpmdbIsLoadedOnce(unittest.TestCase):
         self.assertEqual(calls, ["a", "b"])
 
 
+class TestMissingEntriesShortCircuits(unittest.TestCase):
+    A = {"time": 1, "who": "x", "text": "one"}
+    B = {"time": 1, "who": "x", "text": "two"}
+
+    def test_empty_sides(self):
+        self.assertEqual(S._missing_entries([], [self.A]), [])
+        self.assertEqual(S._missing_entries([self.A, self.B], []), [self.A, self.B])
+        self.assertEqual(S._missing_entries([], []), [])
+
+    def test_multiplicity_is_still_counted(self):
+        self.assertEqual(S._missing_entries([self.A, self.A, self.B], [self.A]),
+                         [self.A, self.B])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
