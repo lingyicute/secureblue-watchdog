@@ -2062,6 +2062,13 @@ class TestWorkflowHygiene(unittest.TestCase):
         self.assertIn("steps.check.outputs.verdict == 'unknown'", wf)
         self.assertIn("exit 1", wf)
 
+    def test_an_inconclusive_run_still_uploads_its_report(self):
+        # the failing step says "the report is already uploaded above"
+        wf = self._workflow()
+        step = wf.split("- name: Upload report")[1].split("- name:")[0]
+        cond = re.search(r"^\s*if: (.*)$", step, re.M).group(1)
+        self.assertNotIn("'unknown'", cond)
+
 
 # --------------------------------------------------------------------------- #
 # N - report / CLI rendering and robustness findings
