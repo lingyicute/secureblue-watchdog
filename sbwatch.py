@@ -1700,12 +1700,17 @@ def secureblue_notification(diff: dict, groups: list | None = None,
 
 
 def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
-               backlog: list | None = None, bodhi_state: dict | None = None) -> dict:
+               backlog: list | None = None, bodhi_state: dict | None = None,
+               groups: list | None = None) -> dict:
     """Turn the raw diff into a recommendation. Grouped by *source* package so that a
     21-subpackage linux-firmware bump is not counted as 21 separate events.
-    Bilingual: sets headline (English) and headline_zh (中文)."""
+    Bilingual: sets headline (English) and headline_zh (中文).
+
+    `groups` is group_by_src(diff["changed"]) when the caller already has it: the
+    report renders the very same groups, so do_diff() builds them once for both."""
     xc = xc or {}
-    groups = group_by_src(diff["changed"])
+    if groups is None:
+        groups = group_by_src(diff["changed"])
     sec = [g for g in groups if g["security"] and not g["downgrade"]]
     down = [g for g in groups if g["downgrade"]]
     lost = [g for g in groups if g["dropped"]]
@@ -2630,11 +2635,14 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
     return "\n".join(L)
 
 
-def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog=None) -> str:
+def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog=None,
+                    groups=None) -> str:
     """Render markdown report: pure Chinese section first, followed by '---' separator, then pure English section."""
     # Both halves list the same source-package groups: build them once instead of
-    # re-aggregating every changed package for each language.
-    groups = group_by_src(diff["changed"])
+    # re-aggregating every changed package for each language - or not at all when
+    # the caller hands over the groups verdict_of() was already given.
+    if groups is None:
+        groups = group_by_src(diff["changed"])
     zh_part = _render_markdown_lang("zh", subject, a, b, diff, ldiff, verdict, notes, xc, backlog,
                                     groups)
     en_part = _render_markdown_lang("en", subject, a, b, diff, ldiff, verdict, notes, xc, backlog,
@@ -3434,7 +3442,10 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
         # Not the same thing as --no-bodhi: the Fedora release could not be
         # derived from the package list, so no erratum could be queried at all.
         bstate = {"unavailable": 1}
-    v = verdict_of(diff, ld, meta, xc, backlog, bstate)
+    # One aggregation per run: the verdict and both halves of the report all read
+    # the same source-package groups.
+    groups = group_by_src(diff["changed"])
+    v = verdict_of(diff, ld, meta, xc, backlog, bstate, groups)
     # `backlog` is always a list, so test what decides whether the audit ran:
     # without Bodhi (--no-bodhi, unknown release) there is no coverage to report,
     # and "0 of 0 candidate source packages were queried" read as nothing to do.
@@ -3455,7 +3466,8 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
             f"{MAX_BODHI_PAGES * BODHI_PAGE_SIZE} 条，因此对它们而言"
             f"「没有安全修复」并未被证实"))
     return {"a": a, "b": b, "diff": diff, "layers": ld, "xc": xc, "verdict": v,
-            "notes": notes, "release": rel, "backlog": backlog, "backlog_coverage": coverage}
+            "notes": notes, "release": rel, "backlog": backlog, "backlog_coverage": coverage,
+            "groups": groups}
 
 
 def degrade_manifest_only_verdict(v: dict, ld: dict) -> dict:
@@ -3488,7 +3500,7 @@ def cmd_diff(args):
     md = render_markdown(f"{args.image}: {shortref(res['a']['ref'])} → {shortref(res['b']['ref'])}",
                          res["a"], res["b"],
                          res["diff"], res["layers"], res["verdict"], res["notes"],
-                         res.get("xc"), res.get("backlog"))
+                         res.get("xc"), res.get("backlog"), res.get("groups"))
     if args.markdown:
         _atomic_write_text(args.markdown, md)
         log(T(f"wrote {args.markdown}", f"已写入 {args.markdown}"))
@@ -3736,7 +3748,7 @@ def cmd_check(args):
     md = render_markdown(
         f"secureblue update watch / secureblue 更新监控 - {args.image}  {shortref(label_a)} -> {args.to} ({ver})",
                          res["a"], res["b"], res["diff"], res["layers"], v, res["notes"],
-                         res.get("xc"), res.get("backlog"))
+                         res.get("xc"), res.get("backlog"), res.get("groups"))
     report = args.report or "report.md"
     _atomic_write_text(report, md)
     print(md)
