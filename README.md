@@ -258,7 +258,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/test_sbwatch.py` 是 **158 项离线回归测试**，不需要网络、不访问 registry
+`tests/test_sbwatch.py` 是 **161 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -315,6 +315,7 @@ CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并�
 - cosign 公钥 `cosign.pub` **入库**并校验 sha256（`COSIGN_PUB_SHA256`），
   运行时不再从网络取钥；上游换钥会在这里失败，而不是静默改变"已验证"的含义
 - 若配置了 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` secrets，推送到 Telegram
+  （Telegram 单条消息上限 4096 字符，超出部分会被截断并注明，完整报告见 run summary）
 
 环境变量（workflow_dispatch 输入）：
 - `SB_IMAGE` (默认 `secureblue/silverblue-main-hardened`)

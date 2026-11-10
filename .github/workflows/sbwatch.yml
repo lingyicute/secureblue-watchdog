@@ -282,10 +282,16 @@ jobs:
           python3 - <<'PY'
           import json, os, urllib.request, sys
           try:
-              body = open("report.md").read()[:3500]
+              body = open("report.md", encoding="utf-8").read()
           except FileNotFoundError:
               body = "(no report)"
           text = (os.environ.get("SUMMARY") or "secureblue update") + "\n\n" + body
+          # Telegram rejects (HTTP 400) any text over 4096 characters, and the
+          # summary alone can approach 800 on a busy update (the 113-CVE webkitgtk
+          # case measures ~790) - so a fixed 3500-char slice of the report plus the
+          # summary could cross the limit.
+          if len(text) > 4096:
+              text = text[:4000] + f"\n… (+{len(text) - 4000} chars - full report in the run summary)"
           try:
               req = urllib.request.Request(
                   "https://api.telegram.org/bot{}/sendMessage".format(os.environ["TELEGRAM_BOT_TOKEN"]),
