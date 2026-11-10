@@ -2591,5 +2591,26 @@ class TestSecurityTableSurvivesAPipeInTheEvidence(unittest.TestCase):
             self.assertEqual(len(re.findall(r"(?<!\\)\|", row)), 5, row)
 
 
+class TestClipTextHonoursBoth(unittest.TestCase):
+    """clip_list() has always had a bilingual marker for strings shown in both
+    halves at once; clip_text() silently fell back to English for lang="both"."""
+
+    def test_both_marks_the_cut_in_both_languages(self):
+        out = S.clip_text("x" * 95, 90, lang="both")
+        self.assertIn("(+5 chars not shown", out)
+        self.assertIn("另有 5 个字符未显示", out)
+
+    def test_en_and_zh_are_unchanged(self):
+        self.assertTrue(S.clip_text("x" * 95, 90).endswith("(+5 chars not shown)"))
+        self.assertNotIn("另有", S.clip_text("x" * 95, 90))
+        self.assertNotIn("not shown", S.clip_text("x" * 95, 90, lang="zh"))
+
+    def test_the_english_half_of_a_note_does_not_carry_chinese(self):
+        # cmd_check's "not the only new one" note builds its English half from
+        # clip_text(seen, 16); the Chinese half has its own lang='zh' call
+        src = open(os.path.join(os.path.dirname(HERE), "sbwatch.py"), encoding="utf-8").read()
+        self.assertNotIn("clip_text(seen, 16, lang='both')", src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
