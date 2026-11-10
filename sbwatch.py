@@ -3635,7 +3635,10 @@ def cmd_check(args):
         try:
             hist = build_history(reg, scan=args.scan, days=0, to=args.to,
                                  warn=hist_warnings)
-        except Exception as e:
+        except (Exception, RegistryError) as e:
+            # RegistryError is a SystemExit, so a bare `except Exception` let it
+            # through: a registry hiccup in this optional scan ended the whole run
+            # instead of falling back the way the note below promises.
             log(T(f"  ! history scan failed: {clip_text(e, 80)}",
                   f"  ！历史扫描失败：{clip_text(e, 80, lang='zh')}"))
             hist_warnings.append(T(

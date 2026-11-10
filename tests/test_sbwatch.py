@@ -2113,5 +2113,38 @@ class TestHistoryHeaderAlignment(unittest.TestCase):
                              f"column {en_label!r} is misaligned")
 
 
+class TestCheckSurvivesAFailedHistoryScan(unittest.TestCase):
+    def test_registry_error_in_the_history_scan_falls_back(self):
+        import contextlib
+        import types
+
+        cur = {"ref": "latest", "digest": "sha256:" + "a" * 64,
+               "index_digest": "sha256:" + "b" * 64, "created": "2026-01-01T00:00:00Z",
+               "annotations": {}, "layers": []}
+
+        def boom(*a, **kw):
+            raise S.RegistryError("registry error 503 for x/y", http_code=503)
+
+        saved = S._registry, S.resolve, S.build_history, S.tag_exists
+        saved_env = {k: os.environ.pop(k, None) for k in ("GITHUB_OUTPUT", "GITHUB_ACTIONS")}
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S.resolve = lambda reg, ref, light=False: cur
+        S.build_history = boom
+        S.tag_exists = lambda reg, tag, warn=None: None
+        try:
+            with tempfile.TemporaryDirectory() as d, \
+                    contextlib.redirect_stderr(io.StringIO()) as err:
+                args = types.SimpleNamespace(
+                    image="x/y", arch="amd64", to="latest", a=None, scan=12, force=False,
+                    state=os.path.join(d, "state.json"), report=os.path.join(d, "report.md"))
+                # no baseline can be found either, but that is a clean exit 0
+                self.assertEqual(S.cmd_check(args), 0)
+                self.assertTrue(os.path.exists(args.state))
+        finally:
+            S._registry, S.resolve, S.build_history, S.tag_exists = saved
+            os.environ.update({k: v for k, v in saved_env.items() if v is not None})
+        self.assertIn("history scan failed", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
