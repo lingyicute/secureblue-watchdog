@@ -3045,8 +3045,10 @@ def cmd_history(args):
           "cost 下载量 = 上一行镜像的客户端升级到本行需下载的字节数\n")
     print(f"  {'created (UTC)':19} {'image version':15} {'input':11} "
           f"{'chunks':8} {'cost':>9}  {'kernel':22} refs")
-    print(f"  {'创建时间 (UTC)':16} {'镜像版本':13} {'输入哈希':10} "
-          f"{'chunk':8} {'下载量':>8}  {'内核':20} 引用")
+    # A CJK character fills two terminal cells, so each width is the English one
+    # minus the number of CJK characters in the label.
+    print(f"  {'创建时间 (UTC)':15} {'镜像版本':11} {'输入哈希':7} "
+          f"{'chunk':8} {'下载量':>6}  {'内核':20} 引用")
     print("  " + "-" * 110)
     dup = 0
     for r in reversed(rows):
