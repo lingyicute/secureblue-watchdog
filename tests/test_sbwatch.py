@@ -2683,5 +2683,16 @@ class TestTelegramPush(unittest.TestCase):
         self.assertNotIn("failed", err)
 
 
+class TestTelegramReplyLogging(unittest.TestCase):
+    def test_a_delivered_push_is_not_logged_as_failed_on_a_split_character(self):
+        # the first 150 bytes of a reply naming a CJK chat end inside a character
+        reply = ('{"ok":true,"result":{"chat":{"title":"' + "测试" * 60 + '"}}}').encode("utf-8")
+        with self.assertRaises(UnicodeDecodeError):
+            reply[:150].decode()                      # what the step used to do
+        text, err = TestTelegramPush()._push("report", reply=reply)
+        self.assertEqual(text, "[UPDATE-NOW] summary\n\nreport")
+        self.assertNotIn("Telegram push failed", err)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

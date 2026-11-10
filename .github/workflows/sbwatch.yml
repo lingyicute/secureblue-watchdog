@@ -298,7 +298,9 @@ jobs:
                   data=json.dumps({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text,
                                    "disable_web_page_preview": True}).encode(),
                   headers={"Content-Type": "application/json"})
-              print(urllib.request.urlopen(req, timeout=30).read()[:150].decode())
+              # a byte slice can end inside a multi-byte character (a CJK chat
+              # title or bot name), which made a delivered push log as failed
+              print(urllib.request.urlopen(req, timeout=30).read()[:150].decode("utf-8", "replace"))
           except Exception as e:
               print(f"Telegram push failed (non-fatal): {e}", file=sys.stderr)
           PY
