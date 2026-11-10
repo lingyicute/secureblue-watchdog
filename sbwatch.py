@@ -3557,7 +3557,9 @@ def gh_outputs(pairs):
     path = os.environ.get("GITHUB_OUTPUT")
     if not path:
         return
-    with open(path, "a") as f:
+    # utf-8 by name, as for the report: `summary` is bilingual, and open() would
+    # otherwise follow the locale - an ASCII one could not write it at all
+    with open(path, "a", encoding="utf-8") as f:
         for k, v in pairs.items():
             if isinstance(v, str) and "\n" in v:
                 f.write(f"{k}<<EOF_SBWATCH\n{v}\nEOF_SBWATCH\n")
