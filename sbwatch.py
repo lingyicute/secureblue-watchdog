@@ -2585,14 +2585,13 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         for r in backlog[:25]:
             W(f"| `{r['name']}` | {r['have']} | **{r['want']}** | {r['severity'] or '?'} | {r['alias']} |")
         if len(backlog) > 25:
-            # --audit raises this cap; say what was cut instead of just ending the table
+            # A fixed display cap: --backlog-candidates changes how many rows exist,
+            # never how many fit here, so point at the complete JSON instead.
             if is_zh:
-                W(f"- ……另有 {len(backlog)-25} 行未显示（提高 --backlog-candidates 可全部显示；"
-                  f"JSON 输出中始终包含全部 {len(backlog)} 行）")
+                W(f"- ……另有 {len(backlog)-25} 行未显示（JSON 输出中始终包含全部 {len(backlog)} 行）")
             else:
-                W(f"- … and {len(backlog)-25} more row(s) not shown (raise "
-                  f"--backlog-candidates to see them; the JSON output always carries "
-                  f"all {len(backlog)})")
+                W(f"- … and {len(backlog)-25} more row(s) not shown (the JSON output always "
+                  f"carries all {len(backlog)})")
         W("")
 
     if ldiff["changed_chunks"]:
