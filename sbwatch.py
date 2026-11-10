@@ -3294,9 +3294,9 @@ def cmd_pkgs(args):
     pkgs = package_list(reg, r)
     if args.json:
         slim = {k: {a: b for a, b in v.items() if a != "changelog"} for k, v in pkgs.items()}
-        json.dump({"ref": args.ref, "digest": r["digest"],
-                   "annotations": r["annotations"], "packages": slim},
-                  open(args.json, "w"), indent=1)
+        with open(args.json, "w") as fh:
+            json.dump({"ref": args.ref, "digest": r["digest"],
+                       "annotations": r["annotations"], "packages": slim}, fh, indent=1)
         log(T(f"wrote {args.json}: {len(pkgs)} packages",
               f"已写入 {args.json}：{len(pkgs)} 个软件包"))
         return 0
@@ -3348,7 +3348,8 @@ def load_pkglist(reg, img, ref, cache_dir, notes):
     cf = os.path.join(cache_dir, f"pkglist-{img['digest'].replace(':', '')}.json")
     if os.path.exists(cf) and os.path.getsize(cf) > 10_000:
         try:
-            data = json.load(open(cf))
+            with open(cf) as fh:
+                data = json.load(fh)
             if isinstance(data, dict) and "packages" in data:
                 pk = PackageTable(data["packages"])
                 pk.collisions = list(data.get("collisions") or [])
@@ -3671,7 +3672,8 @@ def cmd_check(args):
     state = {}
     if os.path.exists(state_path):
         try:
-            state = json.load(open(state_path))
+            with open(state_path) as fh:
+                state = json.load(fh)
         except Exception:
             state = {}
     reg = _registry(args)
