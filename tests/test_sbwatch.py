@@ -697,6 +697,7 @@ class TestBacklogCoverage(unittest.TestCase):
                                     "pool_missing": ["nginx", "bind"]})
         self.assertIn("3 of 9", cov_line)
         self.assertIn("6 were cut off", cov_line)
+        self.assertIn("--backlog-candidates", cov_line)   # the cap that cut them
         self.assertIn("2 BACKLOG_POOL entries", cov_line)
 
     def test_backlog_returns_rows_and_coverage(self):

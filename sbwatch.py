@@ -2781,13 +2781,13 @@ def coverage_line(cov: dict) -> str:
     """One honest sentence about how much of the backlog audit actually ran."""
     en = (f"backlog audit coverage: {cov['checked']} of {cov['candidates']} candidate source "
           f"packages in the image were queried"
-          + (f", {cov['skipped']} were cut off by --max-bodhi "
+          + (f", {cov['skipped']} were cut off by --backlog-candidates "
              f"({clip_list(cov.get('skipped_names', []), 6)})"
              if cov.get("skipped") else "")
           + (f"; {cov['pool_missing'] and len(cov['pool_missing'])} BACKLOG_POOL entries are not "
              f"in this image" if cov.get("pool_missing") else ""))
     zh = (f"backlog 审计覆盖率：镜像内 {cov['candidates']} 个候选源码包中查询了 {cov['checked']} 个"
-          + (f"，{cov['skipped']} 个因 --max-bodhi 上限被截断"
+          + (f"，{cov['skipped']} 个因 --backlog-candidates 上限被截断"
              f"（{clip_list(cov.get('skipped_names', []), 6, lang='zh', joiner='，')}）"
              if cov.get("skipped") else "")
           + (f"；BACKLOG_POOL 中有 {len(cov['pool_missing'])} 个条目不在此镜像内"
@@ -2809,7 +2809,10 @@ def cmd_backlog(args):
                            "list, so no errata can be queried",
                            "无法从此镜像的软件包列表判断 Fedora 版本，因此无法查询勘误"))
     bodhi = Bodhi(cache_dir=cache_dir, max_calls=args.max_bodhi)
-    rows, cov = security_backlog(pkgs, rel, bodhi, limit=args.max_bodhi)
+    # --backlog-candidates caps how many source packages get audited, as it does
+    # for `check --audit`; --max-bodhi only caps the API calls spent on them.
+    rows, cov = security_backlog(pkgs, rel, bodhi,
+                                 limit=max(1, args.backlog_candidates))
     ver = img["annotations"].get("org.opencontainers.image.version", "?")
     print(f"{args.image}:{args.ref}  version 版本 {ver}  ({rel})")
     print(T(f"{len(rows)} package(s) in this image are behind a published STABLE security update",
@@ -2831,6 +2834,11 @@ def cmd_backlog(args):
     if cov.get("failed"):
         print(T(f"  ! {cov['failed']} Bodhi query(ies) failed - those packages were NOT checked",
                 f"  ！{cov['failed']} 次 Bodhi 查询失败——这些软件包未被检查"))
+    if cov.get("skipped_queries"):
+        print(T(f"  ! {cov['skipped_queries']} source package(s) were not queried because "
+                "--max-bodhi ran out - those packages were NOT checked",
+                f"  ！{cov['skipped_queries']} 个源码包因 --max-bodhi 用尽而未被查询——"
+                "这些软件包未被检查"))
     if args.json_out:
         with open(args.json_out, "w") as fh:
             json.dump({"ref": args.ref, "digest": img["digest"], "version": ver,
