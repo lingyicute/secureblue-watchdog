@@ -2146,5 +2146,32 @@ class TestCheckSurvivesAFailedHistoryScan(unittest.TestCase):
         self.assertIn("history scan failed", err.getvalue())
 
 
+class TestGithubOutputEncoding(unittest.TestCase):
+    def test_github_output_is_written_as_utf8_whatever_the_locale(self):
+        seen = []
+        real_open = open
+
+        def spy(path, mode="r", *a, **kw):
+            seen.append(kw.get("encoding"))
+            return real_open(path, mode, *a, **kw)
+
+        saved_env = os.environ.get("GITHUB_OUTPUT")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "github_output")
+            os.environ["GITHUB_OUTPUT"] = path
+            S.open = spy
+            try:
+                S.gh_outputs({"summary": S.T("no new build", "无新构建")})
+            finally:
+                del S.open
+                if saved_env is None:
+                    del os.environ["GITHUB_OUTPUT"]
+                else:
+                    os.environ["GITHUB_OUTPUT"] = saved_env
+            self.assertEqual(seen, ["utf-8"])
+            with open(path, encoding="utf-8") as fh:
+                self.assertIn("无新构建", fh.read())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
