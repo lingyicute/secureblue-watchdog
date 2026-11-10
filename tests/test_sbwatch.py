@@ -1644,6 +1644,15 @@ class TestManifestOnlyVerdict(unittest.TestCase):
         v = S.verdict_of(d, LD_FIX, {"kernel_a": "1", "kernel_b": "1"}, xc)
         self.assertIn("kernel", v["silent_important"])
 
+    def test_silent_rebuild_of_a_versioned_source_name_is_still_important(self):
+        # chunks carry the source name, which for the interpreter is python3.14
+        xc = {"silent_rebuilds": [("python3.14", 5), ("nano", 4)],
+              "non_package_bytes": 0, "versions_known": True}
+        d = {"added": [], "removed": [], "downgrades": [], "changed": [],
+             "count_a": 5, "count_b": 5}
+        v = S.verdict_of(d, LD_FIX, {"kernel_a": "1", "kernel_b": "1"}, xc)
+        self.assertEqual(v["silent_important"], ["python3.14"])
+
 
 # --------------------------------------------------------------------------- #
 # K - smaller failures that used to be silent or fatal
