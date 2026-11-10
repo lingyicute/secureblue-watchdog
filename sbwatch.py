@@ -2969,7 +2969,8 @@ def list_tags(reg: Registry, max_pages: int = 12) -> list:
 
 
 def build_history(reg: Registry, scan: int = 12, days: int = 7,
-                  to: str = "latest", warn: list | None = None) -> list:
+                  to: str = "latest", warn: list | None = None,
+                  cur: dict | None = None) -> list:
     """Newest-first list of the images that were actually pushed to this repo.
 
     Discovery goes through ghcr's cosign attachment tags (`sha256-<digest>.sig`,
@@ -2979,9 +2980,14 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
 
     record = {digest, created, version, inputhash, kernel, image, tags[],
               from_prev, same_input_as_prev}
+
+    `cur` is `to` already resolved by the caller. `check` has just resolved (and
+    signature-checked) it; resolving it again cost three more registry round
+    trips and, if the tag moved in between, anchored the history on another build.
     """
     tags = list_tags(reg)
-    cur = resolve(reg, to)
+    if cur is None:
+        cur = resolve(reg, to)
     # Lookups that failed for a reason other than "there is no such build". They
     # must not be silent: every one of them is a row that could have been in the
     # list, and `check` picks its baseline out of this list.
@@ -3671,7 +3677,7 @@ def cmd_check(args):
     if args.scan:
         try:
             hist = build_history(reg, scan=args.scan, days=0, to=args.to,
-                                 warn=hist_warnings)
+                                 warn=hist_warnings, cur=cur)
         except (Exception, RegistryError) as e:
             # RegistryError is a SystemExit, so a bare `except Exception` let it
             # through: a registry hiccup in this optional scan ended the whole run
