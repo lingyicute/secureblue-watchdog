@@ -1013,15 +1013,13 @@ def package_list(reg: Registry, resolved: dict) -> dict:
     path = reg.extract_member(chunk, CHUNK_MATCH)
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
-        rows = con.execute("select blob from Packages").fetchall()
+        # Iterated, not fetchall()ed: the blobs add up to most of the ~92 MiB
+        # database, and only the one being parsed has to be in memory.
+        rows = con.execute("select blob from Packages")
     except sqlite3.OperationalError:
+        con.close()
         raise SystemExit(T("unexpected rpmdb schema (no Packages table)",
                            "rpmdb 结构不符合预期（没有 Packages 表）"))
-    con.close()
-    try:
-        os.unlink(path)
-    except OSError:
-        pass
     pkgs = PackageTable()
     stats: dict = {}
     for (blob,) in rows:
@@ -1049,6 +1047,11 @@ def package_list(reg: Registry, resolved: dict) -> dict:
         e["evr"] = e["version"] + "-" + e["release"]
         e["nvr"] = f"{name}-{e['version']}-{e['release']}"
         table_put(pkgs, e)
+    con.close()
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
     pkgs.headers_rejected = stats.get("headers_rejected", 0)
     pkgs.fields_skipped = stats.get("fields_skipped", 0)
     return pkgs

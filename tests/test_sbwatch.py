@@ -2413,5 +2413,95 @@ class TestTagLabelCostsOneRequest(unittest.TestCase):
         self.assertEqual(rows[0]["tags"], ["latest", "20260101", "20260101-44"])
 
 
+class TestPackageListStreamsTheRpmdb(unittest.TestCase):
+    """package_list() must not fetchall() the Packages table: the header blobs are
+    most of the ~92 MiB database and only the one being parsed has to be in memory."""
+
+    @staticmethod
+    def _blob(name, version):
+        import struct
+        ents = [(1000, name), (1001, version), (1002, "1.fc44"), (1022, "x86_64")]
+        store, index = b"", b""
+        for tag, val in ents:
+            index += struct.pack(">IIII", tag, 6, len(store), 1)
+            store += val.encode() + b"\0"
+        return struct.pack(">II", len(ents), len(store)) + index + store
+
+    def _db(self, d, create=True):
+        import sqlite3
+        path = os.path.join(d, "rpmdb.sqlite")
+        con = sqlite3.connect(path)
+        if create:
+            con.execute("create table Packages (hnum integer primary key, blob blob)")
+            con.executemany("insert into Packages (blob) values (?)",
+                            [(self._blob("foo", "1.0"),), (self._blob("bar", "2.0"),)])
+        else:
+            con.execute("create table Other (x)")
+        con.commit()
+        con.close()
+        return path
+
+    class _Spy:
+        """Wraps the connection so that fetchall() on its cursor is a failure."""
+
+        def __init__(self, con):
+            self._con, self.closed = con, False
+
+        def execute(self, sql):
+            cur = self._con.execute(sql)
+
+            class Cur:
+                def fetchall(self_inner):
+                    raise AssertionError("package_list() must iterate, not fetchall()")
+
+                def __iter__(self_inner):
+                    return iter(cur)
+            return Cur()
+
+        def close(self):
+            self.closed = True
+            self._con.close()
+
+    def _run(self, create=True):
+        chunk = {"digest": "sha256:" + "d" * 64, "size": 1,
+                 "components": ["bigfiles/rpmdb.sqlite"]}
+        with tempfile.TemporaryDirectory() as d:
+            path = self._db(d, create)
+
+            class FakeReg:
+                def extract_member(self_inner, layer, match):
+                    return path
+
+            spies = []
+            real = S.sqlite3.connect
+
+            def spy_connect(*a, **kw):
+                spies.append(self._Spy(real(*a, **kw)))
+                return spies[-1]
+
+            S.sqlite3.connect = spy_connect
+            try:
+                try:
+                    out = S.package_list(FakeReg(), {"layers": [chunk]})
+                except SystemExit as e:
+                    out = e
+            finally:
+                S.sqlite3.connect = real
+            return out, spies[0], os.path.exists(path)
+
+    def test_rows_are_streamed_and_the_database_is_cleaned_up(self):
+        pkgs, spy, still_there = self._run()
+        self.assertEqual(sorted(pkgs), ["bar", "foo"])
+        self.assertEqual(pkgs["foo"]["evr"], "1.0-1.fc44")
+        self.assertTrue(spy.closed)
+        self.assertFalse(still_there, "the extracted rpmdb must be deleted after parsing")
+
+    def test_missing_packages_table_is_still_a_clean_error(self):
+        err, spy, _ = self._run(create=False)
+        self.assertIsInstance(err, SystemExit)
+        self.assertIn("rpmdb", str(err))
+        self.assertTrue(spy.closed)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
