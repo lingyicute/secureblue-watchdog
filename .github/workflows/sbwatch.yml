@@ -223,12 +223,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # NOTE: deliberately NOT the same condition as the history step above:
-      # this one also runs for 'no-change' - a no-change run produces a real
-      # report worth keeping as an artifact, while re-listing the build history
-      # for it adds nothing.
+      # this one also runs for 'no-change' and 'unknown' - a no-change run produces
+      # a real report worth keeping as an artifact, and the final step turns an
+      # 'unknown' run red on the promise that its report was uploaded first.
       - name: Upload report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always() && steps.check.outputs.verdict != 'no-update' && steps.check.outputs.verdict != '' && steps.check.outputs.verdict != 'unknown'
+        if: always() && steps.check.outputs.verdict != 'no-update' && steps.check.outputs.verdict != ''
         with:
           name: update-watch-${{ github.run_number }}
           path: |
