@@ -1928,11 +1928,13 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         # is allowed to raise the level.
         if v["level"] == "skip":
             v["level"] = "consider"
+    coverage_gap = False
     if bodhi_state:
         bad, miss = bodhi_state.get("failed", 0), bodhi_state.get("skipped", 0)
         off = bodhi_state.get("disabled", 0)
         unavailable = bodhi_state.get("unavailable", 0)
         if bad or miss or off or unavailable:
+            coverage_gap = True
             why, why_zh = [], []
             if off:
                 why.append("Bodhi lookups were disabled (--no-bodhi)")
@@ -1967,6 +1969,19 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                           "than a lost fix - a real revert shows up as a downgrade)")
         v["headline_zh"] += (" ｜ 提示：以下 CVE 编号在新版更新日志中不再出现：" + drop_txt_zh
                              + "（通常是更新日志被编辑，而非修复被移除——真正的回退会表现为降级）")
+    # The backlog can still raise the level, so settle it before level_basis
+    # below describes that level - computed afterwards, a backlog-raised
+    # `consider` kept the basis of the `skip` it replaced.
+    hi = []
+    if backlog:
+        hi = [r for r in backlog if (r.get("severity") or "").lower() in
+              ("critical", "important", "high", "urgent")]
+        if hi and v["level"] not in ("update-now", "no-change"):
+            v["level"] = "consider"
+        v["headline"] += (f" | note: the image still misses {len(backlog)} published stable "
+                          f"security update(s){' (' + str(len(hi)) + ' important+)' if hi else ''}")
+        v["headline_zh"] += (f" ｜ 提示：该镜像仍缺少 {len(backlog)} 个已发布的 stable 安全更新"
+                             f"{'（其中 ' + str(len(hi)) + ' 个为重要及以上级别）' if hi else ''}")
     # One machine-readable sentence on why this level was chosen. The prose
     # headline explains it too, but consumers of report.md.json / GITHUB_OUTPUT
     # should not have to parse prose to find out what moved the verdict.
@@ -1991,20 +2006,17 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                 bits.append("security-relevant packages were rebuilt at the same version")
             if v["downgrades"]:
                 bits.append(f"{len(v['downgrades'])} package(s) were downgraded")
+            if coverage_gap:
+                bits.append("errata coverage is incomplete, so 'no security fixes' is "
+                            "not proven")
+            if hi:
+                bits.append(f"the image still misses {len(hi)} important+ published "
+                            f"stable security update(s)")
         elif v["level"] == "no-change":
             bits.append("no package in the rpmdb changed")
         elif v["level"] == "skip":
             bits.append("packages changed, but no CVE, erratum or sensitive package moved")
         v["level_basis"] = "; ".join(bits)
-    if backlog:
-        hi = [r for r in backlog if (r.get("severity") or "").lower() in
-              ("critical", "important", "high", "urgent")]
-        if hi and v["level"] not in ("update-now", "no-change"):
-            v["level"] = "consider"
-        v["headline"] += (f" | note: the image still misses {len(backlog)} published stable "
-                          f"security update(s){' (' + str(len(hi)) + ' important+)' if hi else ''}")
-        v["headline_zh"] += (f" ｜ 提示：该镜像仍缺少 {len(backlog)} 个已发布的 stable 安全更新"
-                             f"{'（其中 ' + str(len(hi)) + ' 个为重要及以上级别）' if hi else ''}")
     return v
 
 
