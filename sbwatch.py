@@ -380,6 +380,10 @@ def verify_cosign_image(full_ref: str, pubkey_path: str, require: bool = False) 
         return False
 
 
+# (full ref, key path, required) -> what verify_cosign_image() said in this run
+_COSIGN_RESULTS: dict = {}
+
+
 def maybe_verify_resolved(reg: Registry, resolved: dict, args, notes: list | None = None) -> bool:
     """If --cosign-pub is set, verify the resolved digest.
 
@@ -408,7 +412,14 @@ def maybe_verify_resolved(reg: Registry, resolved: dict, args, notes: list | Non
                                "没有可用于 cosign 校验的 digest"))
         return False
     full_ref = f"{reg.host}/{reg.repo}@{digest}"
-    ok = verify_cosign_image(full_ref, pub, require=req)
+    # `check` verifies the image it watches up front and do_diff() then reports
+    # on that same digest again. A digest names immutable content, so the answer
+    # cannot change within a run - the second cosign call only repeated the
+    # network round trip (up to its 90 s timeout when cosign hangs).
+    key = (full_ref, pub, req)
+    if key not in _COSIGN_RESULTS:
+        _COSIGN_RESULTS[key] = verify_cosign_image(full_ref, pub, require=req)
+    ok = _COSIGN_RESULTS[key]
     if notes is not None:
         notes.append(T(
             f"signature check: {'PASSED' if ok else 'FAILED (tolerated)'} - "

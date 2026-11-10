@@ -2223,5 +2223,58 @@ class TestGroupShowsTheSourceBuildVersion(unittest.TestCase):
         self.assertEqual((g["old_evr"], g["new_evr"]), ("1-1", "1-2"))
 
 
+class TestCosignRunsOncePerDigest(unittest.TestCase):
+    """`check` verifies the image it watches and do_diff() then reports on that
+    same digest. A digest names immutable content, so the second cosign round trip
+    (up to its 90 s timeout when cosign hangs) answered a question already asked."""
+
+    DIG = "sha256:" + "a" * 64
+
+    def setUp(self):
+        import types
+        S._COSIGN_RESULTS.clear()
+        self.calls = []
+        self.verdict = True
+        self._saved = S.verify_cosign_image
+        S.verify_cosign_image = self._fake
+        self.reg = types.SimpleNamespace(host="ghcr.io", repo="x/y")
+
+    def tearDown(self):
+        S.verify_cosign_image = self._saved
+        S._COSIGN_RESULTS.clear()
+
+    def _fake(self, ref, pub, require=False):
+        self.calls.append((ref, pub, require))
+        return self.verdict
+
+    @staticmethod
+    def _args(require=False):
+        import types
+        return types.SimpleNamespace(cosign_pub="k/cosign.pub", require_cosign=require)
+
+    def test_same_digest_is_verified_once_but_reported_every_time(self):
+        notes = []
+        for _ in range(2):
+            self.assertTrue(S.maybe_verify_resolved(
+                self.reg, {"digest": self.DIG}, self._args(), notes))
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(notes), 2, "each report must still state the outcome")
+
+    def test_a_tolerated_failure_is_remembered_too(self):
+        self.verdict = False
+        notes = []
+        for _ in range(2):
+            self.assertFalse(S.maybe_verify_resolved(
+                self.reg, {"digest": self.DIG}, self._args(), notes))
+        self.assertEqual(len(self.calls), 1)
+        self.assertTrue(all("FAILED" in str(n) for n in notes))
+
+    def test_another_digest_or_policy_is_never_answered_from_the_cache(self):
+        S.maybe_verify_resolved(self.reg, {"digest": self.DIG}, self._args())
+        S.maybe_verify_resolved(self.reg, {"digest": "sha256:" + "b" * 64}, self._args())
+        S.maybe_verify_resolved(self.reg, {"digest": self.DIG}, self._args(require=True))
+        self.assertEqual(len(self.calls), 3)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
