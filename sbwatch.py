@@ -2046,16 +2046,20 @@ def group_by_src(changed: list) -> list:
     groups: dict = {}
     for c in changed:
         key = c.get("src") or c["name"]
-        g = groups.setdefault(key, {"src": key, "pkgs": [], "security": False,
-                                    "cves": set(), "dropped": set(), "aliases": [],
-                                    "why": [], "sev_rank": 0, "important": False,
-                                    "downgrade": False, "has_security_erratum": False,
-                                    "advisory_corresponding": False,
-                                    "erratum_severity": ""})
+        g = groups.get(key)
+        if g is None:
+            # Built once per source package: as a setdefault() argument this
+            # literal (two sets, five lists) was allocated again for every binary
+            # subpackage, only to be thrown away.
+            g = groups[key] = {"src": key, "pkgs": [], "security": False,
+                               "cves": set(), "dropped": set(), "aliases": [],
+                               "why": [], "sev_rank": 0, "important": False,
+                               "downgrade": False, "has_security_erratum": False,
+                               "advisory_corresponding": False,
+                               "erratum_severity": "",
+                               "already_had": [], "unreleased": []}
         g["pkgs"].append(c)
         cls = c.get("cls") or {}
-        g.setdefault("already_had", [])
-        g.setdefault("unreleased", [])
         g["security"] = g["security"] or bool(cls.get("security"))
         g["important"] = g["important"] or bool(cls.get("important_src"))
         g["cves"].update(cls.get("cves") or [])
