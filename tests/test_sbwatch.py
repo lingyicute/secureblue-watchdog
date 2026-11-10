@@ -386,6 +386,19 @@ class TestCrosscheckChunks(unittest.TestCase):
         xc = S.crosscheck_chunks(ld, {"changed": []}, versions_known=True)
         self.assertEqual(xc["silent_rebuilds"], [])
 
+    def test_added_or_removed_package_is_not_a_same_version_rebuild(self):
+        # a chunk that moved because the package set changed was not "rebuilt":
+        # `newpkg` is new, `libbar` gained a subpackage and `foo` lost one
+        ld = {"changed_chunks": [{"components": ["rpm/libbar"], "size": 16},
+                                 {"components": ["rpm/newpkg"], "size": 9},
+                                 {"components": ["rpm/foo"], "size": 7},
+                                 {"components": ["rpm/systemd"], "size": 5}]}
+        diff = {"changed": [], "added": ["libbar-data", "newpkg"], "removed": ["foo-doc"]}
+        src_of = {"libbar-data": "libbar", "libbar": "libbar", "newpkg": "newpkg",
+                  "foo-doc": "foo", "foo": "foo", "systemd": "systemd"}
+        xc = S.crosscheck_chunks(ld, diff, src_of)
+        self.assertEqual([n for n, _ in xc["silent_rebuilds"]], ["systemd"])
+
 
 # --------------------------------------------------------------------------- #
 # A5 - argument orientation
