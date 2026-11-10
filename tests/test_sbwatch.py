@@ -413,6 +413,16 @@ class TestOrient(unittest.TestCase):
         a, b, swapped = S.orient(self.NEW, {"ref": "x"})
         self.assertFalse(swapped)
 
+    def test_created_is_cut_to_whole_seconds_with_its_zone(self):
+        # a light resolve only sees the annotation, which carries nanoseconds; a
+        # [:20] slice left "...:53." - no zone, and not the config's spelling
+        self.assertEqual(S.rfc3339_seconds("2026-11-10T06:15:53.905949731+00:00"),
+                         "2026-11-10T06:15:53Z")
+        self.assertEqual(S.rfc3339_seconds("2026-11-10T06:15:53Z"), "2026-11-10T06:15:53Z")
+        self.assertEqual(S.rfc3339_seconds("2026-11-10T08:15:53.5+02:00"),
+                         "2026-11-10T08:15:53+02:00")
+        self.assertEqual(S.rfc3339_seconds(None), "")
+
 
 # --------------------------------------------------------------------------- #
 # A2 - history rows must expose the platform digest
