@@ -2919,5 +2919,25 @@ class TestMissingEntriesShortCircuits(unittest.TestCase):
                          [self.A, self.B])
 
 
+class TestTagsProbeIncludesToday(unittest.TestCase):
+    def test_probe_starts_with_today_and_covers_exactly_days_days(self):
+        import time
+        import types
+        probed = []
+        saved = (S._registry, S.resolve, S.maybe_verify_resolved, S.tag_exists, time.time)
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S.resolve = lambda reg, ref, light=False: {
+            "digest": "sha256:" + "1" * 64, "index_digest": "sha256:" + "2" * 64,
+            "annotations": {}, "layers": [], "created": ""}
+        S.maybe_verify_resolved = lambda *a, **k: False
+        S.tag_exists = lambda reg, tag, warn=None: probed.append(tag)
+        time.time = lambda: 1789776000          # 2026-09-19T00:00:00Z
+        try:
+            S.cmd_tags(types.SimpleNamespace(to="latest", days=3))
+        finally:
+            S._registry, S.resolve, S.maybe_verify_resolved, S.tag_exists, time.time = saved
+        self.assertEqual(probed, ["20260919", "20260918", "20260917"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
