@@ -1666,6 +1666,20 @@ class TestManifestOnlyVerdict(unittest.TestCase):
         v = S.verdict_of(d, LD_FIX, {"kernel_a": "1", "kernel_b": "1"}, xc)
         self.assertEqual(v["silent_important"], ["python3.14"])
 
+    def test_no_change_headline_counts_every_moved_chunk(self):
+        # 3 chunks moved; only one of them is a single-package (silent) rebuild
+        ld = dict(LD_FIX, changed_chunks=[
+            {"components": ["rpm/a", "rpm/b"], "size": 9},
+            {"components": ["rpm/x"], "size": 5},
+            {"components": ["bigfiles/initramfs.img"], "size": 3}])
+        d = {"added": [], "removed": [], "downgrades": [], "changed": [],
+             "count_a": 5, "count_b": 5}
+        v = S.verdict_of(d, ld, {"kernel_a": "1", "kernel_b": "1"},
+                         S.crosscheck_chunks(ld, d, {}))
+        self.assertEqual(v["level"], "no-change")
+        self.assertIn("the 3 moved chunk(s)", v["headline"])
+        self.assertIn("3 个变化的 chunk", v["headline_zh"])
+
 
 # --------------------------------------------------------------------------- #
 # K - smaller failures that used to be silent or fatal

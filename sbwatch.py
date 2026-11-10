@@ -1805,7 +1805,9 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     no_change = versions_known and not pkg_set_moved and not sec and not down and not lost
     if no_change:
         v["level"] = "no-change"
-        nchunks = len(xc.get("silent_rebuilds") or [])
+        # every chunk that moved, not just the single-package ones that
+        # crosscheck_chunks() could name as silent rebuilds
+        nchunks = len(ldiff.get("changed_chunks") or [])
         cnt_info = f"{diff.get('count_b')} packages compared" if diff.get("count_b") != "?" else "identical rpmdb chunk digest"
         cnt_info_zh = f"共比对 {diff.get('count_b')} 个包" if diff.get("count_b") != "?" else "rpmdb chunk 摘要完全一致"
         ev = (f"no package changed in the rpmdb "
