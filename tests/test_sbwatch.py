@@ -2851,5 +2851,52 @@ class TestCorruptGzipBlobIsACleanError(unittest.TestCase):
         self.assertIn("failed to read/decompress layer", str(cm.exception))
 
 
+class TestIdenticalRpmdbIsLoadedOnce(unittest.TestCase):
+    """--exact 1 with two images that share the rpmdb chunk used to fetch and
+    parse that one blob twice."""
+
+    @staticmethod
+    def _img(ref, digest, rpmdb):
+        return {"ref": ref, "digest": digest, "created": "2026-09-20T00:00:00Z",
+                "annotations": {}, "layers": [
+                    {"digest": rpmdb, "size": 100, "components": ["bigfiles/rpmdb.sqlite"],
+                     "stability": 0}]}
+
+    def _run(self, rpmdb_a, rpmdb_b):
+        import types
+
+        class Reg:
+            def _token(self):
+                return None
+
+        calls = []
+
+        def fake_load(reg, img, ref, cache_dir, notes):
+            calls.append(ref)
+            return S.PackageTable({"nano": pkg("nano", "8.0-1.fc44")})
+
+        args = types.SimpleNamespace(exact=1, keep_order=True, no_bodhi=True, audit=False,
+                                     max_bodhi=0, cache_dir=None, cosign_pub=None)
+        a = self._img("a", "sha256:" + "1" * 64, rpmdb_a)
+        b = self._img("b", "sha256:" + "2" * 64, rpmdb_b)
+        orig = S.load_pkglist
+        S.load_pkglist = fake_load
+        try:
+            res = S.do_diff(args, "a", "b", images=(a, b), reg=Reg())
+        finally:
+            S.load_pkglist = orig
+        return calls, res
+
+    def test_same_chunk_loads_the_package_list_once(self):
+        calls, res = self._run("sha256:same", "sha256:same")
+        self.assertEqual(calls, ["a"])
+        self.assertEqual(res["verdict"]["level"], "no-change")
+        self.assertEqual(res["diff"]["count_b"], 1)
+
+    def test_different_chunks_still_load_both(self):
+        calls, _ = self._run("sha256:one", "sha256:two")
+        self.assertEqual(calls, ["a", "b"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

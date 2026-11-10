@@ -3448,7 +3448,16 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
 
     cache_dir = args.cache_dir or os.path.expanduser("~/.cache/sbwatch")
     pa = load_pkglist(reg, a, ref_a, cache_dir, notes)
-    pb = load_pkglist(reg, b, ref_b, cache_dir, notes)
+    if same_rpmdb:
+        # one blob, one package list: fetching and parsing the ~92 MiB database a
+        # second time could only reproduce the table we already hold
+        pb = pa
+        notes.append(T("rpmdb chunk digest identical: the package list of the older image "
+                       "was reused for the newer one (no second download or parse)",
+                       "rpmdb chunk 摘要完全一致：新镜像直接复用旧镜像的软件包列表"
+                       "（不再重复下载或解析）"))
+    else:
+        pb = load_pkglist(reg, b, ref_b, cache_dir, notes)
     diff = pkg_diff(pa, pb)
     diff["same_rpmdb"] = same_rpmdb
     rel = fedora_release(pb, an_b.get("org.opencontainers.image.version", ""))
