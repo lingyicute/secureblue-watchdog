@@ -2063,5 +2063,24 @@ class TestWorkflowHygiene(unittest.TestCase):
         self.assertIn("exit 1", wf)
 
 
+# --------------------------------------------------------------------------- #
+# N - report / CLI rendering and robustness findings
+# --------------------------------------------------------------------------- #
+class TestDroppedMentionKeepsItsVersionLine(unittest.TestCase):
+    def test_group_that_only_lost_a_cve_mention_is_still_listed_as_a_bump(self):
+        old = pkg("foo", "1.0-1.fc44", "foo", [{"time": 1, "text": "- fix CVE-2025-1111"}])
+        new = pkg("foo", "1.1-1.fc44", "foo", [{"time": 2, "text": "- rebase"}])
+        d = S.pkg_diff({"foo": old}, {"foo": new})
+        for c in d["changed"]:
+            c["cls"] = S.classify_change(c["old"], c["new"], "F44", None)
+        ld = dict(LD_FIX, chunks_changed=0, chunks_reused=1, chunks_a=1, chunks_b=1,
+                  download_pct=0)
+        v = S.verdict_of(d, ld, {"kernel_a": "k", "kernel_b": "k"}, {})
+        img = {"ref": "a", "digest": "sha256:" + "1" * 64, "annotations": {}}
+        md = S.render_markdown("s", img, img, d, ld, v, [])
+        self.assertIn("no longer mentions CVE-2025-1111", md)
+        self.assertIn("| foo | `foo` | 1.0-1.fc44 → 1.1-1.fc44 |", md)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

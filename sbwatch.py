@@ -2337,8 +2337,10 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
     g_lost = [g for g in groups if g["dropped"]]
     g_sec = [g for g in groups if g["security"] and not g["downgrade"]]
     g_imp = [g for g in groups if g["important"] and not g["security"] and not g["downgrade"]]
-    # identity, not equality: two source groups can compare == and silently drop out
-    _tagged = {id(g) for g in g_sec + g_imp + g_down + g_lost}
+    # identity, not equality: two source groups can compare == and silently drop out.
+    # g_lost is deliberately absent: its section names the dropped CVE ids only, so
+    # a group that is nothing but "lost" had no old -> new line anywhere.
+    _tagged = {id(g) for g in g_sec + g_imp + g_down}
     g_other = [g for g in groups if id(g) not in _tagged]
 
     if g_down:
