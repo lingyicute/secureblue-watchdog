@@ -932,7 +932,9 @@ def read_header(blob: bytes, stats: dict | None = None) -> dict:
         nindex, hlen = struct.unpack(">II", blob[:8])
         base = 8
     # `base`, not a hard-coded 8: the legacy layout puts the index at offset 16.
-    if base + 16 * nindex + hlen > len(blob) + 40:
+    # The index itself must fit, whatever slack the data store gets: the entry
+    # unpack below is not guarded, so a short index crashed the whole parse.
+    if base + 16 * nindex > len(blob) or base + 16 * nindex + hlen > len(blob) + 40:
         stats["headers_rejected"] = stats.get("headers_rejected", 0) + 1
         return {}
     store = base + 16 * nindex
