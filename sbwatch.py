@@ -206,8 +206,12 @@ def clip_text(s, n: int, *, lang: str = "en") -> str:
     if len(s) <= n:
         return s
     dropped = len(s) - n
-    tail = (f"…（另有 {dropped} 个字符未显示）" if lang == "zh"
-            else f"… (+{dropped} chars not shown)")
+    if lang == "zh":
+        tail = f"…（另有 {dropped} 个字符未显示）"
+    elif lang == "both":                   # same contract as _more_marker()
+        tail = f"… (+{dropped} chars not shown / 另有 {dropped} 个字符未显示)"
+    else:
+        tail = f"… (+{dropped} chars not shown)"
     return s[:n] + tail
 
 
@@ -3817,7 +3821,7 @@ def cmd_check(args):
         if uniq:
             res["notes"].append(T(
                 f"this image is not the only new one: {len(uniq)} build(s) were pushed after "
-                f"the build you last looked at ({clip_text(seen, 16, lang='both')}) — "
+                f"the build you last looked at ({clip_text(seen, 16)}) — "
                 + ", ".join(ts_short(r["created"]) for r in uniq)
                 + " (UTC). Tags like `20260910` or `<sha>-44` are mutable and only point at "
                   "the newest build of a day, so the comparison below is by digest: your last "
