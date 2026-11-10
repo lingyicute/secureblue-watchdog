@@ -1485,6 +1485,13 @@ def crosscheck_chunks(ldiff: dict, diff: dict, src_of: dict | None = None,
         return out
     changed_versions = {c["name"] for c in diff["changed"]}
     changed_src = {c["src"] for c in diff["changed"]}
+    # A package this update adds or removes moves its source's chunk as well. That
+    # is a package-set change, not a rebuild "with the same version" - a brand-new
+    # package sitting in a chunk of its own used to be listed as silently rebuilt.
+    for n in (diff.get("added") or []) + (diff.get("removed") or []):
+        changed_versions.add(n)
+        if src_of.get(n):
+            changed_src.add(src_of[n])
     by_size: dict = {}
     for ch in ldiff["changed_chunks"]:
         pk = [c[4:] for c in ch["components"] if c.startswith("rpm/")]
@@ -3425,7 +3432,8 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
             f"{len(trunc)} 个软件包超出上限、只被部分读取"
             f"（{clip_list(sorted(trunc), 6, lang='zh', joiner='，')}）——"
             f"超出部分的 CVE 提及未被读取"))
-    xc = crosscheck_chunks(ld, diff, {n: p["src"] for n, p in pb.items()})
+    # names from both images: a *removed* package has a source only in the old one
+    xc = crosscheck_chunks(ld, diff, {n: p["src"] for n, p in {**pa, **pb}.items()})
     backlog, coverage = [], {"candidates": 0, "checked": 0, "skipped": 0, "failed": 0,
                              "skipped_names": [], "pool_missing": [], "pool_size": 0}
     if getattr(args, "audit", False) and bodhi is not None:
