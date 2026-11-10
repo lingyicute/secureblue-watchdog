@@ -2343,5 +2343,75 @@ class TestHistoryReusesTheResolvedImage(unittest.TestCase):
         self.assertIs(got.get("cur"), self.CUR)
 
 
+class TestTagLabelCostsOneRequest(unittest.TestCase):
+    """Labelling a history row with a dated tag only needs the digest the tag
+    points at - not the platform manifest resolve() fetches after the index."""
+
+    DIG = "sha256:" + "c" * 64
+
+    class _Resp:
+        def __init__(self, headers, body=b""):
+            self.headers, self._body = headers, body
+
+        def read(self, n=-1):
+            b, self._body = self._body, b""
+            return b
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _reg(self, headers, body=b""):
+        reg = S.Registry.__new__(S.Registry)
+        reg.paths = []
+
+        def fake_open(path, accept):
+            reg.paths.append(path)
+            return self._Resp(headers, body)
+
+        reg._open = fake_open
+        return reg
+
+    def test_digest_comes_from_the_header_in_a_single_request(self):
+        reg = self._reg({"Docker-Content-Digest": self.DIG})
+        self.assertEqual(reg.index_digest("20260917"), self.DIG)
+        self.assertEqual(reg.paths, ["manifests/20260917"])
+
+    def test_without_the_header_it_hashes_the_manifest_like_resolve_does(self):
+        import hashlib
+        reg = self._reg({}, b'{"manifests": []}')
+        self.assertEqual(reg.index_digest("t"),
+                         "sha256:" + hashlib.sha256(b'{"manifests": []}').hexdigest())
+
+    def test_history_labels_rows_without_resolving_dated_tags(self):
+        cur = dict(TestHistoryReusesTheResolvedImage.CUR)
+        probed = []
+
+        class FakeReg:
+            host, repo, timeout, arch = "ghcr.io", "secureblue/x", 30, "amd64"
+
+            def _token(self):
+                return "t"
+
+            def index_digest(self, ref):
+                probed.append(ref)
+                return cur["index_digest"]
+
+        def fake_resolve(reg, ref, light=False):
+            raise AssertionError(f"dated tag {ref!r} must not be fully resolved")
+
+        saved = S.resolve, S.list_tags
+        S.resolve = fake_resolve
+        S.list_tags = lambda reg, max_pages=12: ["20260101", "20260101-44", "latest-uki"]
+        try:
+            rows = S.build_history(FakeReg(), scan=3, days=1, to="latest", cur=cur)
+        finally:
+            S.resolve, S.list_tags = saved
+        self.assertEqual(probed, ["20260101", "20260101-44"])
+        self.assertEqual(rows[0]["tags"], ["latest", "20260101", "20260101-44"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

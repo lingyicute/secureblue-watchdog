@@ -674,6 +674,18 @@ class Registry:
             # manifest is small, blobs can be large - enforce same limit for safety
             return _safe_read_limited(r, MAX_BLOB_BYTES)
 
+    def index_digest(self, ref: str) -> str:
+        """The digest `ref` points at - resolve()'s `index_digest` - in one request.
+
+        That is all a tag label needs; resolve() also fetches the platform
+        manifest, i.e. a second round trip per tag.
+        """
+        with self._open(f"manifests/{ref}", MANIFEST_ACCEPT) as r:
+            dig = r.headers.get("Docker-Content-Digest")
+            if dig:
+                return dig
+            return "sha256:" + hashlib.sha256(self._read_all(r, f"manifest {ref}")).hexdigest()
+
     def resolve(self, ref: str | None = None, light: bool = False) -> dict:
         """manifest + config for one architecture, plus a normalized chunk list."""
         what = ref or self.default_ref
@@ -3038,7 +3050,7 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
         for day in sorted(by_day)[-days:]:
             for t in sorted(by_day[day]):
                 try:
-                    img = resolve(reg, t, light=True)
+                    dig = reg.index_digest(t)
                 except RegistryError as e:
                     if e.http_code != 404:
                         probe_failures.append((t, e.http_code or "network error"))
@@ -3046,7 +3058,7 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
                 except Exception as e:
                     probe_failures.append((t, type(e).__name__))
                     continue
-                r = recs.get(img["index_digest"])
+                r = recs.get(dig)
                 if r is not None and t not in r["tags"]:
                     r["tags"].append(t)
     if probe_failures and warn is not None:
