@@ -2771,5 +2771,49 @@ class TestRpmHeaderIndexMustFit(unittest.TestCase):
         self.assertEqual(S.read_header(blob)["name"], "foo")
 
 
+class TestHistorySkipsPushesWithoutTheArch(unittest.TestCase):
+    """resolve() raised a bare SystemExit for an index with no manifest for --arch;
+    build_history() only catches Exception/RegistryError, so one old push without
+    arm64 ended the whole scan (and, in `check`, the run)."""
+
+    GOOD = "sha256:" + "1" * 64
+    NOARCH = "sha256:" + "2" * 64
+
+    def _image(self, ref):
+        return {"ref": ref, "is_index": True, "index_digest": ref, "digest": "sha256:" + "9" * 64,
+                "created": "2026-01-01T00:00:00Z", "layers": [], "total_size": 0,
+                "annotations": {"org.opencontainers.image.version": "44.20260101.0"}}
+
+    def test_no_arch_manifest_is_a_registry_error_without_an_http_code(self):
+        e = S.NoArchManifest("no arm64 manifest in x/y:latest")
+        self.assertIsInstance(e, S.RegistryError)
+        self.assertIsInstance(e, SystemExit)
+        self.assertIsNone(e.http_code)
+
+    def test_one_push_without_the_arch_does_not_abort_the_scan(self):
+        import types
+        cur = dict(self._image("latest"), index_digest="sha256:" + "f" * 64)
+
+        def fake_resolve(reg, ref, light=False):
+            if ref == self.NOARCH:
+                raise S.NoArchManifest(f"no arm64 manifest in x/y:{ref}")
+            return self._image(ref)
+
+        warns = []
+        saved = S.resolve, S.list_tags
+        S.resolve = fake_resolve
+        # newest sig tag last: the push without the arch is the first one visited
+        S.list_tags = lambda reg, max_pages=12: [
+            "sha256-" + self.GOOD.split(":")[1] + ".sig",
+            "sha256-" + self.NOARCH.split(":")[1] + ".sig"]
+        try:
+            rows = S.build_history(types.SimpleNamespace(), scan=3, days=0, to="latest",
+                                   warn=warns, cur=cur)
+        finally:
+            S.resolve, S.list_tags = saved
+        self.assertEqual(sorted(r["digest"] for r in rows), sorted([cur["index_digest"], self.GOOD]))
+        self.assertEqual(warns, [], "a push without this arch is not a probe failure")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

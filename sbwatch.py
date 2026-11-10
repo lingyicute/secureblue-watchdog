@@ -287,6 +287,10 @@ class RegistryError(SystemExit):
         self.http_code = http_code
 
 
+class NoArchManifest(RegistryError):
+    """The ref is a multi-arch index, but it carries no manifest for --arch."""
+
+
 class _CappedReader:
     """File-like wrapper around an HTTP response that enforces a byte budget.
 
@@ -710,8 +714,8 @@ class Registry:
                     pick = m
                     break
             if pick is None:
-                raise SystemExit(T(f"no {self.arch} manifest in {self.repo}:{what}",
-                                   f"{self.repo}:{what} 中没有 {self.arch} 架构的 manifest"))
+                raise NoArchManifest(T(f"no {self.arch} manifest in {self.repo}:{what}",
+                                       f"{self.repo}:{what} 中没有 {self.arch} 架构的 manifest"))
             man = json.loads(self.get(f"manifests/{pick['digest']}", MANIFEST_ACCEPT))
             out["digest"] = pick["digest"]
         else:
@@ -3033,6 +3037,10 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
             continue
         try:
             img = resolve(reg, d, light=True)
+        except NoArchManifest:
+            # a push without this architecture (e.g. before arm64 was built) is
+            # no build of it; as a bare SystemExit it killed the whole scan
+            continue
         except RegistryError as e:
             if e.http_code != 404:   # a dangling .sig tag (404) is normal
                 probe_failures.append((d[:19] + "…", e.http_code or "network error"))
