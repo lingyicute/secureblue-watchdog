@@ -258,7 +258,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/test_sbwatch.py` 是 **162 项离线回归测试**，不需要网络、不访问 registry
+`tests/test_sbwatch.py` 是 **164 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -308,7 +308,8 @@ CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并�
   （workflow 不传 `--exact` / `--no-fast`，所以走默认值：`--exact 1` + `--fast` 开启，
   见上文「`check --fast` 与 manifest-only」）
 - 若 verdict 不是 `no-update`/`no-change`/`unknown`，会评论到 sticky issue
-  `secureblue update watch`
+  `secureblue update watch`（GitHub 评论上限 65536 字符，超长报告会被截断并注明，
+  完整报告见 run summary / artifact）
 - **结论为 `unknown` 的运行会失败**（红色）：`unknown` 意味着"没得出结论"
   （没有可比基线、registry 探测失败等）。过去它和"这周很安静"长得一模一样，
   监控悄悄失效也发现不了。报告仍会照常上传为 artifact
