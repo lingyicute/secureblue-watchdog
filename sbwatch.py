@@ -231,6 +231,20 @@ def ts_short(s) -> str:
     return str(s or "")[:19]
 
 
+def rfc3339_seconds(s) -> str:
+    """An RFC 3339 timestamp cut to whole seconds, zone kept, UTC spelled `Z`.
+
+    One instant arrives in several spellings: the image config says
+    `2026-11-10T06:56:56Z`, while the `org.opencontainers.image.created`
+    annotation - all that a light resolve reads - carries nanoseconds (e.g.
+    `2026-11-10T06:15:53.905949731+00:00`). A fixed `[:20]` slice turned that
+    build's annotation into `2026-11-10T06:56:56.`: a dangling dot, no zone, and
+    a string that no longer compares like the config's spelling of that instant.
+    """
+    s = re.sub(r"(T\d{2}:\d{2}:\d{2})\.\d+", r"\1", str(s or ""))
+    return re.sub(r"[+-]00:?00$", "Z", s)
+
+
 def _safe_read_limited(resp, limit: int) -> bytes:
     """Read from HTTPResponse with hard limit to avoid OOM / zip-bomb."""
     cl = resp.headers.get("Content-Length")
@@ -686,8 +700,8 @@ class Registry:
         out["annotations"] = ann
         # RFC3339 with nanoseconds -> whole seconds + zone. Only the fractional
         # part goes, and nothing downstream compares finer than a second.
-        out["created"] = (cfg.get("created") or ann.get("org.opencontainers.image.created")
-                          or "")[:20]
+        out["created"] = rfc3339_seconds(cfg.get("created")
+                                         or ann.get("org.opencontainers.image.created"))
         out["layers"] = []
         for l in man.get("layers", []):
             la = l.get("annotations") or {}
