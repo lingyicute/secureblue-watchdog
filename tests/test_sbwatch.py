@@ -1579,6 +1579,25 @@ class TestManifestOnlyVerdict(unittest.TestCase):
         self.assertEqual(v["level"], "no-change")
         self.assertIn("no package", v["level_basis"])
 
+    def test_level_basis_names_what_raised_skip_to_consider(self):
+        # Both of these raise `skip` to `consider`. The basis was empty for the
+        # first and still carried the replaced `skip` sentence for the second.
+        d = {"added": [], "removed": [], "downgrades": [],
+             "changed": [{"name": "nano", "src": "nano", "dir": "upgrade",
+                          "old": {"evr": "8.0-1"}, "new": {"evr": "8.1-1"}}],
+             "count_a": 5, "count_b": 5}
+        meta = {"kernel_a": "1", "kernel_b": "1"}
+        xc = S.crosscheck_chunks(LD_FIX, d, {"nano": "nano"})
+        v = S.verdict_of(d, LD_FIX, meta, xc, bodhi_state={"failed": 1})
+        self.assertEqual(v["level"], "consider")
+        self.assertIn("coverage is incomplete", v["level_basis"])
+        backlog = [{"name": "openssl", "severity": "important", "want": "3.1-2",
+                    "have": "3.1-1", "src": "openssl", "alias": "FEDORA-2026-x", "cves": []}]
+        v = S.verdict_of(d, LD_FIX, meta, xc, backlog)
+        self.assertEqual(v["level"], "consider")
+        self.assertIn("still misses 1 important+", v["level_basis"])
+        self.assertNotIn("no CVE", v["level_basis"])
+
     def test_no_change_still_carries_the_backlog_note(self):
         # The no-change branch used to `return` before everything below it ran, so
         # the backlog note (and every other late annotation) vanished.
