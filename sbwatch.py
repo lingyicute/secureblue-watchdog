@@ -63,6 +63,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zlib
+from collections import Counter
 
 # make bilingual (CJK) output safe even under a C/POSIX locale
 for _stream in (sys.stdout, sys.stderr):
@@ -1287,7 +1288,10 @@ def _missing_entries(these: list, other: list) -> list:
     second with an existing one invisible (its CVE was silently not scanned), and
     a duplicate of an existing entry look like a new one.
     """
-    from collections import Counter
+    if not these:
+        return []
+    if not other:
+        return list(these)       # nothing to cancel against: skip the Counter
     have = Counter((c.get("time"), c.get("who"), c.get("text")) for c in other)
     out = []
     for c in these:
