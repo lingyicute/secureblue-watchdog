@@ -2276,5 +2276,72 @@ class TestCosignRunsOncePerDigest(unittest.TestCase):
         self.assertEqual(len(self.calls), 3)
 
 
+class TestHistoryReusesTheResolvedImage(unittest.TestCase):
+    """`check` has already resolved (and signature-checked) `--to`; resolving it
+    again cost three registry round trips and could anchor the history on a
+    different build if the tag moved in between."""
+
+    CUR = {"ref": "latest", "digest": "sha256:" + "a" * 64,
+           "index_digest": "sha256:" + "b" * 64, "created": "2026-01-01T00:00:00Z",
+           "annotations": {"org.opencontainers.image.version": "44.20260101.0"},
+           "layers": [], "total_size": 0}
+
+    def test_build_history_does_not_resolve_the_current_tag_again(self):
+        import types
+        asked = []
+
+        def fake_resolve(reg, ref, light=False):
+            asked.append(ref)
+            raise AssertionError(f"unexpected resolve({ref!r})")
+
+        saved = S.resolve, S.list_tags
+        S.resolve, S.list_tags = fake_resolve, lambda reg, max_pages=12: []
+        try:
+            rows = S.build_history(types.SimpleNamespace(), scan=3, days=0, to="latest",
+                                   cur=self.CUR)
+        finally:
+            S.resolve, S.list_tags = saved
+        self.assertEqual(asked, [])
+        self.assertEqual([r["digest"] for r in rows], [self.CUR["index_digest"]])
+
+    def test_without_cur_it_still_resolves_the_tag_itself(self):
+        import types
+        saved = S.resolve, S.list_tags
+        S.resolve, S.list_tags = (lambda reg, ref, light=False: dict(self.CUR, ref=ref),
+                                  lambda reg, max_pages=12: [])
+        try:
+            rows = S.build_history(types.SimpleNamespace(), scan=3, days=0, to="latest")
+        finally:
+            S.resolve, S.list_tags = saved
+        self.assertEqual(len(rows), 1)
+
+    def test_check_hands_its_image_to_the_history_scan(self):
+        import contextlib
+        import types
+        got = {}
+
+        def fake_history(reg, **kw):
+            got.update(kw)
+            return []
+
+        saved = S._registry, S.resolve, S.build_history, S.tag_exists
+        saved_env = {k: os.environ.pop(k, None) for k in ("GITHUB_OUTPUT", "GITHUB_ACTIONS")}
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S.resolve = lambda reg, ref, light=False: self.CUR
+        S.build_history = fake_history
+        S.tag_exists = lambda reg, tag, warn=None: None
+        try:
+            with tempfile.TemporaryDirectory() as d, \
+                    contextlib.redirect_stderr(io.StringIO()):
+                args = types.SimpleNamespace(
+                    image="x/y", arch="amd64", to="latest", a=None, scan=12, force=False,
+                    state=os.path.join(d, "state.json"), report=os.path.join(d, "report.md"))
+                S.cmd_check(args)
+        finally:
+            S._registry, S.resolve, S.build_history, S.tag_exists = saved
+            os.environ.update({k: v for k, v in saved_env.items() if v is not None})
+        self.assertIs(got.get("cur"), self.CUR)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
