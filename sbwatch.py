@@ -2930,6 +2930,13 @@ def list_tags(reg: Registry, max_pages: int = 12) -> list:
         url = nxt.group(1)
         if url.startswith("/"):
             url = f"https://{reg.host}{url}"
+    else:
+        # Every allowed page was read and the registry still offered another one.
+        # ghcr lists tags in push order, so a capped walk loses the NEWEST builds.
+        log(T(f"  ! tag list capped at {max_pages} pages ({len(out)} tags) - the newest "
+              f"tags may be missing, history may be incomplete",
+              f"  ！tag 列表在第 {max_pages} 页（共 {len(out)} 个 tag）处被截断——"
+              f"可能缺少最新的 tag，历史记录可能不完整"))
     return out
 
 

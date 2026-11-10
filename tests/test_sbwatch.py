@@ -2173,5 +2173,32 @@ class TestGithubOutputEncoding(unittest.TestCase):
                 self.assertIn("无新构建", fh.read())
 
 
+class TestTagListCapIsReported(unittest.TestCase):
+    def test_hitting_the_page_cap_is_logged_not_silent(self):
+        import contextlib
+        import types
+
+        class Page:
+            headers = {"Link": '</v2/x/y/tags/list?n=1000&last=t>; rel="next"'}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        reg = types.SimpleNamespace(host="h", repo="x/y", timeout=1, _token=lambda: None,
+                                    _read_all=lambda r, what: b'{"tags": ["t"]}')
+        real = S.urllib.request.urlopen
+        S.urllib.request.urlopen = lambda req, timeout=None: Page()
+        try:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                tags = S.list_tags(reg, max_pages=3)
+        finally:
+            S.urllib.request.urlopen = real
+        self.assertEqual(tags, ["t", "t", "t"])
+        self.assertIn("capped at 3 pages", err.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
