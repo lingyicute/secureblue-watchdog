@@ -3229,7 +3229,7 @@ def cmd_tags(args):
           f"缺失的日期表示当天没有发布构建）：")
     now = time.time()
     probe_warnings: list = []
-    for i in range(1, args.days + 1):
+    for i in range(args.days):        # day 0 is today (UTC): the tag most likely to be new
         d = time.strftime("%Y%m%d", time.gmtime(now - i * 86400))
         dig = tag_exists(reg, d, warn=probe_warnings)
         if not dig:
