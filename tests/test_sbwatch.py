@@ -2082,5 +2082,36 @@ class TestDroppedMentionKeepsItsVersionLine(unittest.TestCase):
         self.assertIn("| foo | `foo` | 1.0-1.fc44 → 1.1-1.fc44 |", md)
 
 
+class TestHistoryHeaderAlignment(unittest.TestCase):
+    def test_chinese_header_lines_up_with_the_english_one(self):
+        import contextlib
+        import types
+        import unicodedata
+
+        def cells(s):                     # terminal cells: CJK is double-width
+            return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in s)
+
+        row = {"digest": "sha256:" + "a" * 64, "created": "2026-01-01T00:00:00Z",
+               "version": "44.20260101.0", "inputhash": "abc", "kernel": "7.0",
+               "tags": ["latest"], "from_prev": None, "same_input_as_prev": False}
+        saved = S._registry, S.build_history
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S.build_history = lambda reg, **kw: [row]
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                S.cmd_history(types.SimpleNamespace(image="x/y", arch="amd64", scan=1,
+                                                    days=0, to="latest"))
+        finally:
+            S._registry, S.build_history = saved
+        lines = buf.getvalue().splitlines()
+        en = next(ln for ln in lines if "created (UTC)" in ln)
+        zh = next(ln for ln in lines if "创建时间" in ln)
+        for en_label, zh_label in (("image version", "镜像版本"), ("input", "输入哈希"),
+                                   ("chunks", "chunk"), ("kernel", "内核"), ("refs", "引用")):
+            self.assertEqual(cells(zh[:zh.index(zh_label)]), cells(en[:en.index(en_label)]),
+                             f"column {en_label!r} is misaligned")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
