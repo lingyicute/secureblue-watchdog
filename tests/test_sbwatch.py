@@ -1484,6 +1484,18 @@ class TestRenderMarkdownNotesWithSlash(unittest.TestCase):
         self.assertNotIn("same NEVRA", md)
         self.assertNotIn("NEVRA 完全一致", md)
 
+    def test_notes_and_package_set_changes_are_separate_items(self):
+        # consecutive "> " lines - or plain lines - are ONE paragraph in Markdown,
+        # so the notes and the added/removed lists used to run together
+        diff = {"added": ["newpkg"], "removed": ["oldpkg"], "downgrades": [],
+                "changed": [], "count_a": 10, "count_b": 10}
+        md = self._render(diff, [S.T("first note", "第一条"), S.T("second note", "第二条")])
+        zh, en = md.split("\n\n---\n\n")
+        self.assertIn("> - first note\n> - second note\n", en)
+        self.assertIn("> - 第一条\n> - 第二条\n", zh)
+        self.assertIn("\n- added (1): `newpkg`\n- removed (1): `oldpkg`\n", en)
+        self.assertIn("\n- 新增 (1): `newpkg`\n- 移除 (1): `oldpkg`\n", zh)
+
 
 class TestRebuildNotCountedAsUpgraded(unittest.TestCase):
     def test_rebuild_excluded_from_upgraded(self):

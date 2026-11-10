@@ -2300,10 +2300,12 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               "`ostree.linux` are inherited the same way. Judge the package table below.")
         W("")
 
+    # One list item per note: consecutive "> " lines are a single, lazily
+    # continued paragraph in Markdown, so the notes used to run together.
     dedup_notes = list(dict.fromkeys(notes))
     for n in dedup_notes:
         en_note, zh_note = split_bilingual(n)
-        W(f"> {zh_note if is_zh else en_note}")
+        W(f"> - {zh_note if is_zh else en_note}")
     if dedup_notes:
         W("")
 
@@ -2490,21 +2492,23 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
     if diff["added"] or diff["removed"]:
         if is_zh:
             W("## 软件包集合变更")
+            W("")
             if diff["added"]:
-                W(f"新增 ({len(diff['added'])}): "
+                W(f"- 新增 ({len(diff['added'])}): "
                   + clip_list(diff["added"], PKG_LIST_CAP, lang="zh", joiner="，",
                               render=lambda x: f"`{x}`"))
             if diff["removed"]:
-                W(f"移除 ({len(diff['removed'])}): "
+                W(f"- 移除 ({len(diff['removed'])}): "
                   + clip_list(diff["removed"], PKG_LIST_CAP, lang="zh", joiner="，",
                               render=lambda x: f"`{x}`"))
         else:
             W("## Package set changes")
+            W("")
             if diff["added"]:
-                W(f"added ({len(diff['added'])}): "
+                W(f"- added ({len(diff['added'])}): "
                   + clip_list(diff["added"], PKG_LIST_CAP, render=lambda x: f"`{x}`"))
             if diff["removed"]:
-                W(f"removed ({len(diff['removed'])}): "
+                W(f"- removed ({len(diff['removed'])}): "
                   + clip_list(diff["removed"], PKG_LIST_CAP, render=lambda x: f"`{x}`"))
         W("")
 
