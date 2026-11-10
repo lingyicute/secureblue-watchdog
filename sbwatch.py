@@ -2432,6 +2432,9 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         for g in g_sec:
             ev = (clip_text("; ".join(g["why"]), EV_CELL_CAP, lang=lang)
                   or ", ".join(g["aliases"]) or "—")
+            # the first line of a changelog entry lands here verbatim, and a bare
+            # `|` in it ends the cell early and shifts every column after it
+            ev = ev.replace("|", "\\|")
             cve_str = clip_list(g["cves"], CVE_CELL_CAP, lang=lang) or "—"
             pkg_col = fmt_pkgs(g, "zh" if is_zh else "en")
             W(f"| {pkg_col} ({g['src']}) | {g['old_evr']} → **{g['new_evr']}** | {cve_str} | {ev} |")

@@ -2558,5 +2558,38 @@ class TestExplicitFromTagRunsOnAnUnchangedDigest(unittest.TestCase):
         self.assertEqual(reached, [])
 
 
+class TestSecurityTableSurvivesAPipeInTheEvidence(unittest.TestCase):
+    """The first line of a changelog entry lands in the evidence cell verbatim;
+    a bare `|` ended the cell early and shifted every column after it."""
+
+    def _security_rows(self):
+        old = pkg("libfoo", "1.0-1.fc44", "libfoo", [{"time": 1, "text": "- 1.0"}])
+        new = pkg("libfoo", "1.1-1.fc44", "libfoo", [
+            {"time": 1, "text": "- 1.0"},
+            {"time": 2, "text": "Security fix for CVE-2026-1111: bad parse of a|b|c input"}])
+        d = S.pkg_diff({"libfoo": old}, {"libfoo": new})
+        for c in d["changed"]:
+            c["cls"] = S.classify_change(c["old"], c["new"], "F44", None)
+        ld = {"download_bytes": 1, "total_size_b": 1, "chunks_changed": 1,
+              "chunks_reused": 1, "chunks_a": 1, "chunks_b": 1, "changed_chunks": [],
+              "changed_packages_from_chunks": [], "download_pct": 1.0}
+        v = S.verdict_of(d, ld, {"kernel_a": "k", "kernel_b": "k"}, {})
+        ia = {"ref": "a", "digest": "sha256:" + "1" * 64,
+              "annotations": {"rpmostree.inputhash": "h"}}
+        ib = {"ref": "b", "digest": "sha256:" + "2" * 64,
+              "annotations": {"rpmostree.inputhash": "h"}}
+        md = S.render_markdown("s", ia, ib, d, ld, v, [])
+        return [ln for ln in md.splitlines() if ln.startswith("|") and "CVE-2026-1111" in ln
+                and "bad parse" in ln]
+
+    def test_pipes_in_the_evidence_are_escaped(self):
+        rows = self._security_rows()
+        self.assertTrue(rows, "the security table row was not rendered")
+        for row in rows:
+            self.assertIn("a\\|b\\|c", row)
+            # 4 cells => 5 unescaped column separators, whatever the evidence says
+            self.assertEqual(len(re.findall(r"(?<!\\)\|", row)), 5, row)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
