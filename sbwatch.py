@@ -3429,7 +3429,10 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
         # derived from the package list, so no erratum could be queried at all.
         bstate = {"unavailable": 1}
     v = verdict_of(diff, ld, meta, xc, backlog, bstate)
-    if getattr(args, "audit", False) and backlog is not None:
+    # `backlog` is always a list, so test what decides whether the audit ran:
+    # without Bodhi (--no-bodhi, unknown release) there is no coverage to report,
+    # and "0 of 0 candidate source packages were queried" read as nothing to do.
+    if getattr(args, "audit", False) and bodhi is not None:
         notes.append(coverage_line(coverage))
     if bstate.get("failed"):
         notes.append(T(f"WARNING: {bstate['failed']} Bodhi errata query(ies) failed; those "

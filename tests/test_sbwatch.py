@@ -1707,6 +1707,26 @@ class TestFixesThatUsedToBeSilent(unittest.TestCase):
                "pool_missing": [], "pool_size": 0}
         self.assertIn("6", str(S.coverage_line(cov)))
 
+    def test_backlog_coverage_note_needs_an_audit_that_ran(self):
+        # without Bodhi there is no audit: "0 of 0 candidate source packages were
+        # queried" read as "nothing to check" rather than "nothing was checked"
+        import types
+
+        class Reg:
+            def _token(self):
+                return None
+
+        args = types.SimpleNamespace(exact=1, keep_order=True, no_bodhi=True, audit=True,
+                                     max_bodhi=0, cache_dir=None, cosign_pub=None)
+        img = {"ref": "a", "digest": "sha256:" + "1" * 64, "annotations": {}, "layers": []}
+        orig = S.load_pkglist
+        S.load_pkglist = lambda *a: S.PackageTable({"nano": pkg("nano", "8.0-1.fc44")})
+        try:
+            res = S.do_diff(args, "a", "b", images=(img, dict(img, ref="b")), reg=Reg())
+        finally:
+            S.load_pkglist = orig
+        self.assertFalse([n for n in res["notes"] if "backlog audit coverage" in n])
+
     def test_group_by_src_accepts_entries_without_dir(self):
         g = S.group_by_src([{"name": "foo", "src": "foo", "cls": {},
                              "old": {"evr": "1-1"}, "new": {"evr": "2-1"}}])
