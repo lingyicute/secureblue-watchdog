@@ -3151,15 +3151,14 @@ def list_tags(reg: Registry, max_pages: int = 12) -> list:
                 # Parsed inside the retry: a non-JSON or cut-short body (a proxy
                 # error page, a truncated 200) is as transient as a 5xx, and
                 # raising past the loop aborted the whole history scan instead.
-                # (A read that fails mid-transfer still ends the run: _read_all()
-                # turns that into SystemExit, which is re-raised above.)
+                # So is a read that dies mid-transfer: _read_all() reports it as a
+                # RegistryError, which is retried below. Any other SystemExit (the
+                # size cap) is no Exception and still ends the run.
                 page = json.loads(body)
                 if not isinstance(page, dict):
                     raise ValueError("tag list is not a JSON object")
                 break
-            except SystemExit:
-                raise
-            except Exception as e:
+            except (Exception, RegistryError) as e:
                 if attempt == TAG_LIST_RETRIES - 1:
                     # silent truncation here would quietly shorten the build history
                     # and can make `check` pick a wrong baseline, so say so loudly

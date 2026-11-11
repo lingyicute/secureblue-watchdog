@@ -3737,5 +3737,50 @@ class TestBearerTokenStaysOnTheRegistryHost(unittest.TestCase):
                              for h in S._OPENER.handlers))
 
 
+class TestTagListRetriesAReadCutShort(unittest.TestCase):
+    """A page body that dies mid-transfer is as transient as a 5xx or a garbled
+    body, yet it alone ended the whole run instead of being retried."""
+
+    class _Page:
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _list(self, first_error):
+        import contextlib
+        import types
+        calls = []
+
+        def read_all(r, what):
+            calls.append(what)
+            if len(calls) == 1:
+                raise first_error
+            return b'{"tags": ["ok"]}'
+
+        reg = types.SimpleNamespace(host="h", repo="x/y", timeout=1, _token=lambda: None,
+                                    _read_all=read_all)
+        real_open, real_sleep = S.urllib.request.urlopen, S.time.sleep
+        S.urllib.request.urlopen = lambda req, timeout=None: self._Page()
+        S.time.sleep = lambda s: None
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                return S.list_tags(reg), calls
+        finally:
+            S.urllib.request.urlopen, S.time.sleep = real_open, real_sleep
+
+    def test_registry_error_from_the_read_is_retried(self):
+        tags, calls = self._list(S.RegistryError("failed reading tag list: IncompleteRead"))
+        self.assertEqual(tags, ["ok"])
+        self.assertEqual(len(calls), 2)
+
+    def test_the_size_cap_still_ends_the_run(self):
+        with self.assertRaises(SystemExit):
+            self._list(SystemExit("blob exceeds limit"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
