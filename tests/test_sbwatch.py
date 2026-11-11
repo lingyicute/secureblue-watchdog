@@ -3265,6 +3265,14 @@ class TestRegistrySplit(unittest.TestCase):
         self.assertEqual(S.Registry._split(f"ghcr.io/secureblue/x:latest@{dig}"),
                          ("ghcr.io", ("secureblue/x", dig)))
 
+    def test_surrounding_whitespace_does_not_hide_the_scheme_prefix(self):
+        self.assertEqual(S.Registry._split(" docker://ghcr.io/secureblue/x:44\n"),
+                         ("ghcr.io", ("secureblue/x", "44")))
+        import types
+        a = types.SimpleNamespace(image=" docker://quay.io/fedora/silverblue:44 ", arch="amd64")
+        S._registry(a).close()
+        self.assertEqual(a.image, "quay.io/fedora/silverblue")
+
     def test_trailing_colon_defaults_to_latest(self):
         self.assertEqual(S.Registry._split("secureblue/x:"),
                          ("ghcr.io", ("secureblue/x", "latest")))
