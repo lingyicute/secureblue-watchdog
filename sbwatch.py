@@ -2963,7 +2963,7 @@ def list_tags(reg: Registry, max_pages: int = 12) -> list:
     out, url = [], f"https://{reg.host}/v2/{reg.repo}/tags/list?n=1000"
     pages_done = 0
     for _ in range(max_pages):
-        body = hdrs = None
+        page = hdrs = None
         for attempt in range(TAG_LIST_RETRIES):     # ghcr intermittently 301/404s ?last=
             try:
                 req = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -2972,6 +2972,14 @@ def list_tags(reg: Registry, max_pages: int = 12) -> list:
                     req.add_header("Authorization", "Bearer " + tok)
                 with urllib.request.urlopen(req, timeout=reg.timeout) as r:
                     body, hdrs = reg._read_all(r, "tag list"), r.headers
+                # Parsed inside the retry: a non-JSON or cut-short body (a proxy
+                # error page, a truncated 200) is as transient as a 5xx, and
+                # raising past the loop aborted the whole history scan instead.
+                # (A read that fails mid-transfer still ends the run: _read_all()
+                # turns that into SystemExit, which is re-raised above.)
+                page = json.loads(body)
+                if not isinstance(page, dict):
+                    raise ValueError("tag list is not a JSON object")
                 break
             except SystemExit:
                 raise
@@ -2985,10 +2993,10 @@ def list_tags(reg: Registry, max_pages: int = 12) -> list:
                           f"——历史记录可能不完整"))
                 else:
                     time.sleep(1.5 * (attempt + 1))
-        if body is None:
+        if page is None:
             break
         pages_done += 1
-        out += json.loads(body).get("tags", []) or []
+        out += page.get("tags", []) or []
         nxt = re.search(r"<([^>]+)>;\s*rel=\"next\"", hdrs.get("Link") or "")
         if not nxt:
             break
