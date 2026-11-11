@@ -1,0 +1,84 @@
+"""Relative tar symlinks and rpmdb extraction/parse cleanup regressions."""
+import io
+import os
+import tarfile
+import tempfile
+import types
+import unittest
+
+from test_sbwatch import S
+
+
+class TestTarAndRpmdbCleanup(unittest.TestCase):
+    def _tar_bytes(self, entries):
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tf:
+            for name, kind, payload in entries:
+                ti = tarfile.TarInfo(name)
+                if kind == "sym":
+                    ti.type = tarfile.SYMTYPE
+                    ti.linkname = payload
+                    tf.addfile(ti)
+                else:
+                    ti.size = len(payload)
+                    tf.addfile(ti, io.BytesIO(payload))
+        return buf.getvalue()
+
+    def test_pick_tar_member_resolves_relative_symlink_targets(self):
+        raw = self._tar_bytes([
+            ("usr/share/rpm/rpmdb.sqlite", "sym",
+             "../../lib/sysimage/rpm-ostree-base-db/rpmdb.sqlite"),
+        ])
+        with tarfile.open(fileobj=io.BytesIO(raw)) as tf:
+            chosen, target = S.pick_tar_member(tf, "rpmdb.sqlite")
+        self.assertIsNone(chosen)
+        self.assertEqual(target, "usr/lib/sysimage/rpm-ostree-base-db/rpmdb.sqlite")
+
+    def test_extract_member_follows_relative_symlink_and_removes_blob(self):
+        raw = self._tar_bytes([
+            ("usr/share/rpm/rpmdb.sqlite", "sym",
+             "../../lib/sysimage/rpm-ostree-base-db/target.db"),
+            ("usr/lib/sysimage/rpm-ostree-base-db/target.db", "file", b"sqlite-bytes"),
+        ])
+        reg = S.Registry("secureblue/x")
+        try:
+            def fake_fetch(digest, dest):
+                with open(dest, "wb") as fh:
+                    fh.write(raw)
+                return dest
+
+            reg.fetch_blob = fake_fetch
+            out = reg.extract_member({"digest": "sha256:" + "a" * 64}, "rpmdb.sqlite")
+            with open(out, "rb") as fh:
+                self.assertEqual(fh.read(), b"sqlite-bytes")
+            self.assertEqual([n for n in os.listdir(reg._tmpdir()) if n.endswith(".blob")], [])
+        finally:
+            reg.close()
+
+    def test_extract_member_cleans_up_blob_when_member_is_missing(self):
+        raw = self._tar_bytes([("etc/os-release", "file", b"ID=fedora")])
+        reg = S.Registry("secureblue/x")
+        try:
+            def fake_fetch(digest, dest):
+                with open(dest, "wb") as fh:
+                    fh.write(raw)
+                return dest
+
+            reg.fetch_blob = fake_fetch
+            with self.assertRaises(SystemExit):
+                reg.extract_member({"digest": "sha256:" + "b" * 64}, "rpmdb.sqlite")
+            self.assertEqual(os.listdir(reg._tmpdir()), [])
+        finally:
+            reg.close()
+
+    def test_package_list_handles_corrupt_sqlite_and_unlinks_extracted_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            bad_db = os.path.join(d, "corrupt.sqlite")
+            with open(bad_db, "wb") as fh:
+                fh.write(b"not a valid sqlite3 file at all")
+            reg = types.SimpleNamespace(extract_member=lambda chunk, match: bad_db)
+            resolved = {"layers": [{"digest": "sha256:" + "c" * 64, "size": 10,
+                                    "components": ["bigfiles/rpmdb.sqlite"]}]}
+            with self.assertRaisesRegex(SystemExit, "unexpected rpmdb schema"):
+                S.package_list(reg, resolved)
+            self.assertFalse(os.path.exists(bad_db))
