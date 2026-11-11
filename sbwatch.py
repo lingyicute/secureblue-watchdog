@@ -2683,7 +2683,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W("")
         for ch in xc["non_package_chunks"]:
             W(f"- {human(ch['size'])} — "
-              f"{clip_text(', '.join(c.replace('bigfiles/', '') for c in ch['components']), 120)}")
+              f"{clip_text(', '.join(c.replace('bigfiles/', '') for c in ch['components']), 120, lang=lang)}")
         W("")
 
     if backlog:
