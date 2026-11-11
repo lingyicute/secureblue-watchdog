@@ -150,7 +150,7 @@ sbwatch check                 # 有状态的 digest watch，用于 CI/cron -> re
 >
 > ⚠️ `diff A B` / `layers A B` 中的 A 必须是【较旧】的一方，B 是【较新】的一方。
 >
-> 写反了会得出完全相反的结论（把新镜像里新增的 CVE 说成"本次更新移除的修复"）。
+> 写反了会得出完全相反的结论（把新镜像里新增的 CVE 修复列进「新版更新日志不再提及的 CVE 编号」）。
 >
 > 工具现在会用 `org.opencontainers.image.created` 自动纠正顺序并在报告里说明；
 > 
