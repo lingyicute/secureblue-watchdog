@@ -386,6 +386,9 @@ def verify_cosign_image(full_ref: str, pubkey_path: str, require: bool = False) 
     Raises SystemExit if require=True and verification fails.
     """
     if not pubkey_path:
+        if require:
+            raise SystemExit(T("--require-cosign requires --cosign-pub",
+                               "--require-cosign 必须同时提供 --cosign-pub"))
         return False
     if not os.path.exists(pubkey_path):
         msg = T(f"cosign pubkey not found: {pubkey_path}",
@@ -449,6 +452,9 @@ def maybe_verify_resolved(reg: Registry, resolved: dict, args, notes: list | Non
     """
     pub = getattr(args, "cosign_pub", None)
     if not pub:
+        if getattr(args, "require_cosign", False):
+            raise SystemExit(T("--require-cosign requires --cosign-pub",
+                               "--require-cosign 必须同时提供 --cosign-pub"))
         if notes is not None:
             notes.append(T("signature check: not requested (no --cosign-pub)",
                            "签名校验：未启用（没有 --cosign-pub）"))
@@ -3338,6 +3344,10 @@ def cmd_history(args):
     hist_warnings: list = []
     rows = build_history(reg, scan=args.scan, days=args.days, to=args.to,
                          warn=hist_warnings)
+    # The shared signature options apply to history too, not just to diff/check.
+    if getattr(args, "cosign_pub", None) or getattr(args, "require_cosign", False):
+        for row in rows:
+            maybe_verify_resolved(reg, row["image"], args)
     print(T(f"{args.image} ({args.arch}) — {len(rows)} most recent builds, oldest first.",
             f"{args.image} ({args.arch}) —— 最近 {len(rows)} 次构建，从旧到新显示。"))
     print("(named tags are mutable: several builds/day share one version string and the")
@@ -4390,6 +4400,9 @@ def main(argv=None):
     p.set_defaults(func=cmd_check)
 
     args = ap.parse_args(argv)
+    if args.require_cosign and not args.cosign_pub:
+        ap.error(T("--require-cosign requires --cosign-pub",
+                   "--require-cosign 必须同时提供 --cosign-pub"))
     return args.func(args)
 
 
