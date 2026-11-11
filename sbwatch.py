@@ -980,7 +980,12 @@ def read_header(blob: bytes, stats: dict | None = None) -> dict:
                         q = e + 1
                     out[name] = arr if cnt > 1 else (arr[0] if arr else "")
                 else:
-                    if cnt != 1:
+                    # An I18NSTRING holds one string per locale, C locale first
+                    # (glfw, libraqm, usb_modeswitch ... translate their Summary),
+                    # so only a plain STRING has to be a single value. Rejecting
+                    # count > 1 outright reported 12 "undecodable" fields on the
+                    # live image - a parse warning in every single report.
+                    if cnt != 1 and not (typ == 9 and cnt > 1):
                         raise ValueError("scalar string tag with count != 1")
                     out[name] = blob[p:blob.index(b"\0", p)].decode("utf-8", "replace")
         except (ValueError, struct.error):

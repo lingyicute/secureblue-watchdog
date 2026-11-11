@@ -3321,5 +3321,29 @@ class TestHumanSizes(unittest.TestCase):
         self.assertEqual(S.human(4 * 1024 ** 4), "4.0 TiB")
 
 
+class TestTranslatedI18nStringIsNotAParseProblem(unittest.TestCase):
+    """glfw, libraqm, usb_modeswitch ... ship a translated Summary: an I18NSTRING
+    with one string per locale. Rejecting count > 1 put a "12 field(s) could not
+    be decoded" warning into every report on the live image."""
+
+    def _hdr(self, typ, cnt):
+        import struct
+        store = b"glfw\0A library\0Une biblioth\xc3\xa8que\0"
+        return (struct.pack(">II", 2, len(store))
+                + struct.pack(">IIII", 1000, 6, 0, 1)
+                + struct.pack(">IIII", 1004, typ, 5, cnt) + store)
+
+    def test_first_translation_is_used_and_nothing_is_skipped(self):
+        stats = {}
+        self.assertEqual(S.read_header(self._hdr(9, 2), stats),
+                         {"name": "glfw", "summary": "A library"})
+        self.assertEqual(stats, {})
+
+    def test_plain_string_with_several_values_is_still_rejected(self):
+        stats = {}
+        self.assertNotIn("summary", S.read_header(self._hdr(6, 2), stats))
+        self.assertEqual(stats.get("fields_skipped"), 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
