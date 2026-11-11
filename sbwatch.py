@@ -2847,13 +2847,12 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi, limit: int = 45) -> tup
     rows = []
     for src in chosen:
         ups = bodhi.updates_for_src(src, rel)
+        pkgs_for_src = sorted(want[src], key=lambda np: (np[0] != src, np[0]))
         done = False
         for u in ups:
-            if done:
-                break
             if u.get("type") != "security" or u.get("status") != "stable":
                 continue
-            for n, p in want[src]:
+            for n, p in pkgs_for_src:
                 best = None
                 for b in u["nvrs"]:
                     if not b:      # Bodhi attaches builds without an nvr sometimes
@@ -2882,6 +2881,7 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi, limit: int = 45) -> tup
                              "cves": u.get("cves") or [],
                              "notes": u.get("notes") or ""})
                 done = True
+                break
             if done:
                 break
     # Both spellings of the middle rank: Bodhi's API answers with its own words
