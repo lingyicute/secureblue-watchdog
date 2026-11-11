@@ -2234,6 +2234,14 @@ class TestWorkflowHygiene(unittest.TestCase):
             self.assertRegex(
                 ln, r"^[A-Z_]+: \$\{\{ steps\.check\.outputs\.(fail_reason|summary) \}\}$")
 
+    def test_an_unchanged_cache_is_not_saved_again(self):
+        # a `no-update` run writes nothing into ~/.cache/sbwatch; a failed run
+        # (empty verdict) must still save what it has
+        wf = self._workflow()
+        step = wf.split("- name: Save sbwatch cache")[1].split("- name:")[0]
+        cond = re.search(r"^\s*if: (.*)$", step, re.M).group(1)
+        self.assertEqual(cond, "always() && steps.check.outputs.verdict != 'no-update'")
+
     def test_an_inconclusive_run_is_not_green(self):
         wf = self._workflow()
         self.assertIn("steps.check.outputs.verdict == 'unknown'", wf)
