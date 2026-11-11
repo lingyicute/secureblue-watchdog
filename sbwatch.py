@@ -4103,6 +4103,10 @@ def cmd_check(args):
                 state = json.load(fh)
         except Exception:
             state = {}
+    if not isinstance(state, dict):
+        # valid JSON that is no state (`null`, a list): every `state.get` below
+        # crashed on it, on each run, until someone deleted the file by hand
+        state = {}
     reg = _registry(args)
     reg._token()
     # The default state path is shared by every image and architecture, and a
