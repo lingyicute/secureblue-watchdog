@@ -52,6 +52,43 @@ class TestForceRecheckState(unittest.TestCase):
             self.assertEqual(saved["digest"], older["digest"])
             self.assertEqual(saved["prev_digest"], newer["digest"])
 
+    def test_force_recheck_keeps_the_baseline_label_check_wrote_itself(self):
+        # a baseline picked from the build history is labelled in 35 characters
+        label = "45.20261110.0 @ 2026-11-10T21:50:50"
+
+        def image(n):
+            digest = "sha256:" + str(n) * 64
+            return {"digest": digest, "index_digest": digest,
+                    "created": f"2026-11-1{n}T00:00:00Z", "layers": [],
+                    "annotations": {"org.opencontainers.image.version": f"45.2026111{n}.0"}}
+
+        prev, cur = image(0), image(1)
+
+        def resolve(reg, ref, light=False):
+            return dict(cur if ref in ("latest", cur["digest"]) else prev, ref=ref)
+
+        def packages(reg, img, ref, directory, notes):
+            return S.PackageTable({"bash": pkg("bash", "5.3-1.fc45")})
+
+        with tempfile.TemporaryDirectory() as directory:
+            state, report = Path(directory) / "state.json", Path(directory) / "report.md"
+            state.write_text(json.dumps({"digest": cur["digest"], "created": cur["created"],
+                                         "prev_digest": prev["digest"], "prev_label": label}))
+            with patch.object(S.Registry, "_token", return_value=None), \
+                    patch.object(S, "resolve", side_effect=resolve), \
+                    patch.object(S, "load_pkglist", side_effect=packages), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                for _ in range(2):      # the second run reads back what the first one saved
+                    rc = S.main(["check", "--image", "x/y", "--state", str(state),
+                                 "--report", str(report), "--cache-dir", directory,
+                                 "--scan", "0", "--force", "--no-fast", "--no-audit",
+                                 "--no-bodhi", "--prune-days", "0"])
+                    self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(Path(str(report) + ".json").read_text())["from"], label)
+            self.assertEqual(json.loads(state.read_text())["prev_label"], label)
+            self.assertIn(f"{label} -> latest", report.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()
