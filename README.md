@@ -180,6 +180,8 @@ python3 sbwatch.py diff 20260916 latest --exact 0
 
 # 4. 带签名校验 (P0 加固)；校验结果会写进报告
 python3 sbwatch.py diff 20260916 latest --cosign-pub ./cosign.pub --require-cosign
+#    cosign 只对 digest 签名；sbwatch 会对按 digest 取回的 manifest、config 和 rpmdb blob
+#    逐一校验 sha256，内容与 digest 不符即中止，因此「签名通过」覆盖到实际被分析的数据
 
 # 5. CI 模式：只有 tag 移动时才做重活
 python3 sbwatch.py check --image secureblue/silverblue-main-hardened --to latest --report report.md
@@ -259,7 +261,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/test_sbwatch.py` 是 **203 项离线回归测试**，不需要网络、不访问 registry
+`tests/test_sbwatch.py` 是 **243 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -292,6 +294,7 @@ python3 -m unittest discover -s tests      # 或 python3 tests/test_sbwatch.py
 | **K** | 静默/致命缺陷：`tag_exists` 只对 404 沉默、其它状态码要告警；backlog 严重度序（`medium` 不得排在 `low` 之后）；Bodhi `nvr=null` 不再崩溃；`coverage_line` 容忍缺键；`group_by_src` 不再要求 `dir`；缺 `ostree.linux` 不再渲染成 `None`；multilib 同名包被记录而非静默丢弃；`read_header` 统计并披露解析失败；报告写入改为原子 |
 | **L** | **CI 供应链**：所有 action 钉到 commit SHA；cosign 公钥入库并校验 sha256（运行时不再联网取钥）；`actions: write` 只给需要的 job；`push` 只触发 main；结论为 `unknown` 的运行不再「绿」 |
 | **M** | **不得静默截断**：每一处「砍掉一部分」的渲染都必须写明并给出被省略的数量（headline 的源码包/CVE、安全表 CVE 列、已拥有/未推送勘误、增删包列表、backlog 行、chunk 列表、CLI 各列…）；安全表放不下的 CVE 必须有**完整清单**小节，一条不丢；`cves`/`aliases`/`dropped`/`security_pkgs` 等载荷列表**禁止**直接切片；Bodhi 缓存中用于提取 CVE 的 `title`/`notes` 不得先截断（v1 缓存会因此丢 CVE，读到旧格式必须重取）；GITHUB_OUTPUT 输出完整内容并附计数 |
+| **O** | **活镜像实测暴露的问题**：带译文的 Summary（I18NSTRING，count>1）不得计为解析失败；`ostree.linux` 变了而 `kernel` 包没变 ⟹ 不得报「内核变化」，报告同时列出 rpmdb 中实际安装的内核；`CVE 2026-114583` 这类非标准拼写必须被识别；新旧更新日志都提到的 CVE 既不算新增也不算丢失；更新日志扫描上限不得在真实更新日志上触发；按 digest 取回的 manifest / config / blob 必须校验 sha256；bearer token 不得随重定向发给其它主机；state 里的基线 digest 被 registry 清理后 `check` 必须回退而不是永久失败；Bodhi 连续失败 3 次即停止查询；`--max-bodhi` 预算优先用于安全敏感包；`check` 清理过期缓存 |
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
@@ -301,10 +304,11 @@ CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并�
 
 ## GitHub Action
 
-仓库自带 `.github/workflows/sbwatch.yml`，由 [wroker-cron](https://github.com/lingyicute/worker-cron) 驱动，每半小时就会跑一次：
+仓库自带 `.github/workflows/sbwatch.yml`，由 [worker-cron](https://github.com/lingyicute/worker-cron) 驱动，每半小时就会跑一次：
 
 - cache `~/.cache/sbwatch` (pkglist + Bodhi + state.json)，按 image+arch 分命名空间，
-  并有一个 prune 步骤只保留最近 7 份（否则 `state.json` 会被 LRU 挤掉，`check` 就失去基线）
+  并有一个 prune 步骤只保留最近 7 份（否则 `state.json` 会被 LRU 挤掉，`check` 就失去基线）；
+  结论为 `no-update` 的运行不再重复保存缓存（该路径不往缓存目录写任何东西）
 - `check` 分析完成后会删除超过 14 天的 pkglist / Bodhi 缓存文件（刚对比的两个镜像除外；
   `--prune-days N` 调整，`0` 关闭）：每个分析过的构建会留下约 11 MB 的 pkglist，
   而整个缓存目录每次运行都会被整体恢复、保存
