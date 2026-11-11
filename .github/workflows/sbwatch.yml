@@ -59,6 +59,10 @@ concurrency:
 jobs:
   test:
     name: Tests
+    # Only a push changes the code under test. The watch job never waits for
+    # this one, so on every scheduled or dispatched run (twice an hour) it only
+    # re-ran the same suite on the same commit and reinstalled pyflakes for it.
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
