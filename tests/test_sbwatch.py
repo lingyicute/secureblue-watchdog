@@ -584,21 +584,16 @@ class TestBodhiCache(unittest.TestCase):
                 json.dump({"not": "a list"}, fh)   # valid JSON, wrong type
             self.assertIsNone(b._read_cache_entry(cf))
 
-    def test_legacy_list_cache_still_readable(self):
-        # caches written before pagination existed are a bare list
+    def test_legacy_list_cache_is_refetched_not_trusted(self):
+        # Bare lists cannot prove pagination or untruncated CVE evidence.
         with tempfile.TemporaryDirectory() as d:
-            b = S.Bodhi(cache_dir=d, max_calls=3)
+            b = S.Bodhi(cache_dir=d, max_calls=0)
             cf = b._cf("rpm-F44")
-            payload = [{"alias": "FEDORA-2026-1", "type": "bugfix", "status": "stable",
-                        "severity": "unspecified", "nvrs": ["rpm-4.20-1.fc44"],
-                        "notes": "", "bugs": [], "title": "", "cves": []}]
             with open(cf, "w") as fh:
-                json.dump(payload, fh)
-            ent = b._read_cache_entry(cf)
-            self.assertEqual(ent["updates"], payload)
-            self.assertFalse(ent["truncated"])
-            self.assertIsNone(ent["total"])
-            self.assertEqual(b.updates_for_src("rpm", "F44"), payload)
+                json.dump([{"alias": "FEDORA-2026-1"}], fh)
+            self.assertIsNone(b._read_cache_entry(cf))
+            self.assertEqual(b.updates_for_src("rpm", "F44"), [])
+            self.assertEqual(b.skipped, 1)
 
     def test_new_cache_shape_roundtrips(self):
         with tempfile.TemporaryDirectory() as d:

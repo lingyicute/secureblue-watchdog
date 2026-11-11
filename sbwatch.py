@@ -1220,18 +1220,14 @@ class Bodhi:
     def _read_cache_entry(self, cf):
         """Full cache entry {"total", "truncated", "updates"}, or None.
 
-        Never let a corrupt cache kill a run. Two shapes are accepted: the current
-        dict, and the bare list written before pagination existed (no truncation
-        info, so treated as complete). Anything else is treated as corrupt, removed
-        and refetched - a cache the reader cannot parse must not be written by the
-        writer, and if the two ever disagree again the symptom is a refetch, not a
-        wrong verdict.
+        Only a current versioned object can establish complete CVE coverage.
+        Bare lists predate pagination and the removal of title/notes clipping;
+        accepting one bypassed the version guard and silently hid security fixes.
+        Unreadable or obsolete entries are refetched, never treated as clean.
         """
         try:
             with open(cf) as f:
                 data = json.load(f)
-            if isinstance(data, list):
-                return {"total": None, "truncated": False, "updates": data}
             if isinstance(data, dict) and isinstance(data.get("updates"), list):
                 # A cache written before BODHI_CACHE_VERSION carried clipped bug
                 # titles / notes, i.e. it can be missing CVE ids. Refetching costs
