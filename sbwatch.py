@@ -2022,9 +2022,10 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     coverage_gap = False
     if bodhi_state:
         bad, miss = bodhi_state.get("failed", 0), bodhi_state.get("skipped", 0)
+        trunc = len(bodhi_state.get("truncated") or [])
         off = bodhi_state.get("disabled", 0)
         unavailable = bodhi_state.get("unavailable", 0)
-        if bad or miss or off or unavailable:
+        if bad or miss or trunc or off or unavailable:
             coverage_gap = True
             why, why_zh = [], []
             if off:
@@ -2042,6 +2043,9 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             if miss:
                 why.append(f"{miss} package(s) were not queried (--max-bodhi)")
                 why_zh.append(f"{miss} 个软件包未被查询 (--max-bodhi)")
+            if trunc:
+                why.append(f"errata list truncated for {trunc} package(s)")
+                why_zh.append(f"{trunc} 个软件包的勘误列表被截断")
             v["headline"] += " | CAUTION: errata coverage incomplete - " + "; ".join(why) \
                              + ", so 'no security fixes' is not proven"
             v["headline_zh"] += " ｜ 注意：勘误覆盖不完整 —— " + "；".join(why_zh) \
