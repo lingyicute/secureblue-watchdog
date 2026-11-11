@@ -128,6 +128,11 @@ BODHI_CACHE_VERSION = 2  # v1 clipped bug titles (200) and notes (1500) BEFORE
 OLD_LOG_CAP = 1000  # changelog entries (dropped by this build) scanned for lost fixes
 RETAINED_LOG_CAP = 1000  # unchanged entries that may still mention a purportedly gained/lost CVE
 TAG_LIST_RETRIES = 4                        # ghcr is flaky on tags/list pagination
+TAG_LIST_MAX_PAGES = 100                    # of 1000 tags each. Nothing in the repo is
+                                            # ever pruned: 4795 tags on 2026-11-11, ~32
+                                            # more a day, and ghcr lists the oldest
+                                            # first - the former 12 pages would have
+                                            # begun to hide the NEWEST builds in mid-2027
 CACHE_KEEP_DAYS = 14        # `check --prune-days`: age at which cache files are dropped
 TMP_FILE_RE = re.compile(r"\.json\.tmp\.\d+$")   # _atomic_write_json()'s `<file>.tmp.<pid>`
 TMP_FILE_GRACE = 3600       # seconds after which such a file has no live writer left
@@ -3492,7 +3497,7 @@ DATED_RE = re.compile(r"^(\d{8})(-\d+)?$")   # 20260917 / 20260917-44 are one da
 SIGTAG_RE = re.compile(r"^sha256-([0-9a-f]{64})\.sig$")
 
 
-def list_tags(reg: Registry, max_pages: int = 12) -> list:
+def list_tags(reg: Registry, max_pages: int = TAG_LIST_MAX_PAGES) -> list:
     """All tags of the repo. ghcr returns them in push order; pages via Link header."""
     out, url = [], f"https://{reg.host}/v2/{reg.repo}/tags/list?n=1000"
     pages_done = 0
