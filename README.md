@@ -305,6 +305,9 @@ CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并�
 
 - cache `~/.cache/sbwatch` (pkglist + Bodhi + state.json)，按 image+arch 分命名空间，
   并有一个 prune 步骤只保留最近 7 份（否则 `state.json` 会被 LRU 挤掉，`check` 就失去基线）
+- `check` 分析完成后会删除超过 14 天的 pkglist / Bodhi 缓存文件（刚对比的两个镜像除外；
+  `--prune-days N` 调整，`0` 关闭）：每个分析过的构建会留下约 11 MB 的 pkglist，
+  而整个缓存目录每次运行都会被整体恢复、保存
 - `sbwatch.py check` → `report.md` + `report.md.json` → summary + artifact
   （workflow 不传 `--exact` / `--no-fast`，所以走默认值：`--exact 1` + `--fast` 开启，
   见上文「`check --fast` 与 manifest-only」）
