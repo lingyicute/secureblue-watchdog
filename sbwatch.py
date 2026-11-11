@@ -95,6 +95,7 @@ MAX_BODHI_PAGES = 10                        # 1000 errata/src is far beyond any 
 BODHI_GIVE_UP_AFTER = 3     # failed lookups in a row before Bodhi counts as down: each
                             # can block for its whole 40 s timeout, and --max-bodhi 80
                             # of those outlast the workflow's 25-minute limit
+BODHI_TTL = 6 * 3600        # age at which a cached Bodhi answer is refetched
 NEW_LOG_CAP = 1000  # changelog entries (new in this build) scanned for CVE mentions.
 #                     A guard against a pathological rpmdb, not a tuning knob: the
 #                     live image's longest changelog has 435 entries and all 47,624
@@ -1306,7 +1307,7 @@ def package_list(reg: Registry, resolved: dict) -> dict:
 class Bodhi:
     BASE = "https://bodhi.fedoraproject.org"
 
-    def __init__(self, cache_dir=None, sleep=0.3, max_calls=80, ttl=6 * 3600):
+    def __init__(self, cache_dir=None, sleep=0.3, max_calls=80, ttl=BODHI_TTL):
         self.cache_dir, self.sleep, self.max_calls, self.ttl = cache_dir, sleep, max_calls, ttl
         self.calls, self._mem = 0, {}
         self.failed = 0          # queries that errored => verdict must not claim "clean"
@@ -3929,13 +3930,17 @@ def prune_cache(cache_dir: str, keep_digests, max_age_days: float) -> int:
     nothing ever removed one, while CI restores and saves the whole directory on
     every run: at three builds a day that is about a gigabyte a month. `check`
     only reads a list again as the next baseline, so `keep_digests` are spared
-    and everything else goes once it is older than `max_age_days` (a Bodhi answer
-    is refetched after six hours anyway). Returns the number of files removed.
+    and everything else goes once it is older than `max_age_days`. A Bodhi answer
+    goes as soon as it is past BODHI_TTL: updates_for_src() refetches it from
+    then on, and keeping it made every cache save carry dead answers for the
+    whole retention window. Returns the number of files removed.
     """
     if max_age_days <= 0 or not os.path.isdir(cache_dir):
         return 0
     keep = {f"pkglist-{d.replace(':', '')}.json" for d in keep_digests if d}
-    cutoff = time.time() - max_age_days * 86400
+    now = time.time()
+    cutoff = now - max_age_days * 86400
+    bodhi_cutoff = max(cutoff, now - BODHI_TTL)
     removed = 0
     for name in os.listdir(cache_dir):
         if (name in keep or not name.endswith(".json")
@@ -3943,7 +3948,8 @@ def prune_cache(cache_dir: str, keep_digests, max_age_days: float) -> int:
             continue
         path = os.path.join(cache_dir, name)
         try:
-            if os.path.getmtime(path) < cutoff:
+            limit = bodhi_cutoff if name.startswith("bodhi-") else cutoff
+            if os.path.getmtime(path) < limit:
                 os.unlink(path)
                 removed += 1
         except OSError:
