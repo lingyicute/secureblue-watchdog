@@ -3808,5 +3808,34 @@ class TestBodhiBudgetGoesToSensitivePackagesFirst(unittest.TestCase):
         self.assertIn("for c in classify_order(diff[\"changed\"])", inspect.getsource(S.do_diff))
 
 
+class TestPkgsUsesThePackageListCache(unittest.TestCase):
+    """`pkgs` took --cache-dir and ignored it: every call fetched and parsed the
+    rpmdb chunk again, even for a digest whose list was already cached."""
+
+    def test_second_call_for_the_same_digest_does_not_fetch(self):
+        import contextlib
+        import types
+        table = S.PackageTable({f"p{i}": pkg(f"p{i}", "1.0-1.fc45", changelog=[
+            {"time": 1, "who": "w", "text": "t" * 40}]) for i in range(200)})
+        fetched = []
+        img = {"digest": "sha256:" + "a" * 64, "annotations": {}, "layers": []}
+        saved = S._registry, S.resolve, S.package_list
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S.resolve = lambda reg, ref, light=False: dict(img, ref=ref)
+        S.package_list = lambda reg, r: fetched.append(r["digest"]) or table
+        try:
+            with tempfile.TemporaryDirectory() as d, \
+                    contextlib.redirect_stderr(io.StringIO()):
+                args = types.SimpleNamespace(image="x/y", arch="amd64", ref="latest",
+                                             json=os.path.join(d, "out.json"), cache_dir=d)
+                self.assertEqual(S.cmd_pkgs(args), 0)
+                self.assertEqual(S.cmd_pkgs(args), 0)
+                with open(args.json) as fh:
+                    self.assertEqual(len(json.load(fh)["packages"]), 200)
+        finally:
+            S._registry, S.resolve, S.package_list = saved
+        self.assertEqual(len(fetched), 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
