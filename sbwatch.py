@@ -3502,7 +3502,11 @@ def cmd_pkgs(args):
     reg._token()
     r = resolve(reg, args.ref)
     maybe_verify_resolved(reg, r, args)
-    pkgs = package_list(reg, r)
+    # Through the cache `diff` and `check` share (keyed by the image digest):
+    # `pkgs` accepted --cache-dir, ignored it, and downloaded and parsed the
+    # ~33 MB rpmdb chunk again on every call.
+    pkgs = load_pkglist(reg, r, args.ref,
+                        args.cache_dir or os.path.expanduser("~/.cache/sbwatch"), [])
     if args.json:
         slim = {k: {a: b for a, b in v.items() if a != "changelog"} for k, v in pkgs.items()}
         with open(args.json, "w") as fh:
