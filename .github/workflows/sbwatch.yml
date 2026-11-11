@@ -268,11 +268,13 @@ jobs:
           # languages) exceeds that on its own: the step failed and took the
           # Telegram push after it down too.
           python3 - <<'PY'
-          s = open("body.md", encoding="utf-8").read()
+          with open("body.md", encoding="utf-8") as fh:
+              s = fh.read()
           if len(s) > 65000:
               s = s[:64800] + (f"\n\n… (+{len(s) - 64800} chars not shown: GitHub caps a comment at "
                                "65536 characters - the full report is in the run summary and artifact)\n")
-              open("body.md", "w", encoding="utf-8").write(s)
+              with open("body.md", "w", encoding="utf-8") as fh:
+                  fh.write(s)
           PY
           num=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
                   --search "in:title $title" --json number --jq '.[0].number // empty')
@@ -293,7 +295,8 @@ jobs:
           python3 - <<'PY'
           import json, os, urllib.request, sys
           try:
-              body = open("report.md", encoding="utf-8").read()
+              with open("report.md", encoding="utf-8") as fh:
+                  body = fh.read()
           except FileNotFoundError:
               body = "(no report)"
           text = (os.environ.get("SUMMARY") or "secureblue update") + "\n\n" + body
