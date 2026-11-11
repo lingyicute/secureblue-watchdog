@@ -48,6 +48,7 @@ import argparse
 import atexit
 import gzip
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -715,12 +716,18 @@ class Registry:
         except SystemExit:
             raise
         except Exception as e:
-            raise SystemExit(T(f"failed reading {what}: {e}", f"读取 {what} 失败：{e}")) from None
+            # A RegistryError, like every other registry failure: the callers
+            # that tolerate one (history scan, tag probes) can then tolerate a
+            # connection that died mid-transfer too.
+            raise RegistryError(T(f"failed reading {what}: {e}",
+                                  f"读取 {what} 失败：{e}")) from None
 
     def get(self, path: str, accept: str) -> bytes:
         with self._open(path, accept) as r:
-            # manifest is small, blobs can be large - enforce same limit for safety
-            return _safe_read_limited(r, MAX_BLOB_BYTES)
+            # manifest is small, blobs can be large - enforce same limit for safety.
+            # Through _read_all(): a timeout / reset / IncompleteRead while reading
+            # the body escaped from here as a bare traceback.
+            return self._read_all(r, f"{self.repo}/{path}")
 
     def index_digest(self, ref: str) -> str:
         """The digest `ref` points at - resolve()'s `index_digest` - in one request.
@@ -810,10 +817,11 @@ class Registry:
                 raise SystemExit(T(f"blob Content-Length {cl} > {human(MAX_BLOB_BYTES)} limit",
                                    f"blob 的 Content-Length {cl} 超过 {human(MAX_BLOB_BYTES)} 限制"))
             src = _CappedReader(r, MAX_BLOB_BYTES, d)
-            magic = src.peek(2)
-            stream = gzip.GzipFile(fileobj=src) if magic == b"\x1f\x8b" else src
             written = 0
             try:
+                # inside the try: the very first read can already fail
+                magic = src.peek(2)
+                stream = gzip.GzipFile(fileobj=src) if magic == b"\x1f\x8b" else src
                 with open(dest, "wb") as o:
                     while True:
                         chunk = stream.read(1 << 20)
@@ -833,7 +841,8 @@ class Registry:
                     pass
             except SystemExit:
                 raise
-            except (OSError, gzip.BadGzipFile, EOFError, zlib.error) as e:
+            except (OSError, gzip.BadGzipFile, EOFError, zlib.error,
+                    http.client.HTTPException) as e:    # IncompleteRead is one
                 raise SystemExit(T(f"failed to read/decompress layer {d}: {e}",
                                    f"读取/解压层 {d} 失败：{e}")) from None
             check_digest(src.hexdigest(), digest, f"layer {d}")
