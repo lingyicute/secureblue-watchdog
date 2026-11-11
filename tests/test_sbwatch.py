@@ -3021,5 +3021,43 @@ class TestTagsProbeIncludesToday(unittest.TestCase):
         self.assertEqual(probed, ["20260919", "20260918", "20260917"])
 
 
+class TestImageTagIsTheDefaultRef(unittest.TestCase):
+    """`--image ns/name:44` parsed the tag into Registry.default_ref and then every
+    command looked at `latest` anyway. The image's tag is now the fallback for
+    --to / ref; an explicit option still wins."""
+
+    def _args(self, image, **kw):
+        import types
+        return types.SimpleNamespace(image=image, arch="amd64", **kw)
+
+    def test_tag_in_image_fills_an_unset_to(self):
+        a = self._args("secureblue/x:44", to=None)
+        reg = S._registry(a)
+        reg.close()
+        self.assertEqual(a.to, "44")
+
+    def test_explicit_to_and_plain_image_keep_their_values(self):
+        a = self._args("secureblue/x:44", to="20260917")
+        S._registry(a).close()
+        self.assertEqual(a.to, "20260917")
+        a = self._args("secureblue/x", ref=None)
+        S._registry(a).close()
+        self.assertEqual(a.ref, "latest")
+
+    def test_parsers_default_to_none_so_the_fallback_can_apply(self):
+        saved = S.cmd_tags, S.cmd_check, S.cmd_backlog
+        seen = {}
+        S.cmd_tags = S.cmd_check = S.cmd_backlog = lambda args: seen.update(vars(args))
+        try:
+            S.main(["tags"])
+            self.assertIsNone(seen["to"])
+            S.main(["backlog"])
+            self.assertIsNone(seen["ref"])
+            S.main(["check", "--to", "44"])
+            self.assertEqual(seen["to"], "44")
+        finally:
+            S.cmd_tags, S.cmd_check, S.cmd_backlog = saved
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
