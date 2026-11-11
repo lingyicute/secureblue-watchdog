@@ -3193,6 +3193,11 @@ class TestImageTagIsTheDefaultRef(unittest.TestCase):
         reg = S._registry(a)
         reg.close()
         self.assertEqual(a.to, "44")
+        self.assertEqual(a.image, "secureblue/x")
+        b = self._args("quay.io/fedora/silverblue:44", ref=None)
+        S._registry(b).close()
+        self.assertEqual(b.ref, "44")
+        self.assertEqual(b.image, "quay.io/fedora/silverblue")
 
     def test_explicit_to_and_plain_image_keep_their_values(self):
         a = self._args("secureblue/x:44", to="20260917")
