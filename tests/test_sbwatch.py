@@ -952,7 +952,7 @@ class TestPickTarMember(unittest.TestCase):
                 ti = tarfile.TarInfo(name)
                 if payload is None:
                     ti.type = tarfile.SYMTYPE
-                    ti.linkname = "usr/lib/sysimage/rpm-ostree-base-db/rpmdb.sqlite"
+                    ti.linkname = "/usr/lib/sysimage/rpm-ostree-base-db/rpmdb.sqlite"
                     tf.addfile(ti)
                 else:
                     ti.size = len(payload)

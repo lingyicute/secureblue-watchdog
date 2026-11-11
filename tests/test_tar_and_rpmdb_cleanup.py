@@ -82,3 +82,29 @@ class TestTarAndRpmdbCleanup(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "unexpected rpmdb schema"):
                 S.package_list(reg, resolved)
             self.assertFalse(os.path.exists(bad_db))
+
+    def test_extract_member_follows_a_relative_target_without_a_leading_dot(self):
+        # only a leading "/" makes a symlink target absolute
+        raw = self._tar_bytes([
+            ("usr/share/rpm/rpmdb.sqlite", "sym", "base-db/target.db"),
+            ("usr/share/rpm/base-db/target.db", "file", b"sqlite-bytes"),
+        ])
+        reg = S.Registry("secureblue/x")
+        try:
+            def fake_fetch(digest, dest):
+                with open(dest, "wb") as fh:
+                    fh.write(raw)
+                return dest
+
+            reg.fetch_blob = fake_fetch
+            out = reg.extract_member({"digest": "sha256:" + "d" * 64}, "rpmdb.sqlite")
+            with open(out, "rb") as fh:
+                self.assertEqual(fh.read(), b"sqlite-bytes")
+        finally:
+            reg.close()
+
+    def test_absolute_symlink_target_is_normalised_from_the_archive_root(self):
+        self.assertEqual(
+            S._resolve_tar_link("usr/share/rpm/rpmdb.sqlite",
+                                "/usr/lib/sysimage/../rpm/target.db"),
+            "usr/lib/rpm/target.db")
