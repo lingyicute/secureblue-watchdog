@@ -4204,6 +4204,20 @@ def gh_outputs(pairs):
                 f.write(f"{k}={v}\n")
 
 
+def _state_label(state: dict) -> str:
+    """How a report names the image the state file points at.
+
+    Version *and* build time, like the label of a baseline picked from the build
+    history: several builds a day share one version string, and with the version
+    alone the title read `45.20261111.0 -> latest (45.20261111.0)`.
+    """
+    ver = state.get("version")
+    bits = [str(x) for x in (None if ver == "?" else ver, ts_short(state.get("created")))
+            if x]
+    return clip_text(" @ ".join(bits) or state.get("digest"), BASELINE_LABEL_CAP,
+                     lang="both")
+
+
 def cmd_check(args):
     """Daily entry point: only do real work when the watched tag moved.
 
@@ -4318,8 +4332,7 @@ def cmd_check(args):
     state_base_lbl = None
     if not ref_a and state.get("digest") and state["digest"] != cur["digest"]:
         state_base_dig = state["digest"]
-        state_base_lbl = clip_text(state.get("version") or state.get("created")
-                                   or state["digest"], BASELINE_LABEL_CAP, lang="both")
+        state_base_lbl = _state_label(state)
     elif (not ref_a and state.get("digest") == cur["digest"]
           and state.get("prev_digest") and state["prev_digest"] != cur["digest"]):
         # `check --force` on an unchanged tag re-analyses the last transition:
