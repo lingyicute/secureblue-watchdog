@@ -677,7 +677,11 @@ class Registry:
             url = realm + "?" + urllib.parse.urlencode({k: v for k, v in q.items() if v})
             try:
                 with urllib.request.urlopen(url, timeout=self.timeout) as r:
-                    tok = json.load(r).get("token", "")
+                    # The token spec allows either key ("for compatibility
+                    # with OAuth 2.0"), and Azure's registry sends only
+                    # `access_token` - which read as "no token" and then as 401.
+                    doc = json.load(r)
+                    tok = doc.get("token") or doc.get("access_token") or ""
             except Exception as e2:
                 log(T(f"  ! token fetch failed: {e2}",
                       f"  ！获取 token 失败：{e2}"))

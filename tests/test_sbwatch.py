@@ -3688,5 +3688,28 @@ class TestReadCutShortIsACleanRegistryError(unittest.TestCase):
                 S.Registry.fetch_blob(reg, "sha256:" + "a" * 64, os.path.join(d, "x"))
 
 
+class TestTokenUnderEitherKey(unittest.TestCase):
+    def _token(self, doc):
+        def fake(req, timeout=None):
+            url = req if isinstance(req, str) else req.full_url
+            if url.endswith("/v2/"):
+                raise S.urllib.error.HTTPError(url, 401, "Unauthorized", {
+                    "Www-Authenticate": 'Bearer realm="https://auth.example/t",service="r"'},
+                    None)
+            return _FakeResp(json.dumps(doc).encode())
+
+        saved = S.urllib.request.urlopen
+        S.urllib.request.urlopen = fake
+        try:
+            return S.Registry("reg.example/ns/name")._token()
+        finally:
+            S.urllib.request.urlopen = saved
+
+    def test_access_token_is_accepted_like_token(self):
+        self.assertEqual(self._token({"token": "abc"}), "abc")
+        self.assertEqual(self._token({"access_token": "xyz"}), "xyz")
+        self.assertIsNone(self._token({}))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
