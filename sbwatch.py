@@ -1933,6 +1933,12 @@ def layer_diff(a: dict, b: dict) -> dict:
     }
 
 
+def _epoch(e: dict) -> str:
+    """The epoch as rpm reads it: a package without the tag and one that says
+    `Epoch: 0` are at the same epoch (evr_cmp() already compares them equal)."""
+    return str(e.get("epoch") or "0")
+
+
 def _evr_tuple(e: dict) -> tuple:
     """(epoch, version, release) as strings - the full comparison identity.
 
@@ -1941,7 +1947,7 @@ def _evr_tuple(e: dict) -> tuple:
     (rare, but it happens when Fedora introduces an epoch) silently dropped out
     of the diff entirely.
     """
-    return (str(e.get("epoch") or ""), e.get("version", ""), e.get("release", ""))
+    return (_epoch(e), e.get("version", ""), e.get("release", ""))
 
 
 def pkg_diff(pa: dict, pb: dict) -> dict:

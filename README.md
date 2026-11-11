@@ -270,7 +270,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/` 包含 **378 项离线回归测试**，不需要网络、不访问 registry
+`tests/` 包含 **380 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -337,6 +337,7 @@ python3 -m unittest discover -s tests -v
 - `test_bodhi_retry.py`：偶发失败的 Bodhi 查询会再试一次（同样计入 `--max-bodhi`），单次超时不再造成「勘误覆盖不完整」；连续失败期间和预算用尽后不重试。
 - `test_tag_list_page_budget.py`：tag 列表默认最多读 100 页；ghcr 按从旧到新列出，超过 12 页的仓库仍必须看得到最新的 tag。
 - `test_rpm_header_blob_type.py`：`Packages` 表中 blob 为 NULL、文本或数字的行计为被拒头部并在报告中披露，不再让整次运行崩溃。
+- `test_epoch_spelling.py`：缺失 epoch 与显式 `Epoch: 0` 视为同一个 epoch，不得在 diff 里冒出一个版本完全相同的「重建」；真正的 epoch 变化仍然可见。
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
