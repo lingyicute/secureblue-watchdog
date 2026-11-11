@@ -3612,7 +3612,12 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
             f"（{clip_list(sorted(trunc), 6, lang='zh', joiner='，')}）——"
             f"超出部分的 CVE 提及未被读取"))
     # names from both images: a *removed* package has a source only in the old one
-    xc = crosscheck_chunks(ld, diff, {n: p["src"] for n, p in {**pa, **pb}.items()})
+    src_of = {n: p["src"] for n, p in pb.items()}
+    if pa is not pb:
+        for n in diff["removed"]:
+            if n in pa:
+                src_of[n] = pa[n]["src"]
+    xc = crosscheck_chunks(ld, diff, src_of)
     backlog, coverage = [], {"candidates": 0, "checked": 0, "skipped": 0, "failed": 0,
                              "skipped_names": [], "pool_missing": [], "pool_size": 0}
     if getattr(args, "audit", False) and bodhi is not None:
