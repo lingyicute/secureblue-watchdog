@@ -792,6 +792,13 @@ class TestBacklogMatching(unittest.TestCase):
         self.assertEqual([r["name"] for r in rows], ["shim-x64"])
         self.assertEqual(rows[0]["want"], "16.2-1")
 
+    def test_one_row_per_source_prefers_main_binary(self):
+        pkgs = {"kernel-core": pkg("kernel-core", "7.2.4-100.fc44", src="kernel"),
+                "kernel": pkg("kernel", "7.2.4-100.fc44", src="kernel")}
+        rows, _ = S.security_backlog(
+            pkgs, "F44", FakeBodhi({"kernel": self._upd("kernel-7.2.5-200.fc44")}), limit=10)
+        self.assertEqual([r["name"] for r in rows], ["kernel"])
+
     def test_epoch_package_can_be_behind(self):
         # live example: cups has epoch 1 in the image; Bodhi NVRs carry no epoch,
         # so the old evr_cmp made cups permanently "newer" than every update
