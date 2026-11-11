@@ -3966,6 +3966,12 @@ def _registry(args) -> Registry:
     removed when the process ends (an extracted rpmdb chunk lands there)."""
     reg = Registry(args.image, arch=args.arch)
     atexit.register(reg.close)
+    # `--image ns/name:44` used to parse the tag into default_ref and then
+    # ignore it: every command took `latest` from its own --to/ref default. The
+    # explicit option still wins; the image's own tag is only the fallback.
+    for attr in ("to", "ref"):
+        if hasattr(args, attr) and getattr(args, attr) is None:
+            setattr(args, attr, reg.default_ref)
     return reg
 
 
@@ -4017,7 +4023,9 @@ def main(argv=None):
 
     p = sub.add_parser("tags", help="show current image + recent dated tags / 显示当前镜像与近期日期标签")
     add_common(p)
-    p.add_argument("--to", default="latest")
+    p.add_argument("--to", default=None,
+                   help="tag to look at (default: the tag in --image, else latest) / "
+                        "要查看的标签（默认：--image 中的标签，否则 latest）")
     p.add_argument("--days", type=int, default=21)
     p.set_defaults(func=cmd_tags)
 
@@ -4045,13 +4053,16 @@ def main(argv=None):
 
     p = sub.add_parser("backlog", help="what security updates THIS image is still missing / 此镜像仍缺少哪些安全更新")
     add_common(p)
-    p.add_argument("ref", nargs="?", default="latest")
+    p.add_argument("ref", nargs="?", default=None,
+                   help="image ref (default: the tag in --image, else latest) / 镜像引用（默认：--image 中的标签，否则 latest）")
     p.add_argument("--json-out")
     p.set_defaults(func=cmd_backlog)
 
     p = sub.add_parser("history", help="list recent builds (handles several per day) / 列出近期构建（支持一天多次）")
     add_common(p)
-    p.add_argument("--to", default="latest")
+    p.add_argument("--to", default=None,
+                   help="tag to look at (default: the tag in --image, else latest) / "
+                        "要查看的标签（默认：--image 中的标签，否则 latest）")
     p.add_argument("--scan", type=int, default=12, help="how many builds to list / 列出多少次构建")
     p.add_argument("--days", type=int, default=7,
                    help="also resolve this many dated tags to label rows (0 = off) / "
@@ -4060,7 +4071,8 @@ def main(argv=None):
 
     p = sub.add_parser("check", help="stateful digest watch (for CI/cron) / 有状态 digest 监控（用于 CI/cron）")
     add_common(p)
-    p.add_argument("--to", default="latest", help="tag to watch / 要监控的标签")
+    p.add_argument("--to", default=None,
+                   help="tag to watch (default: the tag in --image, else latest) / 要监控的标签（默认：--image 中的标签，否则 latest）")
     p.add_argument("--a", default=None,
                    help="compare against this tag (default: state/recent tag); an explicit "
                         "--a always runs the comparison, even if the digest is unchanged / "
