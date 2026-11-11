@@ -270,7 +270,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/` 包含 **351 项离线回归测试**，不需要网络、不访问 registry
+`tests/` 包含 **376 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -331,6 +331,12 @@ python3 -m unittest discover -s tests -v
 - `test_bodhi_cache_key.py`：只差标点的源码包名（`foo-bar` / `foo_bar` / `foo.bar` …）各用各的 Bodhi 缓存文件，一个包的勘误不得被当成另一个包的返回。
 - `test_bodhi_cache_prune.py`：过了 TTL 的 Bodhi 应答在清理时即被删除，同龄的 pkglist 仍按 `--prune-days` 保留；`0` 依旧全部保留。
 - `test_history_baseline_label.py`：取自构建历史的基线与状态文件同样标注为「版本 @ 时间」，缺版本注解的构建不再标成 `None @ …`。
+- `test_cache_tmp_prune.py`：运行被中途杀掉时留下的 `<缓存文件>.json.tmp.<pid>` 满一小时即被清理；仍在写入的临时文件和非缓存文件不动。
+- `test_json_size_cap.py`：manifest / 镜像 config / tag 页这类整体载入内存解析的 JSON 文档上限为 16 MiB，不再沿用 200 MiB 的 blob 上限；token 应答同样有界，超限按获取失败处理。
+- `test_malformed_manifest.py`：registry 返回 200 但内容不是 manifest（错误页、缺 `size` 的层、非数字的 stability…）时报出带说明的 registry 错误而不是 traceback；history 扫描把它记为 `malformed manifest`，不再说成网络错误。
+- `test_bodhi_retry.py`：偶发失败的 Bodhi 查询会再试一次（同样计入 `--max-bodhi`），单次超时不再造成「勘误覆盖不完整」；连续失败期间和预算用尽后不重试。
+- `test_tag_list_page_budget.py`：tag 列表默认最多读 100 页；ghcr 按从旧到新列出，超过 12 页的仓库仍必须看得到最新的 tag。
+- `test_rpm_header_blob_type.py`：`Packages` 表中 blob 为 NULL、文本或数字的行计为被拒头部并在报告中披露，不再让整次运行崩溃。
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
@@ -348,7 +354,8 @@ CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并�
 - `check` 分析完成后会删除超过 14 天的 pkglist 缓存文件（刚对比的两个镜像除外；
   `--prune-days N` 调整，`0` 关闭）：每个分析过的构建会留下约 11 MB 的 pkglist，
   而整个缓存目录每次运行都会被整体恢复、保存；Bodhi 应答过了 6 小时 TTL 就再也不会
-  被读取，清理时直接删除，不再陪跑 14 天
+  被读取，清理时直接删除，不再陪跑 14 天；运行被中途杀掉时留下的
+  `*.json.tmp.<pid>` 临时文件满一小时也一并清理
 - `sbwatch.py check` → `report.md` + `report.md.json` → summary + artifact
   （workflow 不传 `--exact` / `--no-fast`，所以走默认值：`--exact 1` + `--fast` 开启，
   见上文「`check --fast` 与 manifest-only」）
