@@ -592,6 +592,8 @@ class Registry:
             host, rest = first, rest_all
         if "@" in rest:
             repo, _, dig = rest.partition("@")
+            if ":" in repo.rsplit("/", 1)[-1]:
+                repo, _, _ = repo.rpartition(":")
         elif ":" in rest.rsplit("/", 1)[-1]:
             repo, _, tag = rest.rpartition(":")
             dig = tag
