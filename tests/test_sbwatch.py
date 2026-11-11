@@ -1923,6 +1923,13 @@ class TestFixesThatUsedToBeSilent(unittest.TestCase):
         stats = {}
         self.assertEqual(S.read_header(hdr, stats), {})
         self.assertEqual(stats.get("fields_skipped"), 1)
+        bad_tags = (_struct.pack(">II", 2, 12)
+                    + _struct.pack(">IIII", 1003, 4, 0, 0)
+                    + _struct.pack(">IIII", 1001, 6, 0, 2)
+                    + b"1.0\02.0\0\0\0\0\0")
+        stats = {}
+        self.assertEqual(S.read_header(bad_tags, stats), {})
+        self.assertEqual(stats.get("fields_skipped"), 2)
 
     def test_rpmdb_parse_problems_on_older_image_are_reported_too(self):
         import types
