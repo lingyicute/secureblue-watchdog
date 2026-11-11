@@ -265,7 +265,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/` 包含 **278 项离线回归测试**，不需要网络、不访问 registry
+`tests/` 包含 **292 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -309,6 +309,10 @@ python3 -m unittest discover -s tests -v
 - `test_watch_direction.py`：使用状态基线时正确识别 tag 回滚，并保持 JSON、Markdown、CI 输出和新状态一致。
 - `test_retained_cves.py`：新增或删除重复提及时，只要保留条目仍提到同一 CVE，就不得声称新增或丢失该编号；保留条目的扫描也有上限并披露。
 - `test_bodhi_budget_memo.py`：预算耗尽按源码包和 Fedora release 去重；不把预算缺失写入磁盘，也不反复读取旧缓存。
+- `test_digest_integrity.py`：严格校验 `sha256:<64 hex>` 摘要格式，拒绝空摘要、非 sha256 算法或畸形摘要，并在校验失败时清理落盘的临时层文件。
+- `test_tar_and_rpmdb_cleanup.py`：解析层 tar 内的相对路径符号链接，并在 tar 提取或 sqlite 解析异常时清理临时文件。
+- `test_errata_and_backlog.py`：新构建的已推送 Bodhi 勘误携带 CVE 时消除更新日志改写造成的假性 CVE 丢失并标记安全属性；`security_backlog` 聚合同一源码包所有落后的 stable 安全勘误（取最新构建、最高严重度与全部 CVE）。
+- `test_force_recheck_state.py`：`check --force` 重跑当前构建时复用 `state.json` 中的 `prev_digest` 基线并保持回滚方向。
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
