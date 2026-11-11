@@ -762,7 +762,8 @@ class Registry:
             except Exception as e2:
                 log(T(f"  ! token fetch failed: {e2}",
                       f"  ！获取 token 失败：{e2}"))
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
+        except (urllib.error.URLError, TimeoutError, OSError,
+                http.client.HTTPException) as e:
             log(T(f"  ! cannot reach {self.host}/v2/ for a token: {e}",
                   f"  ！无法访问 {self.host}/v2/ 获取 token：{e}"))
         self._tok = tok or ""
@@ -786,7 +787,11 @@ class Registry:
             raise RegistryError(T(f"registry error {e.code} for {self.repo}/{path}",
                                   f"registry 返回 {e.code}：{self.repo}/{path}"),
                                 http_code=e.code) from None
-        except (urllib.error.URLError, TimeoutError, OSError) as e:
+        except (urllib.error.URLError, TimeoutError, OSError,
+                http.client.HTTPException) as e:
+            # HTTPException too: urllib wraps only what request() raises, so a
+            # reply that is not HTTP (BadStatusLine, LineTooLong) came out of
+            # getresponse() raw and ended the run with a traceback.
             raise RegistryError(T(f"cannot reach {self.host}: {e}",
                                   f"无法连接 {self.host}：{e}")) from None
 
