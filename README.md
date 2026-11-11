@@ -121,8 +121,8 @@ Chromium CVE 修复后才推的）。因此 `sbwatch` 直接按包名判断，�
 ```bash
 git clone https://github.com/lingyicute/secureblue-watchdog
 cd secureblue-watchdog
-# 可选：下载 secureblue 官方 cosign 公钥用于签名校验
-curl -O https://raw.githubusercontent.com/secureblue/secureblue/live/cosign.pub
+# 仓库已自带 secureblue 的 cosign 公钥 cosign.pub（sha256 钉在 workflow 的 COSIGN_PUB_SHA256），
+# 签名校验直接用它；重新下载只会覆盖这份核对过的文件
 python3 sbwatch.py --help
 ```
 
