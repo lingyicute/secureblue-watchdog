@@ -123,6 +123,8 @@ OLD_LOG_CAP = 1000  # changelog entries (dropped by this build) scanned for lost
 RETAINED_LOG_CAP = 1000  # unchanged entries that may still mention a purportedly gained/lost CVE
 TAG_LIST_RETRIES = 4                        # ghcr is flaky on tags/list pagination
 CACHE_KEEP_DAYS = 14        # `check --prune-days`: age at which cache files are dropped
+TMP_FILE_RE = re.compile(r"\.json\.tmp\.\d+$")   # _atomic_write_json()'s `<file>.tmp.<pid>`
+TMP_FILE_GRACE = 3600       # seconds after which such a file has no live writer left
 MANIFEST_ACCEPT = ",".join([
     "application/vnd.oci.image.index.v1+json",
     "application/vnd.oci.image.manifest.v1+json",
@@ -3933,7 +3935,8 @@ def prune_cache(cache_dir: str, keep_digests, max_age_days: float) -> int:
     and everything else goes once it is older than `max_age_days`. A Bodhi answer
     goes as soon as it is past BODHI_TTL: updates_for_src() refetches it from
     then on, and keeping it made every cache save carry dead answers for the
-    whole retention window. Returns the number of files removed.
+    whole retention window. A temp file a killed run left behind goes after
+    TMP_FILE_GRACE. Returns the number of files removed.
     """
     if max_age_days <= 0 or not os.path.isdir(cache_dir):
         return 0
@@ -3943,12 +3946,21 @@ def prune_cache(cache_dir: str, keep_digests, max_age_days: float) -> int:
     bodhi_cutoff = max(cutoff, now - BODHI_TTL)
     removed = 0
     for name in os.listdir(cache_dir):
-        if (name in keep or not name.endswith(".json")
-                or not name.startswith(("pkglist-", "bodhi-"))):
+        if name in keep or not name.startswith(("pkglist-", "bodhi-")):
+            continue
+        # `<file>.json.tmp.<pid>` is what a run killed mid-write leaves behind
+        # (the workflow's time limit, a cancelled job). Nothing reads or replaces
+        # it - the next run has another pid - and as it does not end in `.json`
+        # it was never pruned either: CI saved it with the cache from then on.
+        orphan = bool(TMP_FILE_RE.search(name))
+        if not orphan and not name.endswith(".json"):
             continue
         path = os.path.join(cache_dir, name)
         try:
-            limit = bodhi_cutoff if name.startswith("bodhi-") else cutoff
+            if orphan:
+                limit = now - TMP_FILE_GRACE
+            else:
+                limit = bodhi_cutoff if name.startswith("bodhi-") else cutoff
             if os.path.getmtime(path) < limit:
                 os.unlink(path)
                 removed += 1
