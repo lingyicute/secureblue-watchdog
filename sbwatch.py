@@ -3763,8 +3763,15 @@ def load_pkglist(reg, img, ref, cache_dir, notes):
     _atomic_write_json(cf, {"packages": pk, "collisions": pk.collisions,
                             "headers_rejected": pk.headers_rejected,
                             "fields_skipped": pk.fields_skipped})
-    notes.append(T(f"package list of `{ref}` came from that image's `rpmdb.sqlite` chunk (~33 MB fetched, ~3.7 GiB avoided)",
-                   f"`{ref}` 的软件包列表来自该镜像的 `rpmdb.sqlite` chunk（仅下载约 33 MB，避免约 3.7 GiB）"))
+    # This image's own numbers: the fixed "~33 MB fetched, ~3.7 GiB avoided" was
+    # only ever true for one variant on one architecture.
+    layers = img.get("layers") or []
+    fetched = (rpmdb_chunk({"layers": layers}) or {}).get("size", 0)
+    avoided = sum(l["size"] for l in layers) - fetched
+    notes.append(T(f"package list of `{ref}` came from that image's `rpmdb.sqlite` chunk "
+                   f"({human(fetched)} fetched, {human(avoided)} avoided)",
+                   f"`{ref}` 的软件包列表来自该镜像的 `rpmdb.sqlite` chunk"
+                   f"（仅下载 {human(fetched)}，避免 {human(avoided)}）"))
     return pk
 
 
