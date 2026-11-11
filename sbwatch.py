@@ -110,6 +110,11 @@ CVE_CELL_CAP = 6         # CVE ids per row in the security table (rest listed in
 EV_CELL_CAP = 190        # characters of evidence per row in the security table
 WHY_CAP = 160            # characters of evidence per row in the sensitive-bump table
 PKG_LIST_CAP = 40        # package names per line in the package-set-change section
+BASELINE_LABEL_CAP = 80  # characters of a baseline label read back from the state file:
+#                          room for check's own "<version> @ <timestamp>" (35) and for a
+#                          whole digest (71), which shortref() then abbreviates. The
+#                          former 26 cut check's own label and appended a 40-character
+#                          marker to it - once more on every --force run.
 BODHI_CACHE_VERSION = 2  # v1 clipped bug titles (200) and notes (1500) BEFORE
 #                          extracting CVE ids from them, so a v1 cache can be
 #                          missing CVEs. A cache without this marker is refetched.
@@ -4311,7 +4316,7 @@ def cmd_check(args):
     if not ref_a and state.get("digest") and state["digest"] != cur["digest"]:
         state_base_dig = state["digest"]
         state_base_lbl = clip_text(state.get("version") or state.get("created")
-                                   or state["digest"], 26, lang="both")
+                                   or state["digest"], BASELINE_LABEL_CAP, lang="both")
     elif (not ref_a and state.get("digest") == cur["digest"]
           and state.get("prev_digest") and state["prev_digest"] != cur["digest"]):
         # `check --force` on an unchanged tag re-analyses the last transition:
@@ -4319,7 +4324,7 @@ def cmd_check(args):
         # reversing a rollback via the history scan.
         state_base_dig = state["prev_digest"]
         state_base_lbl = clip_text(state.get("prev_label") or state["prev_digest"],
-                                   26, lang="both")
+                                   BASELINE_LABEL_CAP, lang="both")
     if state_base_dig:
         # Resolved here, before the baseline is settled: the image analysed last
         # time can be gone by now (registries prune old builds, and a schedule
