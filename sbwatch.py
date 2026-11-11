@@ -1016,22 +1016,25 @@ class Registry:
 
 
 def _resolve_tar_link(member_name: str, linkname: str) -> str:
-    """Normalise a tar symlink target inside the archive's root namespace."""
+    """Normalise a tar symlink target inside the archive's root namespace.
+
+    Only a leading `/` makes a target absolute. Everything else is relative to
+    the directory that holds the link, leading dot or not: `db/rpmdb.sqlite` used
+    to be looked up at the archive root, where no such member exists.
+    """
     link = linkname or ""
-    if link.startswith("."):
-        parent = member_name.rsplit("/", 1)[0] if "/" in member_name else ""
-        joined = f"{parent}/{link}" if parent else link
-        parts: list = []
-        for seg in joined.split("/"):
-            if not seg or seg == ".":
-                continue
-            if seg == "..":
-                if parts:
-                    parts.pop()
-            else:
-                parts.append(seg)
-        return "/".join(parts)
-    return link.lstrip("./")
+    if not link.startswith("/") and "/" in member_name:
+        link = member_name.rsplit("/", 1)[0] + "/" + link
+    parts: list = []
+    for seg in link.split("/"):
+        if not seg or seg == ".":
+            continue
+        if seg == "..":
+            if parts:
+                parts.pop()
+        else:
+            parts.append(seg)
+    return "/".join(parts)
 
 
 def pick_tar_member(tf, match: str, label: str = ""):
