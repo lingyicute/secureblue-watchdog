@@ -276,6 +276,15 @@ class TestClassifyChange(unittest.TestCase):
         self.assertEqual(info["aliases"], ["FEDORA-2026-243a820a1c"])
         self.assertEqual(info["cves"], [], "the old build's CVE is not this update's CVE")
 
+    def test_same_upstream_erratum_across_secureblue_rebuild_is_already_had(self):
+        old = pkg("kernel", "7.2.8-200.secureblue.1.fc44")
+        new = pkg("kernel", "7.2.8-200.secureblue.2.fc44")
+        info = S.classify_change(old, new, "F44", FakeBodhi({"kernel": [SEC_UPD]}))
+        self.assertFalse(info["security"])
+        self.assertEqual(info["sev_rank"], 0)
+        self.assertEqual([a["alias"] for a in info["already_had"]], ["FEDORA-2026-abcd"])
+        self.assertEqual(info["cves"], [])
+
     def test_unpushed_erratum_is_reported_but_not_counted(self):
         # live example: ffmpeg matched FEDORA-2026-bcaf0ddb2a with status=unpushed
         upd = {"ffmpeg": [{"alias": "FEDORA-2026-bcaf0ddb2a", "type": "security",

@@ -1394,10 +1394,12 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
             if not (hit_attached or hit_corresponding or hit_old):
                 continue
             status = (u.get("status") or "").lower()
-            # An erratum that only contains the OLD build is a fix the user already
-            # has. Recording its severity here is what produced a bogus
-            # "HIGH/CRITICAL - UPDATE NOW" for a plain bugfix bump.
-            if not (hit_attached or hit_corresponding):
+            # An erratum that already matched the OLD build (including when both
+            # builds are .secureblue.N rebuilds of the same Fedora NVR, or only
+            # the epoch changed) is a fix the user already has. Recording its
+            # severity here is what produced a bogus "HIGH/CRITICAL - UPDATE NOW"
+            # for a plain bugfix bump or local rebuild.
+            if hit_old:
                 info["already_had"].append(
                     {"alias": u["alias"], "type": u.get("type"),
                      "severity": u.get("severity"), "status": status,
