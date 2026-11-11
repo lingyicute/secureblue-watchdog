@@ -367,6 +367,10 @@ class NoArchManifest(RegistryError):
     """The ref is a multi-arch index, but it carries no manifest for --arch."""
 
 
+class MalformedManifest(RegistryError):
+    """The registry answered, but not with a manifest or config this tool can read."""
+
+
 class _CappedReader:
     """File-like wrapper around an HTTP response that enforces a byte budget.
 
@@ -868,6 +872,19 @@ class Registry:
 
     def resolve(self, ref: str | None = None, light: bool = False) -> dict:
         """manifest + config for one architecture, plus a normalized chunk list."""
+        try:
+            return self._resolve(ref, light)
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            # A 200 whose body is no manifest (a proxy's error page, a layer
+            # without `size`) used to end `diff` and `check` with a traceback.
+            what = ref or self.default_ref
+            raise MalformedManifest(T(
+                f"{self.repo}:{what} is not a readable image manifest "
+                f"({type(e).__name__}: {e})",
+                f"{self.repo}:{what} 不是可读取的镜像 manifest"
+                f"（{type(e).__name__}：{e}）")) from None
+
+    def _resolve(self, ref: str | None, light: bool) -> dict:
         what = ref or self.default_ref
         with self._open(f"manifests/{what}", MANIFEST_ACCEPT) as r:
             raw = self._read_all(r, f"manifest {what}")
@@ -3566,6 +3583,9 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
         except NoArchManifest:
             # a push without this architecture (e.g. before arm64 was built) is
             # no build of it; as a bare SystemExit it killed the whole scan
+            continue
+        except MalformedManifest:
+            probe_failures.append((d[:19] + "…", "malformed manifest"))
             continue
         except RegistryError as e:
             if e.http_code != 404:   # a dangling .sig tag (404) is normal
