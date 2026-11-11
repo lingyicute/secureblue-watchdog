@@ -1286,6 +1286,13 @@ def nvr_candidates_split(pkg: dict) -> tuple:
     stripped = re.sub(r"\.secureblue\.\d+", "", pkg["release"])
     if stripped != pkg["release"]:
         normalised = [f"{nm}-{pkg['version']}-{stripped}" for nm in names]
+    if src:
+        bevr = _build_evr(pkg)
+        if bevr and bevr != "?" and bevr != f"{pkg['version']}-{pkg['release']}":
+            bstripped = re.sub(r"\.secureblue\.\d+", "", bevr)
+            exact.append(f"{src}-{bevr}")
+            if bstripped != bevr:
+                normalised.append(f"{src}-{bstripped}")
     return list(dict.fromkeys(exact)), list(dict.fromkeys(normalised))
 
 
