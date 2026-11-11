@@ -3633,5 +3633,18 @@ class TestReportShowsTheInstalledKernel(unittest.TestCase):
         self.assertNotIn("rpmdb, the kernel actually installed", md)
 
 
+class TestSensitiveBumpNamesItsBinaries(unittest.TestCase):
+    def test_kernel_tools_bump_does_not_read_as_a_kernel_update(self):
+        """`kernel` 7.2.15 -> 7.3.3 - 3 pkg(s) was all the report said when only
+        kernel-tools (same source package) had moved."""
+        pa = {"kernel-tools": pkg("kernel-tools", "7.2.15-300.fc45", "kernel"),
+              "python3-perf": pkg("python3-perf", "7.2.15-300.fc45", "kernel")}
+        pb = {"kernel-tools": pkg("kernel-tools", "7.3.3-300.fc45", "kernel"),
+              "python3-perf": pkg("python3-perf", "7.3.3-300.fc45", "kernel")}
+        md = _mini_report(pa, pb)
+        self.assertEqual(md.count("— `kernel-tools`, `python3-perf`; "), 2)
+        self.assertNotIn("pkg(s);", md)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
