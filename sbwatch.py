@@ -1066,10 +1066,12 @@ def pick_tar_member(tf, match: str, label: str = ""):
 # --------------------------------------------------------------------------- #
 # reading the RPM database out of the `bigfiles/rpmdb.sqlite` chunk
 # --------------------------------------------------------------------------- #
+# Tag numbers as in rpm's rpmtag.h. 1010 is Distribution: listed as "vendor", it
+# pushed the real Vendor (1011) into "license" and left License (1014) unread.
 RPMTAG = {
     1000: "name", 1001: "version", 1002: "release", 1003: "epoch", 1004: "summary",
-    1005: "description", 1007: "buildhost", 1010: "vendor",
-    1011: "license", 1022: "arch", 1044: "sourcerpm", 1080: "changelogtime",
+    1005: "description", 1007: "buildhost", 1011: "vendor",
+    1014: "license", 1022: "arch", 1044: "sourcerpm", 1080: "changelogtime",
     1081: "changelogname", 1082: "changelogtext",
 }
 STR_TYPES = {6, 8, 9}   # 6=STRING, 8=STRING_ARRAY, 9=I18NSTRING
