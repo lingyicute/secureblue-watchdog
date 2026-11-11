@@ -216,8 +216,9 @@ python3 sbwatch.py backlog latest --max-bodhi 80
 每个级别都会带一句机器可读的 `verdict.level_basis`（英文），说明是什么把级别定下来
 （例如 `the kernel moved`、`a released security erratum ranks 4/4`、
 `secureblue's own notification rule classifies this as major`），
-以及逐包的 `verdict.security_basis`，区分「安全勘误」「对应 Fedora 勘误（归一化匹配）」
-与「更新日志 CVE」。
+以及逐包的 `verdict.security_basis`，区分「安全勘误」「对应 Fedora 勘误（归一化匹配）」、
+「被越过构建的安全勘误」「非安全类勘误（含 CVE 或高严重度）」与「更新日志 CVE」——
+只有新版更新日志里真的出现了 CVE 编号，才会标成「更新日志 CVE」。
 
 
 报告里会包含：
@@ -226,7 +227,8 @@ python3 sbwatch.py backlog latest --max-bodhi 80
 - 下载量：`download_bytes / total_size_b / download_pct`
 - `secureblue_notification`：桌面会弹哪个通知 + 触发原因（见上文）
 - `silent_rebuilds`：版本没变但 chunk 变了（工具链/macro/文件重排）
-- `downgrades`：这次更新把某个包**降级**了（真证据，会抬高级别）；`cves_dropped`：
+- `downgrades`：这次更新把某个包**降级**了（真证据，会抬高级别；报告点名「回退」的是**被离开的
+  那个构建**的已发布安全勘误，而不是降级目标自己的勘误）；`cves_dropped`：
   新版更新日志不再提到的 CVE 编号（通常是日志被编辑，只作提示、不再抬高级别）
 - `backlog`：即使跳过，你仍暴露在多少已发布 stable 安全更新之外
 - `passed_over`：被这次更新**越过**的中间构建所带的 stable 安全勘误（旧 < 该构建 ≤ 新，同一 Fedora 版本内）。
@@ -268,7 +270,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/` 包含 **334 项离线回归测试**，不需要网络、不访问 registry
+`tests/` 包含 **351 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -323,6 +325,12 @@ python3 -m unittest discover -s tests -v
 - `test_dropped_cves_wording.py`：新版更新日志不再提及的 CVE 编号只按「不再提及」呈现，小节标题与依据文本不得再写成「本次更新移除的修复」。
 - `test_registry_auth_hint.py`：registry 返回 401/403 时指出最可能的原因（仓库不存在或非公开，检查 `--image`）；其它状态码不带该提示。
 - `test_cache_write.py`：缓存文件经一次性 JSON 编码器写出，不走逐段迭代的 `json.dump()`。
+- `test_downgrade_reverted_erratum.py`：降级被点名「回退」的，是被离开的那个构建的已发布安全勘误；降级目标自己的勘误、非安全类或未推送的勘误都不得被说成被回退。
+- `test_evidence_label.py`：只因非 security 类勘误（列出 CVE 或高严重度）而判为安全相关的源码包，`security_basis` 与 headline 不得写成「更新日志 CVE」；新版更新日志真有 CVE 时照旧。
+- `test_since_last_look_note.py`：「上次查看之后还推送了 N 次构建」只在基线就是上次分析的镜像时提示；显式 `--a` 的对比不得被说成「你的上一版镜像 -> 当前镜像」。
+- `test_bodhi_cache_key.py`：只差标点的源码包名（`foo-bar` / `foo_bar` / `foo.bar` …）各用各的 Bodhi 缓存文件，一个包的勘误不得被当成另一个包的返回。
+- `test_bodhi_cache_prune.py`：过了 TTL 的 Bodhi 应答在清理时即被删除，同龄的 pkglist 仍按 `--prune-days` 保留；`0` 依旧全部保留。
+- `test_history_baseline_label.py`：取自构建历史的基线与状态文件同样标注为「版本 @ 时间」，缺版本注解的构建不再标成 `None @ …`。
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
@@ -337,9 +345,10 @@ CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并�
 - cache `~/.cache/sbwatch` (pkglist + Bodhi + state.json)，按 image+arch 分命名空间，
   并有一个 prune 步骤只保留最近 7 份（否则 `state.json` 会被 LRU 挤掉，`check` 就失去基线）；
   结论为 `no-update` 的运行不再重复保存缓存（该路径不往缓存目录写任何东西）
-- `check` 分析完成后会删除超过 14 天的 pkglist / Bodhi 缓存文件（刚对比的两个镜像除外；
+- `check` 分析完成后会删除超过 14 天的 pkglist 缓存文件（刚对比的两个镜像除外；
   `--prune-days N` 调整，`0` 关闭）：每个分析过的构建会留下约 11 MB 的 pkglist，
-  而整个缓存目录每次运行都会被整体恢复、保存
+  而整个缓存目录每次运行都会被整体恢复、保存；Bodhi 应答过了 6 小时 TTL 就再也不会
+  被读取，清理时直接删除，不再陪跑 14 天
 - `sbwatch.py check` → `report.md` + `report.md.json` → summary + artifact
   （workflow 不传 `--exact` / `--no-fast`，所以走默认值：`--exact 1` + `--fast` 开启，
   见上文「`check --fast` 与 manifest-only」）
