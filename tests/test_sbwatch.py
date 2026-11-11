@@ -3224,18 +3224,19 @@ class TestTagsProbeIncludesToday(unittest.TestCase):
 
 class TestMultiArchIndexAnnotations(unittest.TestCase):
     def test_index_and_descriptor_annotations_survive_light_resolve(self):
+        import hashlib
+        plat = json.dumps({"layers": [], "annotations": {"ostree.linux": "7.2.6"}}).encode()
         idx = json.dumps({
             "annotations": {"org.opencontainers.image.version": "44.20260917.0"},
             "manifests": [{
-                "digest": "sha256:" + "b" * 64,
+                "digest": "sha256:" + hashlib.sha256(plat).hexdigest(),
                 "platform": {"architecture": "amd64", "os": "linux"},
                 "annotations": {"org.opencontainers.image.created": "2026-09-17T12:00:00.123Z"},
             }],
         }).encode()
-        plat = json.dumps({"layers": [], "annotations": {"ostree.linux": "7.2.6"}}).encode()
         reg = S.Registry("secureblue/x", arch="amd64")
         reg._open = lambda path, accept: TestTagLabelCostsOneRequest._Resp(
-            {"Docker-Content-Digest": "sha256:" + "a" * 64,
+            {"Docker-Content-Digest": "sha256:" + hashlib.sha256(idx).hexdigest(),
              "Content-Type": "application/vnd.oci.image.index.v1+json"}, idx)
         reg.get = lambda path, accept: plat
         out = reg.resolve("latest", light=True)
@@ -3524,6 +3525,66 @@ class TestCheckPrunesItsCache(unittest.TestCase):
             self.assertEqual(seen["prune_days"], 0)
         finally:
             S.cmd_check = saved
+
+
+class TestContentFetchedByDigestIsHashed(unittest.TestCase):
+    """cosign signs a digest. Nothing hashed what the registry then sent for that
+    digest, so a verified signature said nothing about the manifest, the config
+    or the rpmdb blob the report was actually computed from."""
+
+    @staticmethod
+    def _dig(b):
+        import hashlib
+        return "sha256:" + hashlib.sha256(b).hexdigest()
+
+    def _reg(self, plat_sent, headers=None, plat_named=None):
+        plat = json.dumps({"layers": []}).encode()
+        idx = json.dumps({"manifests": [{
+            "digest": self._dig(plat if plat_named is None else plat_named),
+            "platform": {"architecture": "amd64", "os": "linux"}}]}).encode()
+        reg = S.Registry("secureblue/x", arch="amd64")
+        hdr = {"Docker-Content-Digest": self._dig(idx)} if headers is None else headers
+        reg._open = lambda path, accept: TestTagLabelCostsOneRequest._Resp(hdr, idx)
+        reg.get = lambda path, accept: plat if plat_sent is None else plat_sent
+        return reg, idx
+
+    def test_matching_content_resolves(self):
+        reg, idx = self._reg(None)
+        self.assertEqual(reg.resolve("latest", light=True)["index_digest"], self._dig(idx))
+        self.assertEqual(reg.resolve(self._dig(idx), light=True)["layers"], [])
+
+    def test_altered_platform_manifest_is_refused(self):
+        reg, _ = self._reg(json.dumps({"layers": [], "x": 1}).encode())
+        with self.assertRaisesRegex(SystemExit, "digest mismatch"):
+            reg.resolve("latest", light=True)
+
+    def test_announced_or_requested_digest_must_match_the_bytes(self):
+        reg, _ = self._reg(None, headers={"Docker-Content-Digest": "sha256:" + "0" * 64})
+        with self.assertRaisesRegex(SystemExit, "digest mismatch"):
+            reg.resolve("latest", light=True)
+        reg, _ = self._reg(None, headers={})
+        with self.assertRaisesRegex(SystemExit, "digest mismatch"):
+            reg.resolve("sha256:" + "f" * 64, light=True)
+
+    def _fetch(self, blob, digest):
+        import types
+
+        class Resp(io.BytesIO):
+            headers = {}
+
+        reg = types.SimpleNamespace(_open=lambda path, accept: Resp(blob))
+        with tempfile.TemporaryDirectory() as d:
+            dest = S.Registry.fetch_blob(reg, digest, os.path.join(d, "x"))
+            with open(dest, "rb") as fh:
+                return fh.read()
+
+    def test_blob_is_hashed_while_it_streams(self):
+        import gzip
+        blob = gzip.compress(b"rpmdb" * 1000)
+        self.assertEqual(self._fetch(blob, self._dig(blob)), b"rpmdb" * 1000)
+        self.assertEqual(self._fetch(b"plain tar", self._dig(b"plain tar")), b"plain tar")
+        with self.assertRaisesRegex(SystemExit, "digest mismatch"):
+            self._fetch(blob, "sha256:" + "a" * 64)
 
 
 if __name__ == "__main__":
