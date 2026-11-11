@@ -70,8 +70,8 @@ class _FakeResp:
     def __init__(self, body):
         self._b = body
 
-    def read(self):
-        return self._b
+    def read(self, size=-1):
+        return self._b if size is None or size < 0 else self._b[:size]
 
     def __enter__(self):
         return self
