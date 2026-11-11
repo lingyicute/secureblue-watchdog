@@ -182,12 +182,16 @@ python3 sbwatch.py diff 20260916 latest --exact 0
 python3 sbwatch.py diff 20260916 latest --cosign-pub ./cosign.pub --require-cosign
 #    cosign 只对 digest 签名；sbwatch 会对按 digest 取回的 manifest、config 和 rpmdb blob
 #    逐一校验 sha256，内容与 digest 不符即中止，因此「签名通过」覆盖到实际被分析的数据
+#    --require-cosign 必须同时指定 --cosign-pub，否则在任何网络请求前报参数错误
+#    history 同样遵守签名选项：启用时逐一校验所有列出的镜像
 
 # 5. CI 模式：只有 tag 移动时才做重活
 python3 sbwatch.py check --image secureblue/silverblue-main-hardened --to latest --report report.md
 # check 的 --audit（默认开）与 diff 共用同一个 Bodhi 调用预算和同一份答案缓存：
 # --max-bodhi 10 就是最多 10 次调用，不会再被内部悄悄放大到 45 次；候选上限用
 # --backlog-candidates 单独控制
+# 使用 state.json 中的上次镜像作基线时，check 保留「上次 → 当前」的实际方向；
+# tag 回滚会报告降级，不会按时间反转成安全升级。显式 --a 仍遵守 --keep-order。
 
 # 6. 看这个镜像还落后多少安全更新
 python3 sbwatch.py backlog latest --max-bodhi 80
@@ -261,11 +265,11 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/test_sbwatch.py` 是 **243 项离线回归测试**，不需要网络、不访问 registry
+`tests/` 包含 **278 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
-python3 -m unittest discover -s tests      # 或 python3 tests/test_sbwatch.py
+python3 -m unittest discover -s tests -v
 ```
 
 覆盖的行为（每组都对应一个曾经真实出错的判定）：
@@ -295,6 +299,16 @@ python3 -m unittest discover -s tests      # 或 python3 tests/test_sbwatch.py
 | **L** | **CI 供应链**：所有 action 钉到 commit SHA；cosign 公钥入库并校验 sha256（运行时不再联网取钥）；`actions: write` 只给需要的 job；`push` 只触发 main；结论为 `unknown` 的运行不再「绿」 |
 | **M** | **不得静默截断**：每一处「砍掉一部分」的渲染都必须写明并给出被省略的数量（headline 的源码包/CVE、安全表 CVE 列、已拥有/未推送勘误、增删包列表、backlog 行、chunk 列表、CLI 各列…）；安全表放不下的 CVE 必须有**完整清单**小节，一条不丢；`cves`/`aliases`/`dropped`/`security_pkgs` 等载荷列表**禁止**直接切片；Bodhi 缓存中用于提取 CVE 的 `title`/`notes` 不得先截断（v1 缓存会因此丢 CVE，读到旧格式必须重取）；GITHUB_OUTPUT 输出完整内容并附计数 |
 | **O** | **活镜像实测暴露的问题**：带译文的 Summary（I18NSTRING，count>1）不得计为解析失败；`ostree.linux` 变了而 `kernel` 包没变 ⟹ 不得报「内核变化」，报告同时列出 rpmdb 中实际安装的内核；`CVE 2026-114583` 这类非标准拼写必须被识别；新旧更新日志都提到的 CVE 既不算新增也不算丢失；更新日志扫描上限不得在真实更新日志上触发；按 digest 取回的 manifest / config / blob 必须校验 sha256；bearer token 不得随重定向发给其它主机；state 里的基线 digest 被 registry 清理后 `check` 必须回退而不是永久失败；Bodhi 连续失败 3 次即停止查询；`--max-bodhi` 预算优先用于安全敏感包；`check` 清理过期缓存 |
+
+新增的独立回归模块还覆盖：
+
+- `test_signature_policy.py`：缺公钥时强制验证必须失败；history 不得忽略签名选项。
+- `test_registry_boundaries.py`：跨 origin 重定向剥离 token；分页只访问原 registry 的 HTTPS origin；相对链接正确解析；畸形 JSON 形状重试后不能继续使用。
+- `test_output_boundaries.py`：镜像元数据中的旧分隔符不能覆盖 GITHUB_OUTPUT；随机分隔符碰撞时重选；verdict 只通过环境变量进入 shell。
+- `test_legacy_bodhi_cache.py`：无版本缓存必须重取，不能把历史截断的 CVE 数据当完整结果。
+- `test_watch_direction.py`：使用状态基线时正确识别 tag 回滚，并保持 JSON、Markdown、CI 输出和新状态一致。
+- `test_retained_cves.py`：新增或删除重复提及时，只要保留条目仍提到同一 CVE，就不得声称新增或丢失该编号；保留条目的扫描也有上限并披露。
+- `test_bodhi_budget_memo.py`：预算耗尽按源码包和 Fedora release 去重；不把预算缺失写入磁盘，也不反复读取旧缓存。
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
