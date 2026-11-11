@@ -94,7 +94,12 @@ MAX_BODHI_PAGES = 10                        # 1000 errata/src is far beyond any 
 BODHI_GIVE_UP_AFTER = 3     # failed lookups in a row before Bodhi counts as down: each
                             # can block for its whole 40 s timeout, and --max-bodhi 80
                             # of those outlast the workflow's 25-minute limit
-NEW_LOG_CAP = 40    # changelog entries (new in this build) scanned for CVE mentions
+NEW_LOG_CAP = 1000  # changelog entries (new in this build) scanned for CVE mentions.
+#                     A guard against a pathological rpmdb, not a tuning knob: the
+#                     live image's longest changelog has 435 entries and all 47,624
+#                     entries of the image scan in ~10 ms. The former 40 was hit by
+#                     every kernel rebase (Fedora regenerates that changelog: 66 of
+#                     66 entries were new on 7.2.15 -> 7.3.3) and cut off two CVE ids.
 # Display caps. These are the only places allowed to shorten a rendered list, and
 # each one must go through clip_list()/clip_text() so the loss is stated and
 # counted. The full data always survives in the JSON outputs.
@@ -107,7 +112,7 @@ PKG_LIST_CAP = 40        # package names per line in the package-set-change sect
 BODHI_CACHE_VERSION = 2  # v1 clipped bug titles (200) and notes (1500) BEFORE
 #                          extracting CVE ids from them, so a v1 cache can be
 #                          missing CVEs. A cache without this marker is refetched.
-OLD_LOG_CAP = 40    # changelog entries (dropped by this build) scanned for lost fixes
+OLD_LOG_CAP = 1000  # changelog entries (dropped by this build) scanned for lost fixes
 TAG_LIST_RETRIES = 4                        # ghcr is flaky on tags/list pagination
 CACHE_KEEP_DAYS = 14        # `check --prune-days`: age at which cache files are dropped
 MANIFEST_ACCEPT = ",".join([
@@ -1486,9 +1491,10 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
             (into if into is not None else info["cves"]).add(c)
 
     # (a) changelog entries that are new in this build: Fedora writes CVE ids there.
-    # The per-package caps bound the regex work on huge changelogs; when they bite,
-    # that fact is recorded (and do_diff turns it into a report note) - an
-    # undisclosed cap is how "no CVE found" quietly becomes "no CVE read".
+    # The per-package caps only guard against a pathological changelog (no real
+    # one comes near them); should they ever bite, that fact is recorded (and
+    # do_diff turns it into a report note) - an undisclosed cap is how "no CVE
+    # found" quietly becomes "no CVE read".
     old_log = (old or {}).get("changelog", [])
     new_log = new.get("changelog", [])
     # Multiset difference, not a timestamp set: two entries can share a second

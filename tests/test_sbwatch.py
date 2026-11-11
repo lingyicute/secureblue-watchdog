@@ -3892,5 +3892,23 @@ class TestCveSpellingVariants(unittest.TestCase):
         self.assertEqual(info["cves"], ["CVE-2026-114583"])
 
 
+class TestChangelogCapsDoNotBiteOnRealChangelogs(unittest.TestCase):
+    """Fedora regenerates the kernel changelog on every rebase: all 66 entries
+    were new on 7.2.15 -> 7.3.3, the cap of 40 stopped the scan, and the two CVE
+    ids in the rest were never read - to save well under a millisecond."""
+
+    def test_a_cve_in_the_66th_new_entry_is_read(self):
+        log = [{"time": 1000 - i, "who": "w", "text": f"- change {i}"} for i in range(65)]
+        log.append({"time": 1, "who": "w", "text": "- CVE-2026-31415 kernel: use-after-free"})
+        info = S.classify_change(pkg("kernel-tools", "7.2.15-300.fc45", "kernel"),
+                                 pkg("kernel-tools", "7.3.3-300.fc45", "kernel", log),
+                                 "F45", None)
+        self.assertEqual(info["cves"], ["CVE-2026-31415"])
+        self.assertEqual(info["changelog_scan"]["new_scanned"], 66)
+
+    def test_caps_are_far_above_the_longest_live_changelog(self):
+        self.assertGreaterEqual(min(S.NEW_LOG_CAP, S.OLD_LOG_CAP), 2 * 435)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
