@@ -3203,18 +3203,20 @@ class TestImageTagIsTheDefaultRef(unittest.TestCase):
         self.assertEqual(a.ref, "latest")
 
     def test_parsers_default_to_none_so_the_fallback_can_apply(self):
-        saved = S.cmd_tags, S.cmd_check, S.cmd_backlog
+        saved = S.cmd_tags, S.cmd_check, S.cmd_backlog, S.cmd_pkgs
         seen = {}
-        S.cmd_tags = S.cmd_check = S.cmd_backlog = lambda args: seen.update(vars(args))
+        S.cmd_tags = S.cmd_check = S.cmd_backlog = S.cmd_pkgs = lambda args: seen.update(vars(args))
         try:
             S.main(["tags"])
             self.assertIsNone(seen["to"])
             S.main(["backlog"])
             self.assertIsNone(seen["ref"])
+            S.main(["pkgs"])
+            self.assertIsNone(seen["ref"])
             S.main(["check", "--to", "44"])
             self.assertEqual(seen["to"], "44")
         finally:
-            S.cmd_tags, S.cmd_check, S.cmd_backlog = saved
+            S.cmd_tags, S.cmd_check, S.cmd_backlog, S.cmd_pkgs = saved
 
 
 class TestHumanSizes(unittest.TestCase):

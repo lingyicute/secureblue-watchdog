@@ -4076,7 +4076,8 @@ def main(argv=None):
 
     p = sub.add_parser("pkgs", help="exact package list (NEVRA) of one image / 单个镜像的精确软件包列表（NEVRA）")
     add_common(p)
-    p.add_argument("ref")
+    p.add_argument("ref", nargs="?", default=None,
+                   help="image ref (default: the tag in --image, else latest) / 镜像引用（默认：--image 中的标签，否则 latest）")
     p.add_argument("--json", help="write machine-readable package list / 输出机器可读的软件包列表")
     p.set_defaults(func=cmd_pkgs)
 
