@@ -3837,6 +3837,33 @@ class TestPkgsUsesThePackageListCache(unittest.TestCase):
         self.assertEqual(len(fetched), 1)
 
 
+class TestCveNamedOnBothSidesIsNeitherGainedNorLost(unittest.TestCase):
+    """Fedora regenerates the kernel changelog on a rebase, so an old fix sits in
+    a "new" entry and in a "dropped" one at once: CVE-2023-6240 was reported as
+    gained by 7.2.15 -> 7.3.3 and, in the same headline, as no longer mentioned."""
+
+    def _info(self, old_text, new_text):
+        return S.classify_change(
+            pkg("kernel-tools", "7.2.15-300.fc45", "kernel",
+                [{"time": 10, "who": "a", "text": old_text}]),
+            pkg("kernel-tools", "7.3.3-300.fc45", "kernel",
+                [{"time": 20, "who": "b", "text": new_text}]),
+            "F45", None)
+
+    def test_a_regenerated_entry_with_the_same_id_changes_nothing(self):
+        info = self._info("- CVE-2023-6240 kernel: Marvin (rhbz 1)",
+                          "- redhat: backport for CVE-2023-6240 (Marvin)")
+        self.assertEqual(info["cves"], [])
+        self.assertEqual(info["cves_dropped"], [])
+        self.assertFalse(info["security"])
+
+    def test_ids_on_one_side_only_are_still_gained_or_lost(self):
+        info = self._info("- CVE-2023-6240, CVE-2025-1111", "- CVE-2023-6240, CVE-2026-2222")
+        self.assertEqual(info["cves"], ["CVE-2026-2222"])
+        self.assertEqual(info["cves_dropped"], ["CVE-2025-1111"])
+        self.assertTrue(info["security"])
+
+
 class TestCveSpellingVariants(unittest.TestCase):
     """Live case, 45.20261110.0 -> 45.20261111.0: python3.15-3.15.2's changelog
     reads "CVE 2026-114583: tar filter allows writing outside destination". The
