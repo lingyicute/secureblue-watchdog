@@ -2811,6 +2811,18 @@ class TestClipTextHonoursBoth(unittest.TestCase):
         self.assertNotIn("另有", S.clip_text("x" * 95, 90))
         self.assertNotIn("not shown", S.clip_text("x" * 95, 90, lang="zh"))
 
+    def test_non_package_chunks_line_uses_chinese_clip_marker_in_zh_section(self):
+        d = {"added": [], "removed": [], "downgrades": [], "changed": [], "count_a": 1, "count_b": 1}
+        ld = dict(LD_FIX, chunks_changed=1, chunks_reused=1, chunks_a=2, chunks_b=2, download_pct=1.0)
+        xc = {"non_package_chunks": [{"size": 100, "components": ["bigfiles/" + "x" * 140]}],
+              "non_package_bytes": 100, "versions_known": True, "silent_rebuilds": []}
+        v = S.verdict_of(d, ld, {"kernel_a": "k", "kernel_b": "k"}, xc)
+        img = {"ref": "a", "digest": "sha256:" + "1" * 64, "annotations": {}}
+        zh, en = S.render_markdown("s", img, img, d, ld, v, [], xc).split("\n\n---\n\n")
+        self.assertIn("个字符未显示", zh)
+        self.assertNotIn("chars not shown", zh)
+        self.assertIn("chars not shown", en)
+
     def test_the_english_half_of_a_note_does_not_carry_chinese(self):
         # cmd_check's "not the only new one" note builds its English half from
         # clip_text(seen, 16); the Chinese half has its own lang='zh' call
