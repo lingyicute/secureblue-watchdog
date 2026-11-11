@@ -1984,6 +1984,19 @@ class TestFixesThatUsedToBeSilent(unittest.TestCase):
         self.assertIn("downgrades openssl", v["headline"])
         self.assertEqual(v["downgrades"], ["openssl"])
 
+    def test_downgrade_with_changelog_cve_only_does_not_print_dangling_erratum_label(self):
+        old = pkg("foo", "2.0-1.fc44", "foo", [{"time": 1, "text": "- 2.0"}])
+        new = pkg("foo", "1.0-1.fc44", "foo", [{"time": 2, "text": "- Fix CVE-2026-1234"}])
+        d = S.pkg_diff({"foo": old}, {"foo": new})
+        for c in d["changed"]:
+            c["cls"] = S.classify_change(c["old"], c["new"], "F44", None)
+        ld = dict(LD_FIX, chunks_changed=0, chunks_reused=1, chunks_a=1, chunks_b=1, download_pct=0)
+        v = S.verdict_of(d, ld, {"kernel_a": "k", "kernel_b": "k"}, {})
+        img = {"ref": "a", "digest": "sha256:" + "1" * 64, "annotations": {}}
+        md = S.render_markdown("s", img, img, d, ld, v, [])
+        self.assertNotIn("reverts* a published erratum:", md)
+        self.assertNotIn("回退*已发布的勘误:", md)
+
     def test_changelog_cves_dropped_no_longer_escalates(self):
         d = {"added": [], "removed": [], "downgrades": [],
              "changed": [{"name": "foo", "src": "foo", "dir": "upgrade",

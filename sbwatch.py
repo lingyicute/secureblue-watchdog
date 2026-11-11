@@ -2447,7 +2447,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W("")
         for g in g_down:
             pkgs_label = f"{len(g['pkgs'])} 个包" if is_zh else f"{len(g['pkgs'])} package(s)"
-            if g["security"]:
+            if g["security"] and g["aliases"]:
                 rev = (f" — 这会*回退*已发布的勘误: "
                        f"{clip_list(g['aliases'], 2, lang='zh', joiner='，')}" if is_zh
                        else f" — this *reverts* a published erratum: "
