@@ -52,6 +52,7 @@ import http.client
 import json
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import struct
@@ -3968,8 +3969,15 @@ def gh_outputs(pairs):
     # otherwise follow the locale - an ASCII one could not write it at all
     with open(path, "a", encoding="utf-8") as f:
         for k, v in pairs.items():
-            if isinstance(v, str) and "\n" in v:
-                f.write(f"{k}<<EOF_SBWATCH\n{v}\nEOF_SBWATCH\n")
+            v = str(v)
+            if "\n" in v or "\r" in v:
+                # Image metadata is untrusted. A fixed delimiter let its own
+                # line terminate the value and inject/overwrite step outputs.
+                lines = set(v.splitlines())
+                delimiter = "EOF_SBWATCH_" + secrets.token_hex(16)
+                while delimiter in lines:
+                    delimiter = "EOF_SBWATCH_" + secrets.token_hex(16)
+                f.write(f"{k}<<{delimiter}\n{v}\n{delimiter}\n")
             else:
                 f.write(f"{k}={v}\n")
 
