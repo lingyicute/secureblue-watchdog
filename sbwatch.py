@@ -1441,6 +1441,19 @@ def _missing_entries(these: list, other: list) -> list:
     return out
 
 
+def classify_order(changed: list) -> list:
+    """Changed packages in the order their errata should be looked up.
+
+    --max-bodhi caps the lookups, and plain name order spent the budget on
+    whatever sorts first: on a 100-source update `abattis-cantarell-fonts` got
+    its query while systemd, webkitgtk and xdg-desktop-portal were "not queried".
+    Security-sensitive sources go first; the sort is stable, so both halves keep
+    their name order.
+    """
+    return sorted(changed,
+                  key=lambda c: not _src_matches_pool(c.get("src") or "", IMPORTANT_SRC))
+
+
 def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) -> dict:
     info = {"security": False, "cves": set(), "cves_dropped": set(), "aliases": [],
             "severities": [], "bodhi_type": None, "why": [], "erratum": None,
@@ -3708,7 +3721,7 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
                        "警告：无法从软件包列表判断 Fedora 版本，因此未查询任何 Bodhi 勘误"))
     bodhi = None if (args.no_bodhi or not rel) else Bodhi(cache_dir=cache_dir,
                                                          max_calls=args.max_bodhi)
-    for c in diff["changed"]:
+    for c in classify_order(diff["changed"]):       # report order stays by name
         c["cls"] = classify_change(c["old"], c["new"], rel, bodhi)
     # rpm-ostree attaches advisories to every package that is *new* in the
     # deployment, so packets that this update merely adds need classifying too -
