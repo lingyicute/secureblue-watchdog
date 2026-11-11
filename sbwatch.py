@@ -1368,6 +1368,13 @@ class Bodhi:
             try:
                 with urllib.request.urlopen(url, timeout=40) as r:
                     data = json.load(r)
+                if not isinstance(data, dict):
+                    raise ValueError("Bodhi response is not a JSON object")
+                page_ups = data.get("updates", [])
+                if page_ups is not None and (not isinstance(page_ups, list)
+                                             or any(not isinstance(u, dict) for u in page_ups)):
+                    raise ValueError("Bodhi updates must be a list of JSON objects")
+                page_ups = page_ups or []
             except Exception as ex:
                 self.failed += 1
                 log(T(f"  ! bodhi lookup failed for {src} (page {page}): {ex}",
@@ -1385,7 +1392,6 @@ class Bodhi:
             ok = True
             self._streak = 0
             total = data.get("total", total)
-            page_ups = data.get("updates", []) or []
             for u in page_ups:
                 # Bodhi's /updates/ payload has NO "cves" key (verified against the
                 # live API); CVE ids live in the notes text and in bugs[].title,
@@ -1410,7 +1416,7 @@ class Bodhi:
                     "bugs": bugs,
                     "date_approved": u.get("date_approved"),
                     "date_stable": u.get("date_stable"),
-                    "nvrs": [b.get("nvr") for b in (u.get("builds") or [])],
+                    "nvrs": [b.get("nvr") for b in (u.get("builds") or []) if isinstance(b, dict)],
                 })
             if len(page_ups) < BODHI_PAGE_SIZE:
                 break                       # last page
@@ -1423,6 +1429,7 @@ class Bodhi:
                       f"INCOMPLETE",
                       f"  ！Bodhi：{src} 只取到 {total} 条勘误中的 {len(res)} 条"
                       f"（MAX_BODHI_PAGES={MAX_BODHI_PAGES}）——该包的审计不完整"))
+                break
             time.sleep(self.sleep)
         if truncated:
             self.truncated_src.add(src)
@@ -1605,13 +1612,11 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
         "retained_total": len(retained_entries),
         "retained_scanned": min(len(retained_entries), RETAINED_LOG_CAP),
     }
-    if info["cves"]:
+    chlog_cves = sorted(info["cves"])
+    if chlog_cves:
         info["security"] = True
         info["why"].insert(0, "changelog CVEs/更新日志中的 CVE: "
-                           + clip_list(sorted(info["cves"]), 8, lang="both"))
-    if info["cves_dropped"]:
-        info["why"].insert(0, "DROPS fixes/丢失的修复: "
-                           + clip_list(sorted(info["cves_dropped"]), 8, lang="both"))
+                           + clip_list(chlog_cves, 8, lang="both"))
 
     # (b) the Fedora erratum that shipped the new build
     exact_new, norm_new = nvr_candidates_split(new)
@@ -1699,6 +1704,15 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                         f"(matched Fedora's {sorted(hit_corresponding)[0]} only after "
                         f"stripping the local release marker from {new['release']} - "
                         f"rpm-ostree does not attach it to this build)")
+    # A CVE carried by the new build's pushed erratum is not a dropped fix even if
+    # the RPM changelog entry that used to mention it was trimmed or reworded.
+    info["cves_dropped"] -= info["cves"]
+    if info["cves"]:
+        info["security"] = True
+    if info["cves_dropped"]:
+        info["why"].insert(1 if chlog_cves else 0,
+                           "DROPS fixes/丢失的修复: "
+                           + clip_list(sorted(info["cves_dropped"]), 8, lang="both"))
     info["cves"] = sorted(info["cves"])
     info["cves_dropped"] = sorted(info["cves_dropped"])
     info["important_src"] = _src_matches_pool(new["src"], IMPORTANT_SRC)
@@ -3106,17 +3120,23 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi, limit: int = 45) -> tup
            "skipped_names": candidates[limit:],
            "pool_size": len(BACKLOG_POOL),
            "pool_missing": sorted(BACKLOG_POOL - covered)}
+    # Both spellings of the middle rank: Bodhi's API answers with its own words
+    # (unspecified/low/medium/high/urgent) while the updateinfo mapping uses the
+    # RHEL ones (Low/Moderate/Important/Critical). Listing only "moderate" made a
+    # `medium` erratum rank 0 - i.e. sort *below* a `low` one.
+    order = {"critical": 4, "urgent": 4, "important": 3, "high": 3,
+             "moderate": 2, "medium": 2, "low": 1}
     rows = []
     for src in chosen:
         ups = bodhi.updates_for_src(src, rel)
         pkgs_for_src = sorted(want[src], key=lambda np: (np[0] != src, np[0]))
-        done = False
+        row = None
         for u in ups:
             if u.get("type") != "security" or u.get("status") != "stable":
                 continue
             for n, p in pkgs_for_src:
                 best = None
-                for b in u["nvrs"]:
+                for b in u.get("nvrs") or []:
                     if not b:      # Bodhi attaches builds without an nvr sometimes
                         continue
                     parts = b.rsplit("-", 2)
@@ -3138,22 +3158,32 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi, limit: int = 45) -> tup
                     continue
                 # full lists: the CLI preview and the report both clip *with a
                 # stated count*, and the JSON export must stay complete
-                rows.append({"name": n, "src": src,
-                             "have": _build_evr(p) if n != src else p["evr"],
-                             "want": f"{best['version']}-{best['release']}",
-                             "alias": u["alias"], "severity": u.get("severity"),
-                             "cves": u.get("cves") or [],
-                             "notes": u.get("notes") or ""})
-                done = True
+                if row is None:
+                    row = {"name": n, "src": src,
+                           "have": _build_evr(p) if n != src else p["evr"],
+                           "want": f"{best['version']}-{best['release']}",
+                           "_best": best,
+                           "alias": u["alias"], "severity": u.get("severity"),
+                           "cves": set(u.get("cves") or ()),
+                           "notes": u.get("notes") or ""}
+                else:
+                    row["cves"].update(u.get("cves") or ())
+                    if evr_cmp(row["_best"], best) < 0:
+                        row["_best"] = best
+                        row["want"] = f"{best['version']}-{best['release']}"
+                        row["alias"] = u["alias"]
+                        if u.get("notes"):
+                            row["notes"] = u.get("notes") or ""
+                    if order.get((u.get("severity") or "").lower(), 0) > \
+                            order.get((row["severity"] or "").lower(), 0):
+                        row["severity"] = u.get("severity")
+                        if not row["notes"] and u.get("notes"):
+                            row["notes"] = u.get("notes") or ""
                 break
-            if done:
-                break
-    # Both spellings of the middle rank: Bodhi's API answers with its own words
-    # (unspecified/low/medium/high/urgent) while the updateinfo mapping uses the
-    # RHEL ones (Low/Moderate/Important/Critical). Listing only "moderate" made a
-    # `medium` erratum rank 0 - i.e. sort *below* a `low` one.
-    order = {"critical": 4, "urgent": 4, "important": 3, "high": 3,
-             "moderate": 2, "medium": 2, "low": 1}
+        if row is not None:
+            row.pop("_best", None)
+            row["cves"] = sorted(row["cves"])
+            rows.append(row)
     rows.sort(key=lambda r: -order.get((r["severity"] or "").lower(), 0))
     cov["failed"] = bodhi.failed
     cov["skipped_queries"] = bodhi.skipped
@@ -3858,10 +3888,9 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
     # same as gaining a fix.
     added_cls = {}
     if bodhi is not None:
-        for _name in diff["added"]:
-            _p = pb.get(_name)
-            if _p:
-                added_cls[_name] = classify_change(None, _p, rel, bodhi)
+        added_pkgs = [pb[n] for n in diff["added"] if n in pb]
+        for _p in classify_order(added_pkgs):
+            added_cls[_p["name"]] = classify_change(None, _p, rel, bodhi)
     diff["added_cls"] = added_cls
     # parse-quality notes: both of these used to fail silently, and both make the
     # diff look calmer than the data warrants
