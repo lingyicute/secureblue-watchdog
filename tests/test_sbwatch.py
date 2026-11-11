@@ -3599,5 +3599,39 @@ class TestContentFetchedByDigestIsHashed(unittest.TestCase):
             self._fetch(blob, "sha256:" + "a" * 64)
 
 
+def _mini_report(pa, pb, ann_a=None, ann_b=None, kernel_evr=None):
+    """render_markdown() over two tiny package tables, classified without Bodhi."""
+    a = {"ref": "A", "digest": "sha256:" + "a" * 64, "created": "2026-01-01T00:00:00Z",
+         "annotations": ann_a or {}, "layers": []}
+    b = dict(a, ref="B", digest="sha256:" + "b" * 64, annotations=ann_b or {})
+    d = S.pkg_diff(pa, pb)
+    for c in d["changed"]:
+        c["cls"] = S.classify_change(c["old"], c["new"], "F45", None)
+    if kernel_evr:
+        d["kernel_evr"] = kernel_evr
+    ld = S.layer_diff(a, b)
+    xc = S.crosscheck_chunks(ld, d, {n: p["src"] for n, p in pb.items()})
+    return S.render_markdown("t", a, b, d, ld, S.verdict_of(d, ld, {}, xc), [], xc)
+
+
+class TestReportShowsTheInstalledKernel(unittest.TestCase):
+    """The header table's "kernel" row is the ostree.linux annotation, i.e. the
+    Fedora base's kernel - not what is installed once secureblue ships its own."""
+
+    ANN = ({"ostree.linux": "7.2.15-300.fc45.x86_64"}, {"ostree.linux": "7.3.3-300.fc45.x86_64"})
+
+    def test_annotation_row_is_labelled_and_the_package_row_is_added(self):
+        md = _mini_report({}, {}, *self.ANN, kernel_evr=["7.3.3-300.secureblue.2.fc45"] * 2)
+        self.assertEqual(md.count("| 7.3.3-300.secureblue.2.fc45 | 7.3.3-300.secureblue.2.fc45 |"), 2)
+        self.assertIn("| kernel (`ostree.linux` annotation, from the Fedora base) | "
+                      "7.2.15-300.fc45.x86_64 | 7.3.3-300.fc45.x86_64 |", md)
+        self.assertNotIn("| kernel | ", md)
+        self.assertNotIn("| 内核 | ", md)
+
+    def test_no_package_row_when_versions_were_not_read(self):
+        md = _mini_report({}, {}, *self.ANN)
+        self.assertNotIn("rpmdb, the kernel actually installed", md)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

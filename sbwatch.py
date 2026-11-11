@@ -2460,13 +2460,20 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
           "bytes you already have under another name.")
     W("")
 
+    # The row that used to be labelled just "kernel" is the ostree.linux
+    # annotation: it names the Fedora base's kernel, which is not the installed
+    # one once secureblue ships its own build (7.3.3-300.fc45 in the annotation
+    # next to kernel-7.3.3-300.secureblue.2.fc45 in the rpmdb).
+    kernel_evr = diff.get("kernel_evr") or (None, None)
     if is_zh:
         W("| | 上一版 | 新版 |")
         W("|---|---|---|")
         W(f"| 对比引用 | `{shortref(a['ref'])}` | `{shortref(b['ref'])}` |")
         W(f"| 镜像版本 | {a['annotations'].get('org.opencontainers.image.version', '?')} | {b['annotations'].get('org.opencontainers.image.version', '?')} |")
         W(f"| 构建时间 (UTC) | {a.get('created') or '?'} | {b.get('created') or '?'} |")
-        W(f"| 内核 | {a['annotations'].get('ostree.linux', '?')} | {b['annotations'].get('ostree.linux', '?')} |")
+        W(f"| 内核（`ostree.linux` 注解，来自 Fedora 基础镜像） | {a['annotations'].get('ostree.linux', '?')} | {b['annotations'].get('ostree.linux', '?')} |")
+        if any(kernel_evr):
+            W(f"| `kernel` 软件包（rpmdb，实际安装的内核） | {kernel_evr[0] or '—'} | {kernel_evr[1] or '—'} |")
         W(f"| rpm-ostree 输入哈希 | `{clip_hash(a['annotations'].get('rpmostree.inputhash'), 12)}` | `{clip_hash(b['annotations'].get('rpmostree.inputhash'), 12)}` |")
         W(f"| ostree 提交 | `{clip_hash(a['annotations'].get('ostree.commit') or '—', 12)}` | `{clip_hash(b['annotations'].get('ostree.commit') or '—', 12)}` |")
         W(f"| 镜像摘要 (manifest) | `{a['digest'][:19]}…` | `{b['digest'][:19]}…` |")
@@ -2477,7 +2484,9 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W(f"| compared refs | `{shortref(a['ref'])}` | `{shortref(b['ref'])}` |")
         W(f"| image version | {a['annotations'].get('org.opencontainers.image.version', '?')} | {b['annotations'].get('org.opencontainers.image.version', '?')} |")
         W(f"| built (UTC) | {a.get('created') or '?'} | {b.get('created') or '?'} |")
-        W(f"| kernel | {a['annotations'].get('ostree.linux', '?')} | {b['annotations'].get('ostree.linux', '?')} |")
+        W(f"| kernel (`ostree.linux` annotation, from the Fedora base) | {a['annotations'].get('ostree.linux', '?')} | {b['annotations'].get('ostree.linux', '?')} |")
+        if any(kernel_evr):
+            W(f"| `kernel` package (rpmdb, the kernel actually installed) | {kernel_evr[0] or '—'} | {kernel_evr[1] or '—'} |")
         W(f"| rpm-ostree inputhash | `{clip_hash(a['annotations'].get('rpmostree.inputhash'), 12)}` | `{clip_hash(b['annotations'].get('rpmostree.inputhash'), 12)}` |")
         W(f"| ostree.commit | `{clip_hash(a['annotations'].get('ostree.commit') or '—', 12)}` | `{clip_hash(b['annotations'].get('ostree.commit') or '—', 12)}` |")
         W(f"| manifest digest | `{a['digest'][:19]}…` | `{b['digest'][:19]}…` |")
@@ -3653,6 +3662,8 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
     _ka, _kb = pa.get("kernel"), pb.get("kernel")
     meta["kernel_pkg_unchanged"] = same_rpmdb or bool(
         _ka and _kb and _evr_tuple(_ka) == _evr_tuple(_kb))
+    # for the report's header table: the kernel that is really installed
+    diff["kernel_evr"] = [(_ka or {}).get("evr"), (_kb or {}).get("evr")]
     rel = fedora_release(pb, an_b.get("org.opencontainers.image.version", ""))
     if not rel:
         notes.append(T("WARNING: could not determine the Fedora release from the package "
