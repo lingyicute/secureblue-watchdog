@@ -3945,8 +3945,11 @@ def cmd_check(args):
                 + " (UTC)。`20260910`、`<sha>-44` 之类的标签是可变的，只指向当天最新构建，"
                   "因此下方对比按 digest 进行：你的上一版镜像 -> 当前镜像，"
                   "即跳过它们全部时的完整差异。"))
+    swapped = res["a"]["digest"] != prev["digest"]
+    from_lbl = args.to if swapped else label_a
+    to_lbl = label_a if swapped else args.to
     md = render_markdown(
-        f"secureblue update watch / secureblue 更新监控 - {args.image}  {shortref(label_a)} -> {args.to} ({ver})",
+        f"secureblue update watch / secureblue 更新监控 - {args.image}  {shortref(from_lbl)} -> {shortref(to_lbl)} ({ver})",
                          res["a"], res["b"], res["diff"], res["layers"], v, res["notes"],
                          res.get("xc"), res.get("backlog"), res.get("groups"))
     report = args.report or "report.md"
@@ -3957,19 +3960,19 @@ def cmd_check(args):
                + f" | download 下载 {human(res['layers']['download_bytes'])}")
     print("\n" + "=" * 72, file=sys.stderr)
     print(summary, file=sys.stderr)
-    _atomic_write_json(report + ".json", {"verdict": v, "from": label_a, "to": args.to,
+    _atomic_write_json(report + ".json", {"verdict": v, "from": from_lbl, "to": to_lbl,
                "digest": cur["digest"],
                "version": ver, "download_bytes": res["layers"]["download_bytes"],
                "changed": [{"name": c["name"], "old": c["old"]["evr"], "new": c["new"]["evr"],
                             "src": c["src"], "dir": c["dir"],
-                            "security": bool(c.get("cls", {}).get("security")),
-                            "cves": c.get("cls", {}).get("cves", [])}
+                            "security": bool((c.get("cls") or {}).get("security")),
+                            "cves": (c.get("cls") or {}).get("cves", [])}
                            for c in res["diff"]["changed"]],
                # complete: the report's backlog table stops at 25 rows and refers
                # to the JSON output for the rest - for `check`, that is this file
                "behind_stable_security": res.get("backlog") or [],
                "backlog_coverage": res.get("backlog_coverage")})
-    save_state({"prev_digest": res["a"]["digest"], "prev_label": label_a,
+    save_state({"prev_digest": prev["digest"], "prev_label": label_a,
                 "last_verdict": v["level"]})
     # Why `--fail-on security` trips, in the CI outputs: `update-now` is also
     # reached by a changelog CVE mention or by secureblue escalating an update it
