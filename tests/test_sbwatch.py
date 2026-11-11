@@ -2792,6 +2792,46 @@ class TestExplicitFromTagRunsOnAnUnchangedDigest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(reached, [])
 
+    def test_swapped_order_updates_report_title_json_and_prev_digest(self):
+        import contextlib
+        import types
+        older = {"ref": "oldtag", "digest": "sha256:" + "1" * 64,
+                 "index_digest": "sha256:" + "2" * 64, "created": "2026-01-01T00:00:00Z",
+                 "annotations": {"org.opencontainers.image.version": "44.20260101.0"},
+                 "layers": [{"digest": "sha256:same", "size": 10,
+                             "components": ["bigfiles/rpmdb.sqlite"], "stability": 0}]}
+        newer = dict(older, ref="newtag", digest="sha256:" + "3" * 64,
+                     index_digest="sha256:" + "4" * 64, created="2026-01-02T00:00:00Z")
+        saved = S._registry, S.resolve, S.maybe_verify_resolved
+        saved_env = {k: os.environ.pop(k, None) for k in ("GITHUB_OUTPUT", "GITHUB_ACTIONS")}
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S.resolve = lambda reg, ref, light=False: newer if ref == "newtag" else older
+        S.maybe_verify_resolved = lambda *a, **k: False
+        try:
+            with tempfile.TemporaryDirectory() as d, \
+                    contextlib.redirect_stderr(io.StringIO()), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                state_path = os.path.join(d, "state.json")
+                report_path = os.path.join(d, "report.md")
+                args = types.SimpleNamespace(
+                    image="x/y", arch="amd64", to="oldtag", a="newtag", scan=0,
+                    force=True, fast=True, exact=0, keep_order=False, no_bodhi=True,
+                    audit=False, cache_dir=d, cosign_pub=None, require_cosign=False,
+                    fail_on="nothing", state=state_path, report=report_path)
+                self.assertEqual(S.cmd_check(args), 0)
+                with open(report_path, encoding="utf-8") as fh:
+                    md = fh.read()
+                with open(report_path + ".json", encoding="utf-8") as fh:
+                    rj = json.load(fh)
+                with open(state_path, encoding="utf-8") as fh:
+                    st = json.load(fh)
+        finally:
+            S._registry, S.resolve, S.maybe_verify_resolved = saved
+            os.environ.update({k: v for k, v in saved_env.items() if v is not None})
+        self.assertIn("oldtag -> newtag", md.splitlines()[0])
+        self.assertEqual((rj["from"], rj["to"]), ("oldtag", "newtag"))
+        self.assertEqual(st["prev_digest"], newer["digest"])
+
 
 class TestSecurityTableSurvivesAPipeInTheEvidence(unittest.TestCase):
     """The first line of a changelog entry lands in the evidence cell verbatim;
