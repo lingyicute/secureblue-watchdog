@@ -1766,7 +1766,10 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     sec = [g for g in groups if g["security"] and not g["downgrade"]]
     down = [g for g in groups if g["downgrade"]]
     lost = [g for g in groups if g["dropped"]]
-    imp = [g for g in groups if g["important"] and not g["security"]]
+    # Same partition as the report's "Bumps in security-sensitive packages"
+    # section: a downgraded group belongs to the downgrade warning below, and
+    # calling it a "version bump" in the same headline contradicted that warning.
+    imp = [g for g in groups if g["important"] and not g["security"] and not g["downgrade"]]
     cves = sorted({c for g in sec for c in g["cves"]})
     sev = max([g["sev_rank"] for g in sec] or [0])
     # `kernel` as a *binary package that actually moved* - the same test
