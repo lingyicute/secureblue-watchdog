@@ -3392,6 +3392,8 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
     tags = list_tags(reg)
     if cur is None:
         cur = resolve(reg, to)
+    # does the watched image carry the chunkah layout this tool diffs by?
+    chunked = rpmdb_chunk({"layers": cur.get("layers") or []}) is not None
     # Lookups that failed for a reason other than "there is no such build". They
     # must not be silent: every one of them is a row that could have been in the
     # list, and `check` picks its baseline out of this list.
@@ -3425,6 +3427,15 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
         if not img.get("is_index"):
             # secureblue also publishes single-arch UKI images into this same repo
             # (latest-uki, 20260917-uki, ...); they are not builds of this image
+            continue
+        if chunked and rpmdb_chunk(img) is None:
+            # ...and its integration-test images (`integrationtest-<sha>` tags):
+            # signed multi-arch indexes built FROM `latest` plus one layer, with
+            # no chunk annotation on any layer (3 of the 12 newest on
+            # 2026-11-11). They cannot be diffed, yet a `check` without usable
+            # state took the newest one as its baseline and died on "no
+            # standalone rpmdb chunk" - on every later run too, as no state was
+            # ever saved.
             continue
         recs[img["index_digest"]] = {
             # index digest names the push; platform digest names what a client of
