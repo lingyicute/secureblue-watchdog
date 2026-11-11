@@ -610,7 +610,9 @@ class Registry:
 
     @staticmethod
     def _split(ref: str):
-        ref = (ref or "").removeprefix("docker://").strip().removeprefix("oci:")
+        # strip first: with the whitespace still in front, the scheme prefix did
+        # not match and " docker://ghcr.io/..." was rejected as host `docker:`
+        ref = (ref or "").strip().removeprefix("docker://").removeprefix("oci:")
         if ref.count("/") < 1:
             raise SystemExit(T(f"need a reference like host/ns/name:tag, got: {ref}",
                                f"需要形如 host/ns/name:tag 的引用，实际收到：{ref}"))
@@ -4176,7 +4178,7 @@ def _registry(args) -> Registry:
     for attr in ("to", "ref"):
         if hasattr(args, attr) and getattr(args, attr) is None:
             setattr(args, attr, reg.default_ref)
-    raw_img = (args.image or "").removeprefix("docker://").strip().removeprefix("oci:")
+    raw_img = (args.image or "").strip().removeprefix("docker://").removeprefix("oci:")
     args.image = f"{reg.host}/{reg.repo}" if raw_img.startswith(reg.host + "/") else reg.repo
     return reg
 
