@@ -3782,5 +3782,23 @@ class TestTagListRetriesAReadCutShort(unittest.TestCase):
             self._list(SystemExit("blob exceeds limit"))
 
 
+class TestBodhiBudgetGoesToSensitivePackagesFirst(unittest.TestCase):
+    """--max-bodhi is spent in lookup order. By name, a big update used it up on
+    fonts while systemd / webkitgtk / xdg-desktop-portal went unqueried."""
+
+    def test_sensitive_sources_first_and_name_order_within_each_half(self):
+        changed = [{"name": n, "src": s} for n, s in (
+            ("abattis-cantarell-fonts", "abattis-cantarell-fonts"), ("kernel-core", "kernel"),
+            ("python3-libs", "python3.14"), ("systemd", "systemd"), ("zlib-ng", "zlib-ng"))]
+        self.assertEqual([c["name"] for c in S.classify_order(changed)],
+                         ["kernel-core", "python3-libs", "systemd",
+                          "abattis-cantarell-fonts", "zlib-ng"])
+        self.assertEqual([c["name"] for c in changed][0], "abattis-cantarell-fonts")
+
+    def test_do_diff_classifies_in_that_order(self):
+        import inspect
+        self.assertIn("for c in classify_order(diff[\"changed\"])", inspect.getsource(S.do_diff))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
