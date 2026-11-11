@@ -2319,6 +2319,15 @@ class TestGroupShowsTheSourceBuildVersion(unittest.TestCase):
         g = S.group_by_src([{"name": "x", "src": "x", "old": old, "new": new}])[0]
         self.assertEqual((g["old_evr"], g["new_evr"]), ("1-1", "1-2"))
 
+    def test_subpackage_with_its_own_version_matches_source_bodhi_erratum(self):
+        old = self._nss("nspr", "4.38.0-9.fc45", "3.130.0-1.fc45")
+        new = self._nss("nspr", "4.39.0-9.fc45", "3.131.0-1.fc45")
+        upd = {"nss": [_upd_for("nss-3.131.0-1.fc45", sev="high", alias="FEDORA-2026-nss")]}
+        cls = S.classify_change(old, new, "F45", FakeBodhi(upd))
+        self.assertTrue(cls["security"])
+        self.assertTrue(cls["has_security_erratum"])
+        self.assertEqual(cls["aliases"], ["FEDORA-2026-nss"])
+
 
 class TestCosignRunsOncePerDigest(unittest.TestCase):
     """`check` verifies the image it watches and do_diff() then reports on that
