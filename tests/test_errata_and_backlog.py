@@ -22,7 +22,7 @@ class TestErrataAndBacklog(unittest.TestCase):
         self.assertTrue(info["security"])
         self.assertEqual(info["cves"], ["CVE-2026-9999"])
         self.assertEqual(info["cves_dropped"], [])
-        self.assertFalse(any("DROPS fixes" in w for w in info["why"]))
+        self.assertFalse(any("no longer mentioned" in w for w in info["why"]))
 
     def test_backlog_aggregates_newest_build_highest_severity_and_all_cves(self):
         pkgs = {"openssl": pkg("openssl", "3.2.0-1.fc45", src="openssl")}

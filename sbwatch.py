@@ -1802,7 +1802,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
         info["security"] = True
     if info["cves_dropped"]:
         info["why"].insert(1 if chlog_cves else 0,
-                           "DROPS fixes/丢失的修复: "
+                           "no longer mentioned/不再提及: "
                            + clip_list(sorted(info["cves_dropped"]), 8, lang="both"))
     info["cves"] = sorted(info["cves"])
     info["cves_dropped"] = sorted(info["cves_dropped"])
@@ -2816,13 +2816,23 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
 
     if g_lost:
         if is_zh:
-            W(f"## 本次更新会移除的修复（{len(g_lost)}）")
+            # Not "fixes this update removes": only the changelog says so, and
+            # Fedora trims and rewrites changelogs (one rebase dropped 24 of curl's
+            # ids at once). The verdict has long worded it as a changelog edit.
+            W(f"## 新版更新日志不再提及的 CVE 编号（{len(g_lost)} 个源码包）")
+            W("")
+            W("通常是更新日志被编辑或裁剪，而不是修复被移除——真正的回退会表现为降级。"
+              "列出仅供核对。")
             W("")
             for g in g_lost:
                 W(f"- `{g['src']}`: 不再提及 "
                   f"{clip_list(g['dropped'], 8, lang='zh', joiner='，')}")
         else:
-            W(f"## Fixes that this update REMOVES ({len(g_lost)})")
+            W(f"## CVE ids the new changelogs no longer mention "
+              f"({len(g_lost)} source package(s))")
+            W("")
+            W("Usually a changelog that was edited or trimmed, not a fix that was removed - "
+              "a real revert shows up as a downgrade. Listed so that you can check.")
             W("")
             for g in g_lost:
                 W(f"- `{g['src']}`: no longer mentions {clip_list(g['dropped'], 8)}")
