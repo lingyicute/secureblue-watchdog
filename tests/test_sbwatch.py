@@ -2206,6 +2206,34 @@ class TestTagListCapIsReported(unittest.TestCase):
         self.assertEqual(tags, ["t", "t", "t"])
         self.assertIn("capped at 3 pages", err.getvalue())
 
+    def test_a_garbled_page_body_is_retried_not_fatal(self):
+        import contextlib
+        import io
+        import types
+
+        class Page:
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        bodies = [b"<html>502 Bad Gateway</html>", b'{"tags": ["ok"]}']
+        reg = types.SimpleNamespace(host="h", repo="x/y", timeout=1, _token=lambda: None,
+                                    _read_all=lambda r, what: bodies.pop(0))
+        real_open, real_sleep = S.urllib.request.urlopen, S.time.sleep
+        S.urllib.request.urlopen = lambda req, timeout=None: Page()
+        S.time.sleep = lambda s: None
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                tags = S.list_tags(reg, max_pages=3)
+        finally:
+            S.urllib.request.urlopen, S.time.sleep = real_open, real_sleep
+        self.assertEqual(tags, ["ok"])
+        self.assertEqual(bodies, [])
+
 
 class TestGroupShowsTheSourceBuildVersion(unittest.TestCase):
     @staticmethod
