@@ -243,8 +243,10 @@ jobs:
 
       - name: Should we notify?
         id: notify
+        env:
+          VERDICT: ${{ steps.check.outputs.verdict }}
         run: |
-          verdict="${{ steps.check.outputs.verdict }}"
+          verdict="$VERDICT"
           post=true
           # silent when nothing changed: no-update, no-change, unknown, empty
           if [ "$verdict" = "no-update" ] || [ "$verdict" = "no-change" ] || [ "$verdict" = "unknown" ] || [ -z "$verdict" ]; then post=false; fi
@@ -259,11 +261,12 @@ jobs:
         if: steps.notify.outputs.post == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERDICT: ${{ steps.notify.outputs.verdict }}
           FAIL_REASON: ${{ steps.check.outputs.fail_reason }}
         run: |
           title="secureblue update watch"
           {
-            printf '> 🤖 update-watch · %s · verdict: **%s**\n\n' "$(date -u +%F)" "${{ steps.notify.outputs.verdict }}"
+            printf '> 🤖 update-watch · %s · verdict: **%s**\n\n' "$(date -u +%F)" "$VERDICT"
             if [ -n "${FAIL_REASON:-}" ]; then printf '> fail-on-security trigger: %s\n\n' "$FAIL_REASON"; fi
             if [ -f report.md ]; then cat report.md; else echo "_no report_"; fi
           } > body.md
