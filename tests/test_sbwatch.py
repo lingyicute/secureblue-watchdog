@@ -1136,6 +1136,12 @@ class TestNoChangeNeedsAnEmptyPackageSet(unittest.TestCase):
         self.assertTrue(v["same_inputhash_but_packages_moved"])
         self.assertNotIn("no new content", v["headline"])
 
+    def test_added_or_removed_package_under_same_inputhash_is_counted_in_headline(self):
+        v = _verdict({"a": pkg("a", "1-1")}, {"a": pkg("a", "1-1"), "b": pkg("b", "1-1")})
+        self.assertTrue(v["same_inputhash_but_packages_moved"])
+        self.assertIn("yet 1 package(s) moved", v["headline"])
+        self.assertIn("却有 1 个软件包发生了变化", v["headline_zh"])
+
     def test_identical_inputhash_and_identical_commit_still_no_change(self):
         pa = {"glibc": pkg("glibc", "2.42-5.fc44")}
         d = S.pkg_diff(pa, dict(pa))

@@ -2001,10 +2001,11 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                              f"「{sbn['message']}」"
                              f"（触发原因：{'；'.join(reasons_zh)}）")
     if v["same_inputhash_but_packages_moved"]:
+        n_moved = n_bin + len(diff["added"]) + len(diff["removed"])
         v["headline"] += (" | NOTE: rpmostree.inputhash is identical on both images yet "
-                          f"{n_bin} package(s) moved - do not treat inputhash as evidence "
+                          f"{n_moved} package(s) moved - do not treat inputhash as evidence "
                           "of a no-op")
-        v["headline_zh"] += (f" ｜ 注意：两个镜像的 rpmostree.inputhash 相同，却有 {n_bin} 个"
+        v["headline_zh"] += (f" ｜ 注意：两个镜像的 rpmostree.inputhash 相同，却有 {n_moved} 个"
                              "软件包发生了变化——不要拿 inputhash 当作「无变化」的证据")
     if down:
         def _dl(g):
