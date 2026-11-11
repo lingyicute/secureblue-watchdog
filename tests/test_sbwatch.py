@@ -2282,7 +2282,8 @@ class TestHistoryHeaderAlignment(unittest.TestCase):
                "version": "44.20260101.0", "inputhash": "abc", "kernel": "7.0",
                "tags": ["latest"], "from_prev": None, "same_input_as_prev": False}
         saved = S._registry, S.build_history
-        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None, host="ghcr.io",
+                                                        repo="x/y", arch="amd64")
         S.build_history = lambda reg, **kw: [row]
         buf = io.StringIO()
         try:
@@ -2314,7 +2315,8 @@ class TestCheckSurvivesAFailedHistoryScan(unittest.TestCase):
 
         saved = S._registry, S.resolve, S.build_history, S.tag_exists
         saved_env = {k: os.environ.pop(k, None) for k in ("GITHUB_OUTPUT", "GITHUB_ACTIONS")}
-        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None, host="ghcr.io",
+                                                        repo="x/y", arch="amd64")
         S.resolve = lambda reg, ref, light=False: cur
         S.build_history = boom
         S.tag_exists = lambda reg, tag, warn=None: None
@@ -2550,7 +2552,8 @@ class TestHistoryReusesTheResolvedImage(unittest.TestCase):
 
         saved = S._registry, S.resolve, S.build_history, S.tag_exists
         saved_env = {k: os.environ.pop(k, None) for k in ("GITHUB_OUTPUT", "GITHUB_ACTIONS")}
-        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None, host="ghcr.io",
+                                                        repo="x/y", arch="amd64")
         S.resolve = lambda reg, ref, light=False: self.CUR
         S.build_history = fake_history
         S.tag_exists = lambda reg, tag, warn=None: None
@@ -2777,7 +2780,8 @@ class TestExplicitFromTagRunsOnAnUnchangedDigest(unittest.TestCase):
 
         saved = S._registry, S.resolve, S.do_diff
         saved_env = {k: os.environ.pop(k, None) for k in ("GITHUB_OUTPUT", "GITHUB_ACTIONS")}
-        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None, host="ghcr.io",
+                                                        repo="x/y", arch="amd64")
         S.resolve = lambda reg, ref, light=False: dict(cur, ref=ref)
         S.do_diff = fake_diff
         try:
@@ -2821,7 +2825,8 @@ class TestExplicitFromTagRunsOnAnUnchangedDigest(unittest.TestCase):
                      index_digest="sha256:" + "4" * 64, created="2026-01-02T00:00:00Z")
         saved = S._registry, S.resolve, S.maybe_verify_resolved
         saved_env = {k: os.environ.pop(k, None) for k in ("GITHUB_OUTPUT", "GITHUB_ACTIONS")}
-        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None, host="ghcr.io",
+                                                        repo="x/y", arch="amd64")
         S.resolve = lambda reg, ref, light=False: newer if ref == "newtag" else older
         S.maybe_verify_resolved = lambda *a, **k: False
         try:
@@ -3223,7 +3228,8 @@ class TestTagsProbeIncludesToday(unittest.TestCase):
         import types
         probed = []
         saved = (S._registry, S.resolve, S.maybe_verify_resolved, S.tag_exists, time.time)
-        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None, host="ghcr.io",
+                                                        repo="x/y", arch="amd64")
         S.resolve = lambda reg, ref, light=False: {
             "digest": "sha256:" + "1" * 64, "index_digest": "sha256:" + "2" * 64,
             "annotations": {}, "layers": [], "created": ""}
@@ -3428,7 +3434,8 @@ class TestCheckSurvivesAPrunedBaseline(unittest.TestCase):
 
         saved = S._registry, S.resolve, S.do_diff, S.tag_exists
         saved_env = {k: os.environ.pop(k, None) for k in ("GITHUB_OUTPUT", "GITHUB_ACTIONS")}
-        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None, host="ghcr.io",
+                                                        repo="x/y", arch="amd64")
         S.resolve, S.do_diff = fake_resolve, fake_diff
         S.tag_exists = lambda reg, tag, warn=None: self.OLD["index_digest"]
         try:
@@ -3815,7 +3822,8 @@ class TestPkgsUsesThePackageListCache(unittest.TestCase):
         fetched = []
         img = {"digest": "sha256:" + "a" * 64, "annotations": {}, "layers": []}
         saved = S._registry, S.resolve, S.package_list
-        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None, host="ghcr.io",
+                                                        repo="x/y", arch="amd64")
         S.resolve = lambda reg, ref, light=False: dict(img, ref=ref)
         S.package_list = lambda reg, r: fetched.append(r["digest"]) or table
         try:
