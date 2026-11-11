@@ -3654,5 +3654,39 @@ class TestSensitiveBumpNamesItsBinaries(unittest.TestCase):
         self.assertNotIn("pkg(s);", md)
 
 
+class TestReadCutShortIsACleanRegistryError(unittest.TestCase):
+    """A connection that dies while a body is being read (timeout, reset,
+    http.client.IncompleteRead) escaped as a traceback from get() and from
+    fetch_blob() - the ~33 MB rpmdb download being the likeliest place."""
+
+    class _Cut:
+        headers = {}
+
+        def read(self, n=-1):
+            import http.client
+            raise http.client.IncompleteRead(b"")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def test_get_and_resolve_raise_registry_error(self):
+        reg = S.Registry("secureblue/x")
+        reg._open = lambda path, accept: self._Cut()
+        with self.assertRaises(S.RegistryError):
+            reg.get("blobs/sha256:" + "a" * 64, "application/json")
+        with self.assertRaises(S.RegistryError):
+            reg.resolve("latest")
+
+    def test_fetch_blob_reports_it_as_a_failed_read(self):
+        import types
+        reg = types.SimpleNamespace(_open=lambda path, accept: self._Cut())
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(SystemExit, "failed to read/decompress"):
+                S.Registry.fetch_blob(reg, "sha256:" + "a" * 64, os.path.join(d, "x"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
