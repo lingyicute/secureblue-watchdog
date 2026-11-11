@@ -3491,9 +3491,9 @@ def cmd_backlog(args):
                 f"  ！{cov['skipped_queries']} 个源码包因 --max-bodhi 用尽而未被查询——"
                 "这些软件包未被检查"))
     if args.json_out:
-        with open(args.json_out, "w") as fh:
-            json.dump({"ref": args.ref, "digest": img["digest"], "version": ver,
-                       "behind": rows, "coverage": cov}, fh, indent=1)
+        _atomic_write_json(args.json_out, {"ref": args.ref, "digest": img["digest"],
+                                           "version": ver, "behind": rows, "coverage": cov},
+                           indent=1)
     # Exit status reflects *execution*, not the verdict: a successful run is 0
     # even when packages are behind. Machines read the verdict from --json-out
     # (`behind`) or stdout; only real errors exit non-zero. (The one deliberate
@@ -3874,8 +3874,7 @@ def cmd_layers(args):
     maybe_verify_resolved(reg, b, args)
     ld = layer_diff(a, b)
     if args.json:
-        with open(args.json, "w") as fh:
-            json.dump(ld, fh, indent=1)
+        _atomic_write_json(args.json, ld, indent=1)
     # print the *compared* direction (post-swap), not the raw argv order - printing
     # "latest -> 20260916" right below a note saying the pair was swapped to
     # "20260916 -> latest" contradicted itself.
@@ -3915,9 +3914,9 @@ def cmd_pkgs(args):
                         args.cache_dir or os.path.expanduser("~/.cache/sbwatch"), [])
     if args.json:
         slim = {k: {a: b for a, b in v.items() if a != "changelog"} for k, v in pkgs.items()}
-        with open(args.json, "w") as fh:
-            json.dump({"ref": args.ref, "digest": r["digest"],
-                       "annotations": r["annotations"], "packages": slim}, fh, indent=1)
+        _atomic_write_json(args.json, {"ref": args.ref, "digest": r["digest"],
+                                       "annotations": r["annotations"], "packages": slim},
+                           indent=1)
         log(T(f"wrote {args.json}: {len(pkgs)} packages",
               f"已写入 {args.json}：{len(pkgs)} 个软件包"))
         return 0
@@ -3932,6 +3931,7 @@ def _atomic_write_text(path: str, text: str) -> None:
     A half-written report.md is what the artifact upload and the sticky-issue
     comment would otherwise pick up if the process died mid-write.
     """
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + f".tmp.{os.getpid()}"
     try:
         # explicit: the report is bilingual (CJK), and open() would otherwise
@@ -3948,15 +3948,16 @@ def _atomic_write_text(path: str, text: str) -> None:
             pass
 
 
-def _atomic_write_json(path: str, data) -> None:
+def _atomic_write_json(path: str, data, indent=None) -> None:
     """ atomic write to avoid cache corruption on concurrent runs."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + f".tmp.{os.getpid()}"
     try:
         with open(tmp, "w") as f:
             # dumps(), not dump(): dump() always walks the document with the
             # pure-Python encoder - three times as long for an 11 MB package
             # list (0.21 s against 0.07 s for the live image's)
-            f.write(json.dumps(data))
+            f.write(json.dumps(data, indent=indent))
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)
@@ -4311,27 +4312,26 @@ def cmd_diff(args):
     if args.json_out:
         xc = res.get("xc") or {}
         # in manifest-only mode nothing ever gets a "cls", so never index it
-        with open(args.json_out, "w") as fh:
-            json.dump({"verdict": res["verdict"],
-                       "download_bytes": res["layers"]["download_bytes"],
-                       "download_bytes_is_upper_bound": True,
-                       "versions_known": xc.get("versions_known", True),
-                       "changed": [{"name": c["name"], "old": c["old"]["evr"],
-                                    "new": c["new"]["evr"], "src": c["src"],
-                                    "dir": c["dir"],
-                                    "security": bool((c.get("cls") or {}).get("security")),
-                                    "cves": (c.get("cls") or {}).get("cves", []),
-                                    "aliases": (c.get("cls") or {}).get("aliases", []),
-                                    "already_had": (c.get("cls") or {}).get("already_had", []),
-                                    "not_pushed": (c.get("cls") or {}).get("not_pushed", []),
-                                    "passed_over": (c.get("cls") or {}).get("passed_over", []),
-                                    "why": (c.get("cls") or {}).get("why", [])}
-                                   for c in res["diff"]["changed"]],
-                       "silent_rebuilds": xc.get("silent_rebuilds", []),
-                       "behind_stable_security": res.get("backlog", []),
-                       "backlog_coverage": res.get("backlog_coverage"),
-                       "added": res["diff"]["added"], "removed": res["diff"]["removed"]},
-                      fh, indent=1)
+        payload = {"verdict": res["verdict"],
+                   "download_bytes": res["layers"]["download_bytes"],
+                   "download_bytes_is_upper_bound": True,
+                   "versions_known": xc.get("versions_known", True),
+                   "changed": [{"name": c["name"], "old": c["old"]["evr"],
+                                "new": c["new"]["evr"], "src": c["src"],
+                                "dir": c["dir"],
+                                "security": bool((c.get("cls") or {}).get("security")),
+                                "cves": (c.get("cls") or {}).get("cves", []),
+                                "aliases": (c.get("cls") or {}).get("aliases", []),
+                                "already_had": (c.get("cls") or {}).get("already_had", []),
+                                "not_pushed": (c.get("cls") or {}).get("not_pushed", []),
+                                "passed_over": (c.get("cls") or {}).get("passed_over", []),
+                                "why": (c.get("cls") or {}).get("why", [])}
+                               for c in res["diff"]["changed"]],
+                   "silent_rebuilds": xc.get("silent_rebuilds", []),
+                   "behind_stable_security": res.get("backlog", []),
+                   "backlog_coverage": res.get("backlog_coverage"),
+                   "added": res["diff"]["added"], "removed": res["diff"]["removed"]}
+        _atomic_write_json(args.json_out, payload, indent=1)
     # Exit status reflects *execution*, not the verdict. This used to return
     # 1 for "consider" and 2 for "update-now", which turned an informational
     # recommendation into what every shell reads as an error (and broke any
