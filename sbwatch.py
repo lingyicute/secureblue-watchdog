@@ -116,7 +116,11 @@ MANIFEST_ACCEPT = ",".join([
     "application/vnd.docker.distribution.manifest.list.v2+json",
     "application/vnd.docker.distribution.manifest.v2+json",
 ])
-CVE_RE = re.compile(r"CVE-\d{4}-\d{4,7}")
+# Tolerant of how people actually type the id: Fedora's python3.15-3.15.2 changelog
+# says "CVE 2026-114583" (a space), others write cve-…, CVE_…, or paste a
+# typographic hyphen. The strict `CVE-\d{4}-\d{4,7}` read none of those, so a
+# CVE fix was reported as "no CVE mentioned". Always go through find_cves().
+CVE_RE = re.compile(r"CVE[-_ \u2010-\u2013]?(\d{4})[-_\u2010-\u2013](\d{4,7})", re.I)
 SEC_WORDS_RE = re.compile(
     r"(security fix|fix(es)? .{0,40}vulnerab|buffer overflow|use-after-free|"
     r"privilege escalation|out.of.bounds)", re.I)
@@ -138,6 +142,11 @@ IMPORTANT_SRC = {
     "bubblewrap", "fwupd", "bluez", "cups", "avahi", "libarchive", "expat", "gnutls",
     "python3",
 }
+
+
+def find_cves(text) -> list:
+    """Every CVE id mentioned in `text`, in the canonical CVE-YYYY-NNNN spelling."""
+    return [f"CVE-{year}-{num}" for year, num in CVE_RE.findall(text or "")]
 
 
 def _src_matches_pool(src: str, pool) -> bool:
@@ -1319,10 +1328,10 @@ class Bodhi:
                     "alias": u.get("alias"), "type": u.get("type"),
                     "severity": u.get("severity"), "status": u.get("status"),
                     "title": u.get("title"), "notes": u.get("notes") or "",
-                    "cves": sorted(set(CVE_RE.findall(u.get("notes") or ""))
-                                   | set(CVE_RE.findall(u.get("title") or ""))
+                    "cves": sorted(set(find_cves(u.get("notes")))
+                                   | set(find_cves(u.get("title")))
                                    | {m for bg in bugs
-                                      for m in CVE_RE.findall(bg["title"])}),
+                                      for m in find_cves(bg["title"])}),
                     "bugs": bugs,
                     "date_approved": u.get("date_approved"),
                     "date_stable": u.get("date_stable"),
@@ -1473,7 +1482,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                                "dropped_total": 0, "dropped_scanned": 0}}
 
     def add_cves(text, into=None):
-        for c in CVE_RE.findall(text or ""):
+        for c in find_cves(text):
             (into if into is not None else info["cves"]).add(c)
 
     # (a) changelog entries that are new in this build: Fedora writes CVE ids there.

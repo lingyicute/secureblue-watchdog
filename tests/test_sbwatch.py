@@ -3837,5 +3837,33 @@ class TestPkgsUsesThePackageListCache(unittest.TestCase):
         self.assertEqual(len(fetched), 1)
 
 
+class TestCveSpellingVariants(unittest.TestCase):
+    """Live case, 45.20261110.0 -> 45.20261111.0: python3.15-3.15.2's changelog
+    reads "CVE 2026-114583: tar filter allows writing outside destination". The
+    strict pattern wanted a hyphen there, and the fix was filed under "no CVE
+    mentioned"."""
+
+    def test_variants_are_read_and_normalised(self):
+        for text in ("- CVE 2026-114583: tar filter", "fixes cve-2026-114583.",
+                     "CVE_2026_114583", "CVE\u20112026\u2011114583 (pasted)"):
+            self.assertEqual(S.find_cves(text), ["CVE-2026-114583"], text)
+        self.assertEqual(S.find_cves("CVE-2026-1234, CVE-2026-56789"),
+                         ["CVE-2026-1234", "CVE-2026-56789"])
+
+    def test_non_ids_are_not_invented(self):
+        for text in (None, "", "see CVE 2026 for details", "build 2026-1234", "CVE-26-1234"):
+            self.assertEqual(S.find_cves(text), [], text)
+
+    def test_space_spelled_id_in_a_new_changelog_entry_is_a_security_change(self):
+        base = {"time": 1, "who": "w", "text": "- Update to Python 3.15.0"}
+        fix = {"time": 2, "who": "w", "text": "- Update to Python 3.15.2\n- CVE 2026-114583: "
+               "tar filter allows writing outside destination"}
+        info = S.classify_change(pkg("python3", "3.15.0-1.fc45", "python3.15", [base]),
+                                 pkg("python3", "3.15.2-1.fc45", "python3.15", [fix, base]),
+                                 "F45", None)
+        self.assertTrue(info["security"])
+        self.assertEqual(info["cves"], ["CVE-2026-114583"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
