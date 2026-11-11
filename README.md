@@ -143,6 +143,7 @@ sbwatch check                 # 有状态的 digest watch，用于 CI/cron -> re
 # A/B/ref 可以是：
 #   latest | 44 | 20260916 | 9ec80ca-44 | sha256:<digest>
 # 推荐用 digest，因为 dated tag 是可变的
+# --image ns/name:44 里的标签会成为 --to / ref 的默认值（显式给出的 --to / ref 优先）
 ```
 
 >[!important]
