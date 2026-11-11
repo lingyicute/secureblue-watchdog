@@ -1155,8 +1155,19 @@ class Bodhi:
         res: list = []
         total = None
         truncated = False
+        budget_cut = False
         ok = False
         for page in range(1, MAX_BODHI_PAGES + 1):
+            if page > 1 and self.calls >= self.max_calls:
+                # --max-bodhi caps API calls, and every page is one call: the
+                # guard above only ran before page 1, so a 127-erratum package
+                # walked past the budget. Stop here and say the audit is partial.
+                truncated = budget_cut = True
+                log(T(f"  ! bodhi: --max-bodhi reached after {len(res)} of {total} errata "
+                      f"for {src} - this package's audit is INCOMPLETE",
+                      f"  ！Bodhi：{src} 只取到 {total} 条勘误中的 {len(res)} 条时 --max-bodhi "
+                      f"已用尽——该包的审计不完整"))
+                break
             self.calls += 1
             url = f"{self.BASE}/updates/?" + urllib.parse.urlencode(
                 {"packages": src, "releases": release,
@@ -1212,8 +1223,9 @@ class Bodhi:
             time.sleep(self.sleep)
         if truncated:
             self.truncated_src.add(src)
-        # never cache a failed query: an empty answer would blind later runs
-        if cf and ok:
+        # never cache a failed query: an empty answer would blind later runs. A
+        # budget-cut one is not cached either - the next run may have the budget.
+        if cf and ok and not budget_cut:
             _atomic_write_json(cf, {"cache_version": BODHI_CACHE_VERSION,
                                     "total": total, "truncated": truncated,
                                     "updates": res})
@@ -3594,12 +3606,13 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
     if bstate.get("truncated"):
         tr = clip_list(bstate["truncated"], 8)
         notes.append(T(
-            f"WARNING: could not read every erratum for: {tr} - their verdict is based on "
-            f"the first {MAX_BODHI_PAGES * BODHI_PAGE_SIZE} only, so 'no security fix' for "
-            f"them is NOT established",
-            f"警告：以下软件包的勘误未能全部读取：{tr}——它们的结论仅基于前 "
-            f"{MAX_BODHI_PAGES * BODHI_PAGE_SIZE} 条，因此对它们而言"
-            f"「没有安全修复」并未被证实"))
+            f"WARNING: could not read every erratum for: {tr} - their verdict is based only "
+            f"on the errata that were read (at most {MAX_BODHI_PAGES * BODHI_PAGE_SIZE} per "
+            f"package, fewer if --max-bodhi ran out), so 'no security fix' for them is NOT "
+            f"established",
+            f"警告：以下软件包的勘误未能全部读取：{tr}——它们的结论仅基于已读取的勘误"
+            f"（每包最多 {MAX_BODHI_PAGES * BODHI_PAGE_SIZE} 条；若 --max-bodhi 用尽则更少），"
+            f"因此对它们而言「没有安全修复」并未被证实"))
     return {"a": a, "b": b, "diff": diff, "layers": ld, "xc": xc, "verdict": v,
             "notes": notes, "release": rel, "backlog": backlog, "backlog_coverage": coverage,
             "groups": groups}

@@ -669,8 +669,8 @@ class TestBodhiPagination(unittest.TestCase):
             body = json.dumps({"total": self.total, "updates": ups}).encode()
             return _FakeResp(body)
 
-    def _run(self, total, max_pages=None):
-        b = S.Bodhi(cache_dir=None, max_calls=99, sleep=0)
+    def _run(self, total, max_pages=None, max_calls=99, cache_dir=None):
+        b = S.Bodhi(cache_dir=cache_dir, max_calls=max_calls, sleep=0)
         orig_open, orig_max = S.urllib.request.urlopen, S.MAX_BODHI_PAGES
         fake = self.FakeHTTP(total)
         S.urllib.request.urlopen = fake
@@ -698,6 +698,18 @@ class TestBodhiPagination(unittest.TestCase):
         ups, b, fake = self._run(5000, max_pages=2)
         self.assertEqual(len(ups), 200)
         self.assertEqual(b.truncated_src, {"kernel"})
+
+    def test_max_bodhi_caps_every_page_and_is_not_cached_as_complete(self):
+        import contextlib
+        import io
+        import tempfile
+        with tempfile.TemporaryDirectory() as td, \
+                contextlib.redirect_stderr(io.StringIO()):
+            ups, b, fake = self._run(250, max_calls=2, cache_dir=td)
+            self.assertEqual(fake.calls, 2)            # the budget, not 3 pages
+            self.assertEqual(len(ups), 200)
+            self.assertEqual(b.truncated_src, {"kernel"})
+            self.assertEqual(os.listdir(td), [])       # a partial answer is not persisted
 
 
 # --------------------------------------------------------------------------- #
