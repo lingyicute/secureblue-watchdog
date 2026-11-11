@@ -1690,6 +1690,10 @@ class TestManifestOnlyVerdict(unittest.TestCase):
         v = S.verdict_of(d, LD_FIX, meta, xc, bodhi_state={"failed": 1})
         self.assertEqual(v["level"], "consider")
         self.assertIn("coverage is incomplete", v["level_basis"])
+        v = S.verdict_of(d, LD_FIX, meta, xc, bodhi_state={"truncated": ["nano"]})
+        self.assertEqual(v["level"], "consider")
+        self.assertIn("coverage is incomplete", v["level_basis"])
+        self.assertIn("truncated for 1 package(s)", v["headline"])
         backlog = [{"name": "openssl", "severity": "important", "want": "3.1-2",
                     "have": "3.1-1", "src": "openssl", "alias": "FEDORA-2026-x", "cves": []}]
         v = S.verdict_of(d, LD_FIX, meta, xc, backlog)
