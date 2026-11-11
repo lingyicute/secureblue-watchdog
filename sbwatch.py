@@ -1408,12 +1408,6 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                 continue
             attached = bool(hit_attached)
             pushed = status in PUSHED_STATUSES
-            info["aliases"].append(u["alias"])
-            add_cves(" ".join(u.get("cves") or []))
-            add_cves(u.get("notes") or "")
-            add_cves(u.get("title") or "")
-            for bg in u.get("bugs") or []:
-                add_cves(bg.get("title"))
             if not pushed:
                 # type=security but unpushed/testing/obsolete: report, don't escalate
                 info["not_pushed"].append(
@@ -1423,6 +1417,12 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                     f"erratum/勘误 {u['alias']}: type={u.get('type')} status={status} "
                     f"(not in a Fedora repo yet / 尚未进入 Fedora 仓库 - not counted)")
                 continue
+            info["aliases"].append(u["alias"])
+            info["cves"].update(u.get("cves") or ())
+            add_cves(u.get("notes") or "")
+            add_cves(u.get("title") or "")
+            for bg in u.get("bugs") or []:
+                add_cves(bg.get("title"))
             info["severities"].append((u.get("severity") or "").lower())
             info["bodhi_type"] = u["type"]
             info["erratum"] = {"alias": u["alias"], "type": u["type"],

@@ -294,6 +294,8 @@ class TestClassifyChange(unittest.TestCase):
         info = S.classify_change(None, pkg("ffmpeg", "7.1-3.fc44"), "F44", FakeBodhi(upd))
         self.assertFalse(info["security"])
         self.assertEqual(info["sev_rank"], 0)
+        self.assertEqual(info["aliases"], [])
+        self.assertEqual(info["cves"], [])
         self.assertEqual([a["alias"] for a in info["not_pushed"]],
                          ["FEDORA-2026-bcaf0ddb2a"])
         self.assertTrue(any("not counted" in w for w in info["why"]))
