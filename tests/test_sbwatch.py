@@ -703,6 +703,20 @@ class TestBodhiPagination(unittest.TestCase):
         self.assertEqual(len(ups), 20)
         self.assertEqual(fake.calls, 1)
 
+    def test_cve_in_update_title_is_extracted_into_cached_cves(self):
+        b = S.Bodhi(cache_dir=None, max_calls=1, sleep=0)
+        body = json.dumps({"total": 1, "updates": [{
+            "alias": "FEDORA-2026-titlecve", "type": "security", "severity": "high",
+            "status": "stable", "title": "foo: fix CVE-2026-4242", "notes": "",
+            "bugs": [], "builds": [{"nvr": "foo-1.0-1.fc44"}]}]}).encode()
+        orig = S.urllib.request.urlopen
+        S.urllib.request.urlopen = lambda url, timeout=None: _FakeResp(body)
+        try:
+            ups = b.updates_for_src("foo", "F44")
+        finally:
+            S.urllib.request.urlopen = orig
+        self.assertEqual(ups[0]["cves"], ["CVE-2026-4242"])
+
     def test_hitting_the_page_bound_is_reported_not_hidden(self):
         ups, b, fake = self._run(5000, max_pages=2)
         self.assertEqual(len(ups), 200)

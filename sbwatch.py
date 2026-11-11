@@ -1204,6 +1204,7 @@ class Bodhi:
                     "severity": u.get("severity"), "status": u.get("status"),
                     "title": u.get("title"), "notes": u.get("notes") or "",
                     "cves": sorted(set(CVE_RE.findall(u.get("notes") or ""))
+                                   | set(CVE_RE.findall(u.get("title") or ""))
                                    | {m for bg in bugs
                                       for m in CVE_RE.findall(bg["title"])}),
                     "bugs": bugs,
