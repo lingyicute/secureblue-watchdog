@@ -4353,12 +4353,12 @@ def cmd_check(args):
         if uniq:
             res["notes"].append(T(
                 f"this image is not the only new one: {len(uniq)} build(s) were pushed after "
-                f"the build you last looked at ({clip_text(seen, 16)}) — "
+                f"the build you last looked at ({ts_short(seen)}) — "
                 + ", ".join(ts_short(r["created"]) for r in uniq)
                 + " (UTC). Tags like `20260910` or `<sha>-44` are mutable and only point at "
                   "the newest build of a day, so the comparison below is by digest: your last "
                   "image -> current image, i.e. the full delta of skipping them all.",
-                f"这不是唯一的新镜像：在你上次查看的构建（{clip_text(seen, 16, lang='zh')}）"
+                f"这不是唯一的新镜像：在你上次查看的构建（{ts_short(seen)}）"
                 f"之后还推送了 {len(uniq)} 次构建 —— "
                 + "，".join(ts_short(r["created"]) for r in uniq)
                 + " (UTC)。`20260910`、`<sha>-44` 之类的标签是可变的，只指向当天最新构建，"
