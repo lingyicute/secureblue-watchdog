@@ -4496,8 +4496,12 @@ def cmd_check(args):
     # difference between "nothing else was pushed" and "I could not ask".
     res["notes"].extend(hist_warnings)
     v = res["verdict"]
-    # (a baseline that had to be replaced is not "your last image" any more)
-    seen = "" if state_lost else (state.get("created") or "")
+    # The note below calls the comparison "your last image -> current image", so
+    # it only holds when the baseline IS the image analysed last time: not for an
+    # explicit --a, a forced re-check of `prev_digest`, or a baseline that had to
+    # replace a pruned one - there it miscounted and misnamed what was compared.
+    seen = (state.get("created") or "") \
+        if not state_lost and prev["digest"] == state.get("digest") else ""
     if seen:
         uniq, minutes = [], set()
         for r in sorted(hist, key=lambda x: x.get("created") or ""):
