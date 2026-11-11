@@ -3555,14 +3555,17 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
     diff["added_cls"] = added_cls
     # parse-quality notes: both of these used to fail silently, and both make the
     # diff look calmer than the data warrants
-    if getattr(pb, "headers_rejected", 0) or getattr(pb, "fields_skipped", 0):
+    tables = (pb,) if pa is pb else (pa, pb)
+    hdr_rej = sum(getattr(t, "headers_rejected", 0) for t in tables)
+    fld_skip = sum(getattr(t, "fields_skipped", 0) for t in tables)
+    if hdr_rej or fld_skip:
         notes.append(T(
-            f"rpmdb parsing: {getattr(pb, 'headers_rejected', 0)} package header(s) were "
-            f"rejected (size fields inconsistent) and {getattr(pb, 'fields_skipped', 0)} "
+            f"rpmdb parsing: {hdr_rej} package header(s) were "
+            f"rejected (size fields inconsistent) and {fld_skip} "
             f"field(s) could not be decoded - missing fields silently weaken the diff "
             f"(epoch, changelog/CVE scan)",
-            f"rpmdb 解析：{getattr(pb, 'headers_rejected', 0)} 个包头部被拒（尺寸字段不自洽）、"
-            f"{getattr(pb, 'fields_skipped', 0)} 个字段无法解码——字段缺失会静默削弱 diff 的"
+            f"rpmdb 解析：{hdr_rej} 个包头部被拒（尺寸字段不自洽）、"
+            f"{fld_skip} 个字段无法解码——字段缺失会静默削弱 diff 的"
             f"准确性（epoch、更新日志/CVE 扫描）"))
     if getattr(pb, "collisions", None):
         _c = pb.collisions

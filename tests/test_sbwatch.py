@@ -1924,6 +1924,28 @@ class TestFixesThatUsedToBeSilent(unittest.TestCase):
         self.assertEqual(S.read_header(hdr, stats), {})
         self.assertEqual(stats.get("fields_skipped"), 1)
 
+    def test_rpmdb_parse_problems_on_older_image_are_reported_too(self):
+        import types
+
+        class Reg:
+            def _token(self):
+                return None
+
+        pa = S.PackageTable({"nano": pkg("nano", "8.0-1.fc44")})
+        pa.headers_rejected = 2
+        pb = S.PackageTable({"nano": pkg("nano", "8.0-1.fc44")})
+        tables = [pa, pb]
+        args = types.SimpleNamespace(exact=1, keep_order=True, no_bodhi=True, audit=False,
+                                     max_bodhi=0, cache_dir=None, cosign_pub=None)
+        img = {"ref": "a", "digest": "sha256:" + "1" * 64, "annotations": {}, "layers": []}
+        orig = S.load_pkglist
+        S.load_pkglist = lambda *a: tables.pop(0)
+        try:
+            res = S.do_diff(args, "a", "b", images=(img, dict(img, ref="b")), reg=Reg())
+        finally:
+            S.load_pkglist = orig
+        self.assertTrue(any("2 package header(s) were rejected" in n.en for n in res["notes"]))
+
     def test_report_is_written_as_utf8_whatever_the_locale(self):
         # open() follows the locale, and the report is bilingual: under a
         # non-UTF-8 locale it could not be written at all
