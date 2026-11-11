@@ -4171,6 +4171,11 @@ def cmd_check(args):
                       "  inputhash 相同但 rpmdb chunk 不同 —— inputhash 继承自 Fedora 基础镜像，"
                       "看不到 secureblue 自己的重建，因此仍然拉取 rpmdb"))
 
+    if not args.a and state.get("digest") == prev["digest"]:
+        # A stateful watch describes the actual movement of the tag, including a
+        # rollback. Auto-orienting by build time would report the reverse upgrade
+        # (and its CVE fixes) while saving the older target as the new state.
+        args.keep_order = True
     res = do_diff(args, ref_a, args.to, images=(prev, cur), reg=reg)
     # Warnings about an incomplete history belong in the report: they are the
     # difference between "nothing else was pushed" and "I could not ask".
