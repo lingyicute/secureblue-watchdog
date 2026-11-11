@@ -1834,7 +1834,14 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     kernel_in_diff = "kernel" in moved_names
     kernel_annot_moved = bool(meta.get("kernel_a")) and \
         meta.get("kernel_a") != meta.get("kernel_b")
-    kernel_moved = kernel_in_diff or kernel_annot_moved
+    # ostree.linux describes the Fedora base compose. When the rpmdb shows the
+    # `kernel` package itself at one EVR on both sides, a moved annotation is the
+    # base's kernel changing underneath an untouched secureblue kernel
+    # (45.20261110.0 -> 45.20261111.0: ostree.linux 7.2.15 -> 7.3.3 and
+    # kernel-tools with it, kernel 7.3.3-300.secureblue.2 in both) - and "the
+    # kernel moved" was reported for an update that did not touch it.
+    kernel_moved = kernel_in_diff or (kernel_annot_moved
+                                      and not meta.get("kernel_pkg_unchanged"))
     sbn = secureblue_notification(diff, groups, diff.get("added_cls"))
     if diff.get("count_a") == "?" and not diff.get("same_rpmdb"):
         # manifest-only mode (--exact 0): no rpmdb was read, so the package set
@@ -3514,6 +3521,8 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
 
     ra, rb = rpmdb_chunk(a), rpmdb_chunk(b)
     same_rpmdb = bool(ra and rb and ra.get("digest") and ra["digest"] == rb.get("digest"))
+    # an identical rpmdb cannot hold a different kernel, whatever ostree.linux says
+    meta["kernel_pkg_unchanged"] = same_rpmdb
 
     if not args.exact:
         diff = {"added": [], "removed": [], "downgrades": [], "changed": [],
@@ -3550,6 +3559,9 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
         pb = load_pkglist(reg, b, ref_b, cache_dir, notes)
     diff = pkg_diff(pa, pb)
     diff["same_rpmdb"] = same_rpmdb
+    _ka, _kb = pa.get("kernel"), pb.get("kernel")
+    meta["kernel_pkg_unchanged"] = same_rpmdb or bool(
+        _ka and _kb and _evr_tuple(_ka) == _evr_tuple(_kb))
     rel = fedora_release(pb, an_b.get("org.opencontainers.image.version", ""))
     if not rel:
         notes.append(T("WARNING: could not determine the Fedora release from the package "

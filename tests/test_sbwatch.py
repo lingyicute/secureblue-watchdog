@@ -3345,5 +3345,29 @@ class TestTranslatedI18nStringIsNotAParseProblem(unittest.TestCase):
         self.assertEqual(stats.get("fields_skipped"), 1)
 
 
+class TestBaseKernelAnnotationIsNotAKernelUpdate(unittest.TestCase):
+    """The real 45.20261110.0 -> 45.20261111.0 case: ostree.linux went
+    7.2.15 -> 7.3.3 (the Fedora base) and kernel-tools followed it, while the
+    secureblue-built `kernel` sat at 7.3.3-300.secureblue.2 on both sides."""
+
+    PA = {"kernel": pkg("kernel", "7.3.3-300.secureblue.2.fc45"),
+          "kernel-tools": pkg("kernel-tools", "7.2.15-300.fc45", "kernel")}
+    PB = {"kernel": pkg("kernel", "7.3.3-300.secureblue.2.fc45"),
+          "kernel-tools": pkg("kernel-tools", "7.3.3-300.fc45", "kernel")}
+    META = {"kernel_a": "7.2.15-300.fc45.x86_64", "kernel_b": "7.3.3-300.fc45.x86_64"}
+
+    def test_unchanged_kernel_package_overrides_the_annotation(self):
+        v = _verdict(self.PA, self.PB, dict(self.META, kernel_pkg_unchanged=True))
+        self.assertTrue(v["kernel_annotation_changed"])
+        self.assertFalse(v["kernel_changed"])
+        self.assertNotIn("the kernel moved", v["level_basis"])
+        self.assertNotIn("kernel 7.2.15", v["headline"])
+
+    def test_annotation_still_counts_when_the_package_was_not_compared(self):
+        v = _verdict(self.PA, self.PB, self.META)
+        self.assertTrue(v["kernel_changed"])
+        self.assertIn("the kernel moved", v["level_basis"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
