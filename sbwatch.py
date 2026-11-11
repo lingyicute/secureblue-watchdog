@@ -1045,7 +1045,7 @@ def package_list(reg: Registry, resolved: dict) -> dict:
             continue
         if name in PSEUDO_PACKAGES:
             continue
-        srpm = (h.get("sourcerpm") or "").replace(".src.rpm", "")
+        srpm = (h.get("sourcerpm") or "").removesuffix(".src.rpm").removesuffix(".nosrc.rpm")
         src = re.sub(r"-\d[^-]*-[^-]*$", "", srpm) or name
         times = h.get("changelogtime") or []
         names = h.get("changelogname") or []
