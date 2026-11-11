@@ -4105,6 +4105,22 @@ def cmd_check(args):
             state = {}
     reg = _registry(args)
     reg._token()
+    # The default state path is shared by every image and architecture, and a
+    # state saved for another one is no baseline: `check --arch arm64` after an
+    # amd64 run diffed the amd64 build against the arm64 one (same repo, so the
+    # digest resolves) and reported nearly every chunk as changed.
+    ident = {"image": f"{reg.host}/{reg.repo}", "arch": reg.arch}
+    state_foreign = None
+    if any(state.get(k) and state[k] != v for k, v in ident.items()):
+        theirs = f"{state.get('image') or ident['image']} ({state.get('arch') or ident['arch']})"
+        state_foreign = T(
+            f"the state file was written for {theirs}, not for {ident['image']} "
+            f"({ident['arch']}), so it was ignored - give every watched image/arch "
+            f"its own --state",
+            f"状态文件是为 {theirs} 写的，而不是 {ident['image']}（{ident['arch']}），"
+            f"已忽略——请为每个被监控的镜像/架构单独指定 --state")
+        log("  ! " + state_foreign)
+        state = {}
     cur = resolve(reg, args.to)
     maybe_verify_resolved(reg, cur, args)
     ver = cur["annotations"].get("org.opencontainers.image.version", "?")
@@ -4113,7 +4129,7 @@ def cmd_check(args):
         # `digest` is the per-arch (platform) digest - that is what a client of
         # --arch pulls and what every comparison in this file uses. `index_digest`
         # names the push. They are different strings and are never interchangeable.
-        d = {"digest": cur["digest"], "index_digest": cur.get("index_digest"),
+        d = {**ident, "digest": cur["digest"], "index_digest": cur.get("index_digest"),
              "tag": args.to, "version": ver, "created": cur.get("created"),
              "inputhash": cur["annotations"].get("rpmostree.inputhash"),
              "ostree_commit": cur["annotations"].get("ostree.commit"),
@@ -4155,6 +4171,8 @@ def cmd_check(args):
     # the last look and (b) pick the immediate predecessor even on a multi-build day
     hist = []
     hist_warnings: list = []
+    if state_foreign:
+        hist_warnings.append(state_foreign)
     if args.scan:
         try:
             hist = build_history(reg, scan=args.scan, days=0, to=args.to,
