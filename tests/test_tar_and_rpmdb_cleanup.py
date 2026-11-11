@@ -1,6 +1,7 @@
 """Relative tar symlinks and rpmdb extraction/parse cleanup regressions."""
 import io
 import os
+import sqlite3
 import tarfile
 import tempfile
 import types
@@ -108,3 +109,34 @@ class TestTarAndRpmdbCleanup(unittest.TestCase):
             S._resolve_tar_link("usr/share/rpm/rpmdb.sqlite",
                                 "/usr/lib/sysimage/../rpm/target.db"),
             "usr/lib/rpm/target.db")
+
+    def _empty_db(self, directory):
+        os.makedirs(directory)
+        path = os.path.join(directory, "rpmdb.sqlite")
+        con = sqlite3.connect(path)
+        con.execute("create table Packages (hnum integer primary key, blob blob)")
+        con.commit()
+        con.close()
+        return path
+
+    def test_package_list_opens_a_database_under_a_directory_with_uri_characters(self):
+        # TMPDIR is the user's: `#` starts a URI fragment, `?` a query and `%` an escape
+        resolved = {"layers": [{"digest": "sha256:" + "e" * 64, "size": 10,
+                                "components": ["bigfiles/rpmdb.sqlite"]}]}
+        for odd in ("a#b", "c%41", "d?e", "f g"):
+            with self.subTest(directory=odd), tempfile.TemporaryDirectory() as d:
+                db = self._empty_db(os.path.join(d, odd))
+                reg = types.SimpleNamespace(extract_member=lambda chunk, match, p=db: p)
+                self.assertEqual(len(S.package_list(reg, resolved)), 0)
+                self.assertFalse(os.path.exists(db))
+
+    def test_the_sqlite_error_is_part_of_the_schema_failure(self):
+        with tempfile.TemporaryDirectory() as d:
+            bad_db = os.path.join(d, "corrupt.sqlite")
+            with open(bad_db, "wb") as fh:
+                fh.write(b"not a valid sqlite3 file at all")
+            reg = types.SimpleNamespace(extract_member=lambda chunk, match: bad_db)
+            resolved = {"layers": [{"digest": "sha256:" + "f" * 64, "size": 10,
+                                    "components": ["bigfiles/rpmdb.sqlite"]}]}
+            with self.assertRaisesRegex(SystemExit, "no Packages table.*not a database"):
+                S.package_list(reg, resolved)

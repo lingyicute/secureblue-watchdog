@@ -51,6 +51,7 @@ import hashlib
 import http.client
 import json
 import os
+import pathlib
 import re
 import secrets
 import shutil
@@ -1300,7 +1301,11 @@ def package_list(reg: Registry, resolved: dict) -> dict:
     con = None
     try:
         try:
-            con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            # A percent-encoded URI, not f"file:{path}": the scratch directory sits
+            # under the user's TMPDIR, and a `#`, `?` or `%` in it cut or decoded the
+            # path into one that does not exist.
+            uri = pathlib.Path(os.path.abspath(path)).as_uri() + "?mode=ro"
+            con = sqlite3.connect(uri, uri=True)
             # Iterated, not fetchall()ed: the blobs add up to most of the ~92 MiB
             # database, and only the one being parsed has to be in memory.
             rows = con.execute("select blob from Packages")
@@ -1331,9 +1336,10 @@ def package_list(reg: Registry, resolved: dict) -> dict:
                 e["evr"] = e["version"] + "-" + e["release"]
                 e["nvr"] = f"{name}-{e['version']}-{e['release']}"
                 table_put(pkgs, e)
-        except sqlite3.DatabaseError:
-            raise SystemExit(T("unexpected rpmdb schema (no Packages table)",
-                               "rpmdb 结构不符合预期（没有 Packages 表）")) from None
+        except sqlite3.DatabaseError as e:
+            # sqlite says which it was: no such table, not a database, unable to open
+            raise SystemExit(T(f"unexpected rpmdb schema (no Packages table): {e}",
+                               f"rpmdb 结构不符合预期（没有 Packages 表）：{e}")) from None
     finally:
         if con is not None:
             con.close()
