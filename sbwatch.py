@@ -4170,29 +4170,42 @@ def cmd_check(args):
     ref_a, label_a = args.a, args.a
     prev = None
     state_lost = False
+    state_base_dig = None
+    state_base_lbl = None
     if not ref_a and state.get("digest") and state["digest"] != cur["digest"]:
+        state_base_dig = state["digest"]
+        state_base_lbl = clip_text(state.get("version") or state.get("created")
+                                   or state["digest"], 26, lang="both")
+    elif (not ref_a and state.get("digest") == cur["digest"]
+          and state.get("prev_digest") and state["prev_digest"] != cur["digest"]):
+        # `check --force` on an unchanged tag re-analyses the last transition:
+        # reuse the baseline recorded in `prev_digest` instead of losing it or
+        # reversing a rollback via the history scan.
+        state_base_dig = state["prev_digest"]
+        state_base_lbl = clip_text(state.get("prev_label") or state["prev_digest"],
+                                   26, lang="both")
+    if state_base_dig:
         # Resolved here, before the baseline is settled: the image analysed last
         # time can be gone by now (registries prune old builds, and a schedule
         # that was paused long enough comes back to exactly that). Its 404 used
         # to end the run before the state was rewritten, so every later run died
         # on the same digest until someone deleted the cache by hand.
         try:
-            prev = resolve(reg, state["digest"])
+            prev = resolve(reg, state_base_dig)
         except RegistryError as e:
             if e.http_code != 404:
                 raise
             state_lost = True
-            msg = T(f"the image analysed last time ({shortref(state['digest'])}) is no "
+            msg = T(f"the image analysed last time ({shortref(state_base_dig)}) is no "
                     f"longer in the registry, so the baseline was chosen from the build "
                     f"history / dated tags instead",
-                    f"上次分析的镜像（{shortref(state['digest'])}）已不在 registry 中，"
+                    f"上次分析的镜像（{shortref(state_base_dig)}）已不在 registry 中，"
                     f"因此基线改由构建历史 / 日期标签选出")
             log("  ! " + msg)
             hist_warnings.append(msg)
         else:
-            ref_a = state["digest"]
-            label_a = clip_text(state.get("version") or state.get("created")
-                                or state["digest"], 26, lang="both")
+            ref_a = state_base_dig
+            label_a = state_base_lbl
     if not ref_a and hist:
         # build_history rows carry the *index* digest in "digest"; comparing that
         # against cur["digest"] (the platform digest) never matched, so the current
@@ -4275,7 +4288,7 @@ def cmd_check(args):
                       "  inputhash 相同但 rpmdb chunk 不同 —— inputhash 继承自 Fedora 基础镜像，"
                       "看不到 secureblue 自己的重建，因此仍然拉取 rpmdb"))
 
-    if not args.a and state.get("digest") == prev["digest"]:
+    if not args.a and prev["digest"] in (state.get("digest"), state.get("prev_digest")):
         # A stateful watch describes the actual movement of the tag, including a
         # rollback. Auto-orienting by build time would report the reverse upgrade
         # (and its CVE fixes) while saving the older target as the new state.
