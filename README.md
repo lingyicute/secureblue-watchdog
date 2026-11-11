@@ -229,6 +229,9 @@ python3 sbwatch.py backlog latest --max-bodhi 80
 - `downgrades`：这次更新把某个包**降级**了（真证据，会抬高级别）；`cves_dropped`：
   新版更新日志不再提到的 CVE 编号（通常是日志被编辑，只作提示、不再抬高级别）
 - `backlog`：即使跳过，你仍暴露在多少已发布 stable 安全更新之外
+- `passed_over`：被这次更新**越过**的中间构建所带的 stable 安全勘误（旧 < 该构建 ≤ 新，同一 Fedora 版本内）。
+  两个镜像里都没有这个构建，所以它的勘误对不上任何一方，但修复随新构建一并到来——计入结论与 CVE，
+  不计入通知预测（rpm-ostree 只把勘误挂在精确命中的构建上）；`security_basis` 中标为「被越过构建的安全勘误」
 - `same_inputhash_but_packages_moved`：inputhash 相同但包确实动了（显式告警，别拿 inputhash 当无变化的证据）
 
 ### `--exact 0` 的 verdict 语义
@@ -265,7 +268,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/` 包含 **292 项离线回归测试**，不需要网络、不访问 registry
+`tests/` 包含 **334 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -310,9 +313,16 @@ python3 -m unittest discover -s tests -v
 - `test_retained_cves.py`：新增或删除重复提及时，只要保留条目仍提到同一 CVE，就不得声称新增或丢失该编号；保留条目的扫描也有上限并披露。
 - `test_bodhi_budget_memo.py`：预算耗尽按源码包和 Fedora release 去重；不把预算缺失写入磁盘，也不反复读取旧缓存。
 - `test_digest_integrity.py`：严格校验 `sha256:<64 hex>` 摘要格式，拒绝空摘要、非 sha256 算法或畸形摘要，并在校验失败时清理落盘的临时层文件。
-- `test_tar_and_rpmdb_cleanup.py`：解析层 tar 内的相对路径符号链接，并在 tar 提取或 sqlite 解析异常时清理临时文件。
+- `test_tar_and_rpmdb_cleanup.py`：解析层 tar 内的相对路径符号链接（只有以 `/` 开头的目标才是绝对路径，不以 `.` 开头的同样相对于链接所在目录），并在 tar 提取或 sqlite 解析异常时清理临时文件。
 - `test_errata_and_backlog.py`：新构建的已推送 Bodhi 勘误携带 CVE 时消除更新日志改写造成的假性 CVE 丢失并标记安全属性；`security_backlog` 聚合同一源码包所有落后的 stable 安全勘误（取最新构建、最高严重度与全部 CVE）。
-- `test_force_recheck_state.py`：`check --force` 重跑当前构建时复用 `state.json` 中的 `prev_digest` 基线并保持回滚方向。
+- `test_force_recheck_state.py`：`check --force` 重跑当前构建时复用 `state.json` 中的 `prev_digest` 基线并保持回滚方向；读回的基线标签保持原样，不会被截成带省略说明的残段。
+- `test_rpm_header_tags.py`：Vendor / License 取自各自的头部标签（1011 / 1014）；1010 是 Distribution，不得当作 vendor。
+- `test_token_realm.py`：pull token 的 realm 只接受 http(s)；`file:`、`ftp:`、`data:` 等 realm 不得被打开。
+- `test_passed_over_errata.py`：被本次更新越过的中间构建（旧 < 构建 ≤ 新，且与旧构建同属一个 Fedora 版本）的 stable 安全勘误计入结论与 CVE，但不计入通知预测；范围之外、未推送、非安全类勘误、降级以及跨 Fedora 版本的构建都不计。
+- `test_baseline_label.py`：来自状态文件的基线标签带上构建时间（`版本 @ 时间`），同一天内共用版本号的多次构建不再显示成 `X -> latest (X)`。
+- `test_dropped_cves_wording.py`：新版更新日志不再提及的 CVE 编号只按「不再提及」呈现，小节标题与依据文本不得再写成「本次更新移除的修复」。
+- `test_registry_auth_hint.py`：registry 返回 401/403 时指出最可能的原因（仓库不存在或非公开，检查 `--image`）；其它状态码不带该提示。
+- `test_cache_write.py`：缓存文件经一次性 JSON 编码器写出，不走逐段迭代的 `json.dump()`。
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
