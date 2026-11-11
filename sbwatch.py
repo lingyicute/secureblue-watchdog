@@ -1563,6 +1563,42 @@ def _missing_entries(these: list, other: list) -> list:
     return out
 
 
+def _dist_tag(release) -> str:
+    """`.fc45` out of an rpm release string, or "" when it carries none."""
+    m = re.search(r"\.fc\d+", release or "")
+    return m.group(0) if m else ""
+
+
+def _passed_build(old: dict, new: dict, nvrs) -> str | None:
+    """The erratum build, if any, that an update from `old` to `new` passes over.
+
+    That is a build newer than the old one and not newer than the new one, in
+    Fedora's namespace (see _is_behind). Neither image contains it, so no NVR
+    spelling of either side can match its erratum.
+
+    Only on the old build's own Fedora release: the release numbers of two
+    branches do not order against each other. Across a rebase the old image's
+    `bluez-5.87-1.fc44` compared as behind `bluez-5.87-1.fc45` - its twin on the
+    other branch, whose fix it already has.
+    """
+    old_dist = _dist_tag(old.get("release"))
+    for b in nvrs or []:
+        parts = (b or "").rsplit("-", 2)
+        if len(parts) != 3:
+            continue
+        bn, bv, br = parts
+        # Bodhi names the source build; accept it for this binary or its source
+        if bn != new["name"] and bn != new.get("src"):
+            continue
+        if not old_dist or _dist_tag(br) != old_dist:
+            continue
+        by_src = bn != new["name"]
+        if (_is_behind(old, bv, br, use_build_evr=by_src)
+                and not _is_behind(new, bv, br, use_build_evr=by_src)):
+            return b
+    return None
+
+
 def classify_order(changed: list) -> list:
     """Changed packages in the order their errata should be looked up.
 
@@ -1591,6 +1627,9 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
             # errata that only matched the OLD build: fixes the user already has.
             # Kept separate so they can never inflate the verdict for this update.
             "already_had": [], "not_pushed": [],
+            # security errata of builds the update passes over (old < build <=
+            # new): in neither image, yet their fixes arrive with the new build
+            "passed_over": [],
             "changelog_scan": {"new_total": 0, "new_scanned": 0,
                                "dropped_total": 0, "dropped_scanned": 0,
                                "retained_total": 0, "retained_scanned": 0}}
@@ -1666,9 +1705,25 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
             hit_attached = exact_new & nvrs
             hit_corresponding = norm_new & nvrs
             hit_old = old_all & nvrs
-            if not (hit_attached or hit_corresponding or hit_old):
-                continue
             status = (u.get("status") or "").lower()
+            if not (hit_attached or hit_corresponding or hit_old):
+                # In neither image, so its erratum matches neither side - but an
+                # update that passes over this build (curl 8.9.0 -> 8.9.3, past
+                # the security erratum of 8.9.1) gains its fix all the same, and
+                # only a CVE id in the rpm changelog could say so before.
+                passed = _passed_build(old, new, u["nvrs"]) if old else None
+                if passed and u.get("type") == "security" and status in PUSHED_STATUSES:
+                    info["passed_over"].append(
+                        {"alias": u["alias"], "severity": u.get("severity"),
+                         "nvr": passed})
+                    info["security"] = True
+                    info["cves"].update(u.get("cves") or ())
+                    info["severities"].append((u.get("severity") or "").lower())
+                    info["why"].append(
+                        f"erratum/勘误 {u['alias']}: type=security "
+                        f"severity={u.get('severity')} status={status} (for {passed}, "
+                        f"a build this update passes over / 本次更新越过的构建)")
+                continue
             # An erratum that already matched the OLD build (including when both
             # builds are .secureblue.N rebuilds of the same Fedora NVR, or only
             # the epoch changed) is a fix the user already has. Recording its
@@ -2086,6 +2141,8 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             return "security erratum 安全勘误"
         if g.get("advisory_corresponding"):
             return "corresponding Fedora erratum 对应 Fedora 勘误（归一化匹配）"
+        if g.get("passed_over"):
+            return "security erratum of a passed-over build 被越过构建的安全勘误"
         return "changelog CVE 更新日志 CVE"
 
     moved_names = {c["name"] for c in diff["changed"] if c.get("dir") != "downgrade"}
@@ -2453,7 +2510,7 @@ def group_by_src(changed: list) -> list:
                                "downgrade": False, "has_security_erratum": False,
                                "advisory_corresponding": False,
                                "erratum_severity": "",
-                               "already_had": [], "unreleased": []}
+                               "already_had": [], "unreleased": [], "passed_over": []}
         g["pkgs"].append(c)
         cls = c.get("cls") or {}
         g["security"] = g["security"] or bool(cls.get("security"))
@@ -2487,6 +2544,9 @@ def group_by_src(changed: list) -> list:
         for a in cls.get("not_pushed") or []:
             if a not in g["unreleased"]:
                 g["unreleased"].append(a)
+        for a in cls.get("passed_over") or []:
+            if a not in g["passed_over"]:
+                g["passed_over"].append(a)
         # `.get`, like every other consumer of this structure: a change entry
         # built without "dir" crashed here with a KeyError while
         # secureblue_notification() happily accepted the same data.
@@ -4100,6 +4160,7 @@ def cmd_diff(args):
                                     "aliases": (c.get("cls") or {}).get("aliases", []),
                                     "already_had": (c.get("cls") or {}).get("already_had", []),
                                     "not_pushed": (c.get("cls") or {}).get("not_pushed", []),
+                                    "passed_over": (c.get("cls") or {}).get("passed_over", []),
                                     "why": (c.get("cls") or {}).get("why", [])}
                                    for c in res["diff"]["changed"]],
                        "silent_rebuilds": xc.get("silent_rebuilds", []),
