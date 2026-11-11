@@ -3179,6 +3179,28 @@ class TestTagsProbeIncludesToday(unittest.TestCase):
         self.assertEqual(probed, ["20260919", "20260918", "20260917"])
 
 
+class TestMultiArchIndexAnnotations(unittest.TestCase):
+    def test_index_and_descriptor_annotations_survive_light_resolve(self):
+        idx = json.dumps({
+            "annotations": {"org.opencontainers.image.version": "44.20260917.0"},
+            "manifests": [{
+                "digest": "sha256:" + "b" * 64,
+                "platform": {"architecture": "amd64", "os": "linux"},
+                "annotations": {"org.opencontainers.image.created": "2026-09-17T12:00:00.123Z"},
+            }],
+        }).encode()
+        plat = json.dumps({"layers": [], "annotations": {"ostree.linux": "7.2.6"}}).encode()
+        reg = S.Registry("secureblue/x", arch="amd64")
+        reg._open = lambda path, accept: TestTagLabelCostsOneRequest._Resp(
+            {"Docker-Content-Digest": "sha256:" + "a" * 64,
+             "Content-Type": "application/vnd.oci.image.index.v1+json"}, idx)
+        reg.get = lambda path, accept: plat
+        out = reg.resolve("latest", light=True)
+        self.assertEqual(out["annotations"]["org.opencontainers.image.version"], "44.20260917.0")
+        self.assertEqual(out["annotations"]["ostree.linux"], "7.2.6")
+        self.assertEqual(out["created"], "2026-09-17T12:00:00Z")
+
+
 class TestRegistrySplit(unittest.TestCase):
     def test_tag_plus_digest_strips_the_tag_from_repo(self):
         dig = "sha256:" + "a" * 64

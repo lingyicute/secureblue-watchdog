@@ -715,6 +715,7 @@ class Registry:
         man = json.loads(raw)
         out = {"ref": what, "index_digest": top_digest, "mediaType": ctype,
                "is_index": "index" in ctype or "manifests" in man}
+        ann = dict(man.get("annotations") or {})
         if "index" in ctype or "manifests" in man:
             pick = None
             for m in man.get("manifests", []):
@@ -725,12 +726,13 @@ class Registry:
             if pick is None:
                 raise NoArchManifest(T(f"no {self.arch} manifest in {self.repo}:{what}",
                                        f"{self.repo}:{what} 中没有 {self.arch} 架构的 manifest"))
+            ann.update(dict(pick.get("annotations") or {}))
             man = json.loads(self.get(f"manifests/{pick['digest']}", MANIFEST_ACCEPT))
             out["digest"] = pick["digest"]
+            ann.update(dict(man.get("annotations") or {}))
         else:
             out["digest"] = top_digest
         out["manifest"] = man
-        ann = dict(man.get("annotations") or {})
         cfg = {}
         if not light:
             cfg = json.loads(self.get(f"blobs/{man['config']['digest']}",
