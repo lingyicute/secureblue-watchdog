@@ -749,6 +749,15 @@ class Registry:
                       f"  ！{self.host} 的 Bearer challenge 没有 realm——将以未认证方式继续"))
                 self._tok = ""
                 return None
+            # The realm is whatever the registry sent, and urlopen() opens file:
+            # and ftp: URLs too: a hostile registry could have a local JSON file
+            # read and its "token" handed back in the next Authorization header.
+            if not re.match(r"https?://", realm, re.I):
+                log(T(f"  ! {self.host} names a token realm that is not http(s) - "
+                      f"continuing unauthenticated",
+                      f"  ！{self.host} 给出的 token realm 不是 http(s)——将以未认证方式继续"))
+                self._tok = ""
+                return None
             q = {"service": parts.get("service", ""),
                  "scope": f"repository:{self.repo}:pull"}
             url = realm + "?" + urllib.parse.urlencode({k: v for k, v in q.items() if v})
