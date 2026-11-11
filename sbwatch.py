@@ -399,25 +399,28 @@ class _CappedReader:
         return self._sha.hexdigest()
 
 
-def verify_cosign_image(full_ref: str, pubkey_path: str, require: bool = False) -> bool:
+def verify_cosign_image(full_ref: str, pubkey_path: str,
+                        require: bool = False) -> bool | None:
     """
     P0: optional cosign signature verification.
     full_ref = host/repo@sha256:digest or host/repo:tag
-    Returns True if verified, False if skipped/failed (and not required).
-    Raises SystemExit if require=True and verification fails.
+    Returns True if verified, False if cosign rejected the signature, and None
+    if the check could not be run at all (no key, no cosign binary, timeout): a
+    check that never ran must not be reported as a failed signature.
+    Raises SystemExit instead of returning False/None if require=True.
     """
     if not pubkey_path:
         if require:
             raise SystemExit(T("--require-cosign requires --cosign-pub",
                                "--require-cosign 必须同时提供 --cosign-pub"))
-        return False
+        return None
     if not os.path.exists(pubkey_path):
         msg = T(f"cosign pubkey not found: {pubkey_path}",
                 f"找不到 cosign 公钥：{pubkey_path}")
         if require:
             raise SystemExit(msg)
         log(f"  ! {msg} - skipping verification / 跳过校验")
-        return False
+        return None
     cosign_bin = shutil.which("cosign")
     if not cosign_bin:
         msg = T("cosign binary not found in PATH - install sigstore/cosign to enable verification",
@@ -425,7 +428,7 @@ def verify_cosign_image(full_ref: str, pubkey_path: str, require: bool = False) 
         if require:
             raise SystemExit(msg)
         log(f"  ! {msg} - skipping / 跳过")
-        return False
+        return None
     # secureblue publishes cosign.pub at https://github.com/secureblue/secureblue/blob/live/cosign.pub
     cmd = [cosign_bin, "verify", "--key", pubkey_path, full_ref]
     log(T(f"  verifying {full_ref} with cosign...",
@@ -450,14 +453,14 @@ def verify_cosign_image(full_ref: str, pubkey_path: str, require: bool = False) 
         if require:
             raise SystemExit(msg)
         log(f"  ! {msg}")
-        return False
+        return None
     except Exception as e:
         msg = T(f"cosign verify error: {e}",
                 f"cosign 校验出错：{e}")
         if require:
             raise SystemExit(msg)
         log(f"  ! {msg}")
-        return False
+        return None
 
 
 # (full ref, key path, required) -> what verify_cosign_image() said in this run
@@ -504,12 +507,21 @@ def maybe_verify_resolved(reg: Registry, resolved: dict, args, notes: list | Non
         _COSIGN_RESULTS[key] = verify_cosign_image(full_ref, pub, require=req)
     ok = _COSIGN_RESULTS[key]
     if notes is not None:
+        if ok:
+            en, zh = "PASSED", "通过"
+        elif ok is None:
+            # cosign missing, key unreadable, timeout: nothing was verified, which
+            # is not the same statement as "the signature is bad"
+            en = "NOT RUN (tolerated: cosign could not run or did not finish - see the log)"
+            zh = "未执行（已被容忍：cosign 无法运行或未完成，见日志）"
+        else:
+            en, zh = "FAILED (tolerated)", "失败（已被容忍）"
         notes.append(T(
-            f"signature check: {'PASSED' if ok else 'FAILED (tolerated)'} - "
+            f"signature check: {en} - "
             f"cosign verify --key {os.path.basename(pub)} {shortref(digest)}",
-            f"签名校验：{'通过' if ok else '失败（已被容忍）'}——"
+            f"签名校验：{zh}——"
             f"cosign verify --key {os.path.basename(pub)} {shortref(digest)}"))
-    return ok
+    return bool(ok)
 
 
 # --------------------------------------------------------------------------- #
