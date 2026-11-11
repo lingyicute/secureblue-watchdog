@@ -950,43 +950,71 @@ class Registry:
             return None
 
         try:
-            with tarfile.open(blob_path) as tf:
-                chosen, target = pick_tar_member(tf, match, d)
-            if chosen is None and target:      # the entry is a symlink into the layer
+            try:
                 with tarfile.open(blob_path) as tf:
-                    chosen = scan_target(tf, target)
-        except tarfile.TarError as e:
-            raise SystemExit(T(f"not a readable tar (layer {d}): {e}",
-                               f"无法解析 tar（层 {d}）：{e}")) from None
-        if chosen is None:
-            raise SystemExit(T(f"'{match}' not found in layer {d}",
-                               f"在层 {d} 中找不到 '{match}'"))
-        if chosen.size > MAX_TAR_FILE_SIZE:
-            raise SystemExit(T(
-                f"tar member {chosen.name} size {human(chosen.size)} > "
-                f"{human(MAX_TAR_FILE_SIZE)} limit",
-                f"tar 成员 {chosen.name} 大小 {human(chosen.size)} 超过 "
-                f"{human(MAX_TAR_FILE_SIZE)} 限制"))
-        with tarfile.open(blob_path) as tf:
-            f = tf.extractfile(chosen)
-            if f is None:
-                raise SystemExit(T("unreadable tar member", "无法读取的 tar 成员"))
-            total_written = 0
-            with open(dest, "wb") as o:
-                while True:
-                    chunk = f.read(1 << 20)
-                    if not chunk:
-                        break
-                    total_written += len(chunk)
-                    if total_written > MAX_TAR_FILE_SIZE:
-                        raise SystemExit(T(f"extracted file > {human(MAX_TAR_FILE_SIZE)} limit",
-                                           f"解出的文件超过 {human(MAX_TAR_FILE_SIZE)} 限制"))
-                    o.write(chunk)
-        try:
-            os.unlink(blob_path)
-        except OSError:
-            pass
+                    chosen, target = pick_tar_member(tf, match, d)
+                if chosen is None and target:      # the entry is a symlink into the layer
+                    with tarfile.open(blob_path) as tf:
+                        chosen = scan_target(tf, target)
+            except tarfile.TarError as e:
+                raise SystemExit(T(f"not a readable tar (layer {d}): {e}",
+                                   f"无法解析 tar（层 {d}）：{e}")) from None
+            if chosen is None:
+                raise SystemExit(T(f"'{match}' not found in layer {d}",
+                                   f"在层 {d} 中找不到 '{match}'"))
+            if chosen.size > MAX_TAR_FILE_SIZE:
+                raise SystemExit(T(
+                    f"tar member {chosen.name} size {human(chosen.size)} > "
+                    f"{human(MAX_TAR_FILE_SIZE)} limit",
+                    f"tar 成员 {chosen.name} 大小 {human(chosen.size)} 超过 "
+                    f"{human(MAX_TAR_FILE_SIZE)} 限制"))
+            try:
+                with tarfile.open(blob_path) as tf:
+                    f = tf.extractfile(chosen)
+                    if f is None:
+                        raise SystemExit(T("unreadable tar member", "无法读取的 tar 成员"))
+                    total_written = 0
+                    with open(dest, "wb") as o:
+                        while True:
+                            chunk = f.read(1 << 20)
+                            if not chunk:
+                                break
+                            total_written += len(chunk)
+                            if total_written > MAX_TAR_FILE_SIZE:
+                                raise SystemExit(T(f"extracted file > {human(MAX_TAR_FILE_SIZE)} limit",
+                                                   f"解出的文件超过 {human(MAX_TAR_FILE_SIZE)} 限制"))
+                            o.write(chunk)
+            except BaseException:
+                try:
+                    os.unlink(dest)
+                except OSError:
+                    pass
+                raise
+        finally:
+            try:
+                os.unlink(blob_path)
+            except OSError:
+                pass
         return dest
+
+
+def _resolve_tar_link(member_name: str, linkname: str) -> str:
+    """Normalise a tar symlink target inside the archive's root namespace."""
+    link = linkname or ""
+    if link.startswith("."):
+        parent = member_name.rsplit("/", 1)[0] if "/" in member_name else ""
+        joined = f"{parent}/{link}" if parent else link
+        parts: list = []
+        for seg in joined.split("/"):
+            if not seg or seg == ".":
+                continue
+            if seg == "..":
+                if parts:
+                    parts.pop()
+            else:
+                parts.append(seg)
+        return "/".join(parts)
+    return link.lstrip("./")
 
 
 def pick_tar_member(tf, match: str, label: str = ""):
@@ -1014,7 +1042,7 @@ def pick_tar_member(tf, match: str, label: str = ""):
             if best is None or m.size > best.size:
                 best = m
         elif m.issym():
-            target = m.linkname.lstrip("./")
+            target = _resolve_tar_link(nm, m.linkname)
     return best, target
 
 
@@ -1179,47 +1207,50 @@ def package_list(reg: Registry, resolved: dict) -> dict:
             "此镜像中没有独立的 rpmdb chunk（需要 chunkah 'bigfiles' 布局）；"
             "请改用 `layers` 或 --exact 0"))
     path = reg.extract_member(chunk, CHUNK_MATCH)
-    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    con = None
     try:
-        # Iterated, not fetchall()ed: the blobs add up to most of the ~92 MiB
-        # database, and only the one being parsed has to be in memory.
-        rows = con.execute("select blob from Packages")
-    except sqlite3.OperationalError:
-        con.close()
-        raise SystemExit(T("unexpected rpmdb schema (no Packages table)",
-                           "rpmdb 结构不符合预期（没有 Packages 表）"))
-    pkgs = PackageTable()
-    stats: dict = {}
-    for (blob,) in rows:
-        h = read_header(blob, stats)
-        name = h.get("name")
-        if not name or not h.get("version"):
-            continue
-        if name in PSEUDO_PACKAGES:
-            continue
-        srpm = (h.get("sourcerpm") or "").removesuffix(".src.rpm").removesuffix(".nosrc.rpm")
-        src = re.sub(r"-\d[^-]*-[^-]*$", "", srpm) or name
-        times = h.get("changelogtime") or []
-        names = h.get("changelogname") or []
-        texts = h.get("changelogtext") or []
-        if isinstance(texts, str):
-            texts = [texts]
-        if isinstance(names, str):
-            names = [names]
-        chlog = [{"time": (times[i] if i < len(times) else 0),
-                  "who": (names[i] if i < len(names) else ""),
-                  "text": t} for i, t in enumerate(texts)]
-        e = {"name": name, "version": h.get("version", ""), "release": h.get("release", ""),
-             "epoch": h.get("epoch", ""), "arch": h.get("arch", ""), "srpm": srpm, "src": src,
-             "changelog": chlog}
-        e["evr"] = e["version"] + "-" + e["release"]
-        e["nvr"] = f"{name}-{e['version']}-{e['release']}"
-        table_put(pkgs, e)
-    con.close()
-    try:
-        os.unlink(path)
-    except OSError:
-        pass
+        try:
+            con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            # Iterated, not fetchall()ed: the blobs add up to most of the ~92 MiB
+            # database, and only the one being parsed has to be in memory.
+            rows = con.execute("select blob from Packages")
+            pkgs = PackageTable()
+            stats: dict = {}
+            for (blob,) in rows:
+                h = read_header(blob, stats)
+                name = h.get("name")
+                if not name or not h.get("version"):
+                    continue
+                if name in PSEUDO_PACKAGES:
+                    continue
+                srpm = (h.get("sourcerpm") or "").removesuffix(".src.rpm").removesuffix(".nosrc.rpm")
+                src = re.sub(r"-\d[^-]*-[^-]*$", "", srpm) or name
+                times = h.get("changelogtime") or []
+                names = h.get("changelogname") or []
+                texts = h.get("changelogtext") or []
+                if isinstance(texts, str):
+                    texts = [texts]
+                if isinstance(names, str):
+                    names = [names]
+                chlog = [{"time": (times[i] if i < len(times) else 0),
+                          "who": (names[i] if i < len(names) else ""),
+                          "text": t} for i, t in enumerate(texts)]
+                e = {"name": name, "version": h.get("version", ""), "release": h.get("release", ""),
+                     "epoch": h.get("epoch", ""), "arch": h.get("arch", ""), "srpm": srpm, "src": src,
+                     "changelog": chlog}
+                e["evr"] = e["version"] + "-" + e["release"]
+                e["nvr"] = f"{name}-{e['version']}-{e['release']}"
+                table_put(pkgs, e)
+        except sqlite3.DatabaseError:
+            raise SystemExit(T("unexpected rpmdb schema (no Packages table)",
+                               "rpmdb 结构不符合预期（没有 Packages 表）")) from None
+    finally:
+        if con is not None:
+            con.close()
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
     pkgs.headers_rejected = stats.get("headers_rejected", 0)
     pkgs.fields_skipped = stats.get("fields_skipped", 0)
     return pkgs
