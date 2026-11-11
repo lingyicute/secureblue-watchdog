@@ -2812,11 +2812,19 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W("")
         for g in g_down:
             pkgs_label = f"{len(g['pkgs'])} 个包" if is_zh else f"{len(g['pkgs'])} package(s)"
-            if g["security"] and g["aliases"]:
+            # What a downgrade reverts is the erratum of the build it moves AWAY
+            # from, i.e. one that matched the old build (`already_had`). `aliases`
+            # are the errata of the older build it moves back to, and naming
+            # those here blamed the revert on the wrong erratum.
+            reverted = list(dict.fromkeys(
+                x["alias"] for x in g.get("already_had") or []
+                if x.get("alias") and x.get("type") == "security"
+                and (x.get("status") or "").lower() in PUSHED_STATUSES))
+            if reverted:
                 rev = (f" — 这会*回退*已发布的勘误: "
-                       f"{clip_list(g['aliases'], 2, lang='zh', joiner='，')}" if is_zh
+                       f"{clip_list(reverted, 2, lang='zh', joiner='，')}" if is_zh
                        else f" — this *reverts* a published erratum: "
-                            f"{clip_list(g['aliases'], 2)}")
+                            f"{clip_list(reverted, 2)}")
             else:
                 rev = ""
             W(f"- **{g['src']}**: {g['old_evr']} → {g['new_evr']} ({pkgs_label}){rev}")
