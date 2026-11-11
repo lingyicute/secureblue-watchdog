@@ -99,7 +99,8 @@ BODHI_PAGE_SIZE = 100                       # Bodhi's max rows_per_page
 MAX_BODHI_PAGES = 10                        # 1000 errata/src is far beyond any real case
 BODHI_GIVE_UP_AFTER = 3     # failed lookups in a row before Bodhi counts as down: each
                             # can block for its whole 40 s timeout, and --max-bodhi 80
-                            # of those outlast the workflow's 25-minute limit
+                            # of those outlast the workflow's 25-minute limit. The
+                            # first of a streak is tried twice (Bodhi._fetch_page)
 BODHI_TTL = 6 * 3600        # age at which a cached Bodhi answer is refetched
 NEW_LOG_CAP = 1000  # changelog entries (new in this build) scanned for CVE mentions.
 #                     A guard against a pathological rpmdb, not a tuning knob: the
@@ -1396,6 +1397,37 @@ class Bodhi:
                 pass
             return None
 
+    def _fetch_page(self, url: str, src: str) -> tuple:
+        """One page of /updates/ as (document, updates), validated.
+
+        A failure out of the blue gets a second try. Bodhi takes 20 s for some
+        queries and now and then misses the 40 s timeout, answering the same
+        query moments later - and that one miss put "errata coverage incomplete"
+        into the verdict and raised `skip` to `consider`. Not while a failure
+        streak is running and not past --max-bodhi: with Bodhi down, every
+        further attempt is another timeout to sit through.
+        """
+        retried = False
+        while True:
+            self.calls += 1
+            try:
+                with urllib.request.urlopen(url, timeout=40) as r:
+                    data = json.load(r)
+                if not isinstance(data, dict):
+                    raise ValueError("Bodhi response is not a JSON object")
+                page_ups = data.get("updates", [])
+                if page_ups is not None and (not isinstance(page_ups, list)
+                                             or any(not isinstance(u, dict) for u in page_ups)):
+                    raise ValueError("Bodhi updates must be a list of JSON objects")
+                return data, page_ups or []
+            except Exception as ex:
+                if retried or self._streak or self.calls >= self.max_calls:
+                    raise
+                retried = True
+                log(T(f"  ! bodhi lookup failed for {src} ({ex}) - trying once more",
+                      f"  ！查询 Bodhi 失败：{src}（{ex}）——再试一次"))
+                time.sleep(self.sleep)
+
     def updates_for_src(self, src: str, release: str) -> list:
         """Every Fedora erratum for one source package in one release.
 
@@ -1452,20 +1484,11 @@ class Bodhi:
                       f"  ！Bodhi：{src} 只取到 {total} 条勘误中的 {len(res)} 条时 --max-bodhi "
                       f"已用尽——该包的审计不完整"))
                 break
-            self.calls += 1
             url = f"{self.BASE}/updates/?" + urllib.parse.urlencode(
                 {"packages": src, "releases": release,
                  "rows_per_page": str(BODHI_PAGE_SIZE), "page": str(page)})
             try:
-                with urllib.request.urlopen(url, timeout=40) as r:
-                    data = json.load(r)
-                if not isinstance(data, dict):
-                    raise ValueError("Bodhi response is not a JSON object")
-                page_ups = data.get("updates", [])
-                if page_ups is not None and (not isinstance(page_ups, list)
-                                             or any(not isinstance(u, dict) for u in page_ups)):
-                    raise ValueError("Bodhi updates must be a list of JSON objects")
-                page_ups = page_ups or []
+                data, page_ups = self._fetch_page(url, src)
             except Exception as ex:
                 self.failed += 1
                 log(T(f"  ! bodhi lookup failed for {src} (page {page}): {ex}",

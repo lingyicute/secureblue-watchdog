@@ -3501,14 +3501,16 @@ class TestBodhiGivesUpWhenItIsDown(unittest.TestCase):
     def test_stops_asking_after_consecutive_failures_but_counts_them(self):
         b, calls, fake = self._bodhi([False])
         self._ask(b, fake, 8)
-        self.assertEqual(len(calls), S.BODHI_GIVE_UP_AFTER)
+        # one more than the limit: only the first failure of a streak is retried
+        self.assertEqual(len(calls), S.BODHI_GIVE_UP_AFTER + 1)
         self.assertTrue(b.down)
         self.assertEqual(b.failed, 8)      # coverage gap stays visible in the verdict
 
     def test_a_success_in_between_resets_the_streak(self):
-        b, calls, fake = self._bodhi([False, False, True, False, False, True])
+        # per lookup: fail + retry, fail, ok, fail + retry, fail, ok
+        b, calls, fake = self._bodhi([False, False, False, True, False, False, False, True])
         self._ask(b, fake, 6)
-        self.assertEqual(len(calls), 6)
+        self.assertEqual(len(calls), 8)
         self.assertFalse(b.down)
         self.assertEqual(b.failed, 4)
 
