@@ -2891,7 +2891,7 @@ def coverage_line(cov: dict) -> str:
           + (f", {cov['skipped']} were cut off by --backlog-candidates "
              f"({clip_list(cov.get('skipped_names', []), 6)})"
              if cov.get("skipped") else "")
-          + (f"; {cov['pool_missing'] and len(cov['pool_missing'])} BACKLOG_POOL entries are not "
+          + (f"; {len(cov['pool_missing'])} BACKLOG_POOL entries are not "
              f"in this image" if cov.get("pool_missing") else ""))
     zh = (f"backlog 审计覆盖率：镜像内 {cov['candidates']} 个候选源码包中查询了 {cov['checked']} 个"
           + (f"，{cov['skipped']} 个因 --backlog-candidates 上限被截断"
