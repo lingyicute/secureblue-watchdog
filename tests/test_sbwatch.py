@@ -2539,9 +2539,11 @@ class TestPackageListStreamsTheRpmdb(unittest.TestCase):
     most of the ~92 MiB database and only the one being parsed has to be in memory."""
 
     @staticmethod
-    def _blob(name, version):
+    def _blob(name, version, sourcerpm=None):
         import struct
         ents = [(1000, name), (1001, version), (1002, "1.fc44"), (1022, "x86_64")]
+        if sourcerpm:
+            ents.append((1044, sourcerpm))
         store, index = b"", b""
         for tag, val in ents:
             index += struct.pack(">IIII", tag, 6, len(store), 1)
@@ -2555,7 +2557,7 @@ class TestPackageListStreamsTheRpmdb(unittest.TestCase):
         if create:
             con.execute("create table Packages (hnum integer primary key, blob blob)")
             con.executemany("insert into Packages (blob) values (?)",
-                            [(self._blob("foo", "1.0"),), (self._blob("bar", "2.0"),)])
+                            [(self._blob("foo", "1.0", "foo-1.0-1.fc44.nosrc.rpm"),), (self._blob("bar", "2.0"),)])
         else:
             con.execute("create table Other (x)")
         con.commit()
@@ -2614,6 +2616,8 @@ class TestPackageListStreamsTheRpmdb(unittest.TestCase):
         pkgs, spy, still_there = self._run()
         self.assertEqual(sorted(pkgs), ["bar", "foo"])
         self.assertEqual(pkgs["foo"]["evr"], "1.0-1.fc44")
+        self.assertEqual(pkgs["foo"]["srpm"], "foo-1.0-1.fc44")
+        self.assertEqual(pkgs["foo"]["src"], "foo")
         self.assertTrue(spy.closed)
         self.assertFalse(still_there, "the extracted rpmdb must be deleted after parsing")
 
