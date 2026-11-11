@@ -88,6 +88,11 @@ MAX_BLOB_BYTES = 200 * 1024 * 1024          # 200 MiB compressed. Note: this cap
                                             # (initramfs ~235 MiB) - do not use this
                                             # helper on those without raising the cap.
 MAX_DECOMPRESSED_BYTES = 320 * 1024 * 1024  # 320 MiB decompressed (~3.5x live rpmdb)
+MAX_JSON_BYTES = 16 * 1024 * 1024           # 16 MiB for a document parsed in one piece
+                                            # (manifest, image config, tag page, token
+                                            # reply): the live ones stay under 200 KB,
+                                            # and json.loads() of one at the blob cap
+                                            # takes several times that cap in memory
 MAX_TAR_MEMBERS = 10_000
 MAX_TAR_FILE_SIZE = 256 * 1024 * 1024       # 256 MiB single file inside tar
 BODHI_PAGE_SIZE = 100                       # Bodhi's max rows_per_page
@@ -774,7 +779,12 @@ class Registry:
                     # The token spec allows either key ("for compatibility
                     # with OAuth 2.0"), and Azure's registry sends only
                     # `access_token` - which read as "no token" and then as 401.
-                    doc = json.load(r)
+                    # Bounded: the realm is a host of the registry's choosing
+                    # and json.load() would read whatever it sends, to the end.
+                    raw = r.read(MAX_JSON_BYTES + 1)
+                    if len(raw) > MAX_JSON_BYTES:
+                        raise ValueError(f"token reply exceeds {human(MAX_JSON_BYTES)}")
+                    doc = json.loads(raw)
                     tok = doc.get("token") or doc.get("access_token") or ""
             except Exception as e2:
                 log(T(f"  ! token fetch failed: {e2}",
@@ -821,9 +831,13 @@ class Registry:
                                   f"无法连接 {self.host}：{e}")) from None
 
     def _read_all(self, resp, what: str) -> bytes:
-        """Read a whole (small) document, with the same cap as blob downloads."""
+        """Read a whole JSON document (manifest, image config, tag page).
+
+        Capped at MAX_JSON_BYTES rather than at the blob cap: unlike a blob, which
+        is streamed to disk, this is held in memory and parsed in one piece.
+        """
         try:
-            return _safe_read_limited(resp, MAX_BLOB_BYTES)
+            return _safe_read_limited(resp, MAX_JSON_BYTES)
         except SystemExit:
             raise
         except Exception as e:
@@ -835,7 +849,7 @@ class Registry:
 
     def get(self, path: str, accept: str) -> bytes:
         with self._open(path, accept) as r:
-            # manifest is small, blobs can be large - enforce same limit for safety.
+            # Manifests and image configs only - layers go through fetch_blob().
             # Through _read_all(): a timeout / reset / IncompleteRead while reading
             # the body escaped from here as a bare traceback.
             return self._read_all(r, f"{self.repo}/{path}")
