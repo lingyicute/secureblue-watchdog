@@ -90,6 +90,9 @@ MAX_TAR_MEMBERS = 10_000
 MAX_TAR_FILE_SIZE = 256 * 1024 * 1024       # 256 MiB single file inside tar
 BODHI_PAGE_SIZE = 100                       # Bodhi's max rows_per_page
 MAX_BODHI_PAGES = 10                        # 1000 errata/src is far beyond any real case
+BODHI_GIVE_UP_AFTER = 3     # failed lookups in a row before Bodhi counts as down: each
+                            # can block for its whole 40 s timeout, and --max-bodhi 80
+                            # of those outlast the workflow's 25-minute limit
 NEW_LOG_CAP = 40    # changelog entries (new in this build) scanned for CVE mentions
 # Display caps. These are the only places allowed to shorten a rendered list, and
 # each one must go through clip_list()/clip_text() so the loss is stated and
@@ -1103,6 +1106,8 @@ class Bodhi:
         self.failed = 0          # queries that errored => verdict must not claim "clean"
         self.skipped = 0         # queries we never made because of --max-bodhi
         self.truncated_src = set()   # srcs where we could not read every erratum
+        self._streak = 0         # failed queries in a row
+        self.down = False        # set after BODHI_GIVE_UP_AFTER of them: stop asking
         if cache_dir:
             os.makedirs(cache_dir, exist_ok=True)
 
@@ -1168,6 +1173,12 @@ class Bodhi:
                 if cached.get("truncated"):
                     self.truncated_src.add(src)
                 return cached["updates"]
+        if self.down:
+            # Not attempted, but counted as failed (once per source package): the
+            # verdict must still say that the errata coverage is incomplete.
+            self.failed += 1
+            self._mem[key] = {"total": None, "truncated": False, "updates": []}
+            return []
         if self.calls >= self.max_calls:
             self.skipped += 1
             return []
@@ -1199,9 +1210,18 @@ class Bodhi:
                 self.failed += 1
                 log(T(f"  ! bodhi lookup failed for {src} (page {page}): {ex}",
                       f"  ！查询 Bodhi 失败：{src}（第 {page} 页）：{ex}"))
+                self._streak += 1
+                if self._streak >= BODHI_GIVE_UP_AFTER:
+                    self.down = True
+                    log(T(f"  ! bodhi: {self._streak} lookups in a row failed - treating "
+                          f"Bodhi as unreachable, the remaining lookups of this run are "
+                          f"not attempted (they count as failed)",
+                          f"  ！Bodhi：连续 {self._streak} 次查询失败——视为不可用，"
+                          f"本次运行不再尝试其余查询（计为失败）"))
                 ok = False
                 break
             ok = True
+            self._streak = 0
             total = data.get("total", total)
             page_ups = data.get("updates", []) or []
             for u in page_ups:

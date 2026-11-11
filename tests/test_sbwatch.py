@@ -3439,5 +3439,48 @@ class TestCheckSurvivesAPrunedBaseline(unittest.TestCase):
             self._run(500)
 
 
+class TestBodhiGivesUpWhenItIsDown(unittest.TestCase):
+    """Every failed lookup can block for the full 40 s timeout. With Bodhi down,
+    --max-bodhi 80 of them (53 minutes) outlasted the workflow's 25-minute limit,
+    so the run was killed before it could report anything."""
+
+    def _bodhi(self, outcomes):
+        calls = []
+
+        def fake(url, timeout=None):
+            calls.append(url)
+            if not outcomes[min(len(calls), len(outcomes)) - 1]:
+                raise OSError("timed out")
+            return _FakeResp(json.dumps({"total": 0, "updates": []}).encode())
+
+        b = S.Bodhi(cache_dir=None, sleep=0)
+        return b, calls, fake
+
+    def _ask(self, b, fake, n):
+        import contextlib
+        saved = S.urllib.request.urlopen
+        S.urllib.request.urlopen = fake
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                for i in range(n):
+                    self.assertEqual(b.updates_for_src(f"src{i}", "F44"), [])
+        finally:
+            S.urllib.request.urlopen = saved
+
+    def test_stops_asking_after_consecutive_failures_but_counts_them(self):
+        b, calls, fake = self._bodhi([False])
+        self._ask(b, fake, 8)
+        self.assertEqual(len(calls), S.BODHI_GIVE_UP_AFTER)
+        self.assertTrue(b.down)
+        self.assertEqual(b.failed, 8)      # coverage gap stays visible in the verdict
+
+    def test_a_success_in_between_resets_the_streak(self):
+        b, calls, fake = self._bodhi([False, False, True, False, False, True])
+        self._ask(b, fake, 6)
+        self.assertEqual(len(calls), 6)
+        self.assertFalse(b.down)
+        self.assertEqual(b.failed, 4)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
