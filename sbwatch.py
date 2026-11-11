@@ -1443,7 +1443,9 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                 # hands to rpm-ostree.
                 if attached:
                     info["has_security_erratum"] = True
-                    info["erratum_severity"] = bodhi_severity_as_updateinfo(u.get("severity"))
+                    cand = bodhi_severity_as_updateinfo(u.get("severity"))
+                    if _sev_rank_for_upstream(cand) > _sev_rank_for_upstream(info["erratum_severity"]):
+                        info["erratum_severity"] = cand
                     info["why"].append(
                         f"erratum/勘误 {u['alias']}: type=security "
                         f"severity={u.get('severity')} status={status}")
