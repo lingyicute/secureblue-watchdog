@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+# written by `check` into the working directory
+report.md
+report.md.json
