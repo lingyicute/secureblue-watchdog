@@ -277,6 +277,25 @@ def _safe_read_limited(resp, limit: int) -> bytes:
     return b"".join(chunks)
 
 
+def check_digest(actual_hex: str, digest: str, what: str) -> None:
+    """Abort unless content that was fetched by digest hashes to that digest.
+
+    A digest is a promise about bytes, and cosign signs the digest only: without
+    hashing what the registry actually sent, "signature check: PASSED" vouched for
+    a name while the manifest, the config and the rpmdb blob the report is
+    computed from were taken on trust. Only sha256 is compared (the one algorithm
+    registries use in practice); a tag or another algorithm is left alone.
+    """
+    algo, _, want = str(digest or "").partition(":")
+    if algo != "sha256" or not want or actual_hex == want.lower():
+        return
+    raise SystemExit(T(
+        f"digest mismatch for {what}: expected sha256:{want}, the content hashes to "
+        f"sha256:{actual_hex} - refusing to analyse data the registry altered",
+        f"{what} 的 digest 不匹配：应为 sha256:{want}，实际内容为 "
+        f"sha256:{actual_hex}——拒绝分析被 registry 改动过的数据"))
+
+
 class RegistryError(SystemExit):
     """A registry failure that is fatal but already carries a bilingual message.
 
@@ -310,6 +329,7 @@ class _CappedReader:
         self._r, self._limit, self._label = resp, limit, label
         self._n = 0
         self._buf = b""
+        self._sha = hashlib.sha256()          # of every byte handed out so far
 
     def peek(self, size: int) -> bytes:
         if len(self._buf) < size:
@@ -319,6 +339,7 @@ class _CappedReader:
     def _read(self, size: int) -> bytes:
         b = self._r.read(size)
         self._n += len(b)
+        self._sha.update(b)
         if self._n > self._limit:
             raise SystemExit(T(
                 f"blob {self._label} exceeded {human(self._limit)} while downloading - "
@@ -336,6 +357,10 @@ class _CappedReader:
                 return out[:size]
             return out + self._read(size - len(out))
         return self._read(size)
+
+    def hexdigest(self) -> str:
+        """sha256 of the bytes read so far - of the whole blob once read() hit EOF."""
+        return self._sha.hexdigest()
 
 
 def verify_cosign_image(full_ref: str, pubkey_path: str, require: bool = False) -> bool:
@@ -714,8 +739,13 @@ class Registry:
             raw = self._read_all(r, f"manifest {what}")
             top_digest = r.headers.get("Docker-Content-Digest") or ""
             ctype = r.headers.get("Content-Type", "")
+        actual = hashlib.sha256(raw).hexdigest()
+        # both the digest that was asked for and the one the registry announced
+        # have to be the digest of the bytes that were read
+        check_digest(actual, what, f"manifest {clip_hash(what, 19)}")
+        check_digest(actual, top_digest, f"manifest {what}")
         if not top_digest:
-            top_digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+            top_digest = "sha256:" + actual
         man = json.loads(raw)
         out = {"ref": what, "index_digest": top_digest, "mediaType": ctype,
                "is_index": "index" in ctype or "manifests" in man}
@@ -731,7 +761,10 @@ class Registry:
                 raise NoArchManifest(T(f"no {self.arch} manifest in {self.repo}:{what}",
                                        f"{self.repo}:{what} 中没有 {self.arch} 架构的 manifest"))
             ann.update(dict(pick.get("annotations") or {}))
-            man = json.loads(self.get(f"manifests/{pick['digest']}", MANIFEST_ACCEPT))
+            raw = self.get(f"manifests/{pick['digest']}", MANIFEST_ACCEPT)
+            check_digest(hashlib.sha256(raw).hexdigest(), pick["digest"],
+                         f"manifest {clip_hash(pick['digest'], 19)}")
+            man = json.loads(raw)
             out["digest"] = pick["digest"]
             ann.update(dict(man.get("annotations") or {}))
         else:
@@ -739,8 +772,11 @@ class Registry:
         out["manifest"] = man
         cfg = {}
         if not light:
-            cfg = json.loads(self.get(f"blobs/{man['config']['digest']}",
-                                      "application/vnd.oci.image.config.v1+json"))
+            raw = self.get(f"blobs/{man['config']['digest']}",
+                           "application/vnd.oci.image.config.v1+json")
+            check_digest(hashlib.sha256(raw).hexdigest(), man["config"]["digest"],
+                         f"image config {clip_hash(man['config']['digest'], 19)}")
+            cfg = json.loads(raw)
             ann.update(dict((cfg.get("config") or {}).get("Labels") or {}))
         out["config"] = cfg
         out["annotations"] = ann
@@ -789,11 +825,16 @@ class Registry:
                                 f"层解压后超过 {human(MAX_DECOMPRESSED_BYTES)} 限制——"
                                 f"疑似 zip 炸弹（层 {d}）"))
                         o.write(chunk)
+                # gzip stops at its end-of-stream marker; whatever follows is
+                # still part of the blob that the digest is a digest of
+                while src.read(1 << 20):
+                    pass
             except SystemExit:
                 raise
             except (OSError, gzip.BadGzipFile, EOFError, zlib.error) as e:
                 raise SystemExit(T(f"failed to read/decompress layer {d}: {e}",
                                    f"读取/解压层 {d} 失败：{e}")) from None
+            check_digest(src.hexdigest(), digest, f"layer {d}")
         return dest
 
     def extract_member(self, layer: dict, match: str) -> str:
