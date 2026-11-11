@@ -3850,10 +3850,31 @@ def cmd_check(args):
                 f"因此基线只能取自状态文件 / 日期标签"))
 
     ref_a, label_a = args.a, args.a
+    prev = None
+    state_lost = False
     if not ref_a and state.get("digest") and state["digest"] != cur["digest"]:
-        ref_a = state["digest"]
-        label_a = clip_text(state.get("version") or state.get("created") or state["digest"],
-                            26, lang="both")
+        # Resolved here, before the baseline is settled: the image analysed last
+        # time can be gone by now (registries prune old builds, and a schedule
+        # that was paused long enough comes back to exactly that). Its 404 used
+        # to end the run before the state was rewritten, so every later run died
+        # on the same digest until someone deleted the cache by hand.
+        try:
+            prev = resolve(reg, state["digest"])
+        except RegistryError as e:
+            if e.http_code != 404:
+                raise
+            state_lost = True
+            msg = T(f"the image analysed last time ({shortref(state['digest'])}) is no "
+                    f"longer in the registry, so the baseline was chosen from the build "
+                    f"history / dated tags instead",
+                    f"上次分析的镜像（{shortref(state['digest'])}）已不在 registry 中，"
+                    f"因此基线改由构建历史 / 日期标签选出")
+            log("  ! " + msg)
+            hist_warnings.append(msg)
+        else:
+            ref_a = state["digest"]
+            label_a = clip_text(state.get("version") or state.get("created")
+                                or state["digest"], 26, lang="both")
     if not ref_a and hist:
         # build_history rows carry the *index* digest in "digest"; comparing that
         # against cur["digest"] (the platform digest) never matched, so the current
@@ -3899,7 +3920,8 @@ def cmd_check(args):
     # Resolve the baseline exactly once and hand it to do_diff. Resolving the same
     # tag twice was a TOCTOU window (a new push in between would make us analyse a
     # different image than the one we then record in state) and ran cosign twice.
-    prev = resolve(reg, ref_a)
+    if prev is None:
+        prev = resolve(reg, ref_a)
     # Rebuild-only fast path.  The signal must be the rpmdb chunk's own digest:
     # identical blob => identical rpmdb.sqlite => pkg_diff() is necessarily empty.
     #
@@ -3940,7 +3962,8 @@ def cmd_check(args):
     # difference between "nothing else was pushed" and "I could not ask".
     res["notes"].extend(hist_warnings)
     v = res["verdict"]
-    seen = state.get("created") or ""
+    # (a baseline that had to be replaced is not "your last image" any more)
+    seen = "" if state_lost else (state.get("created") or "")
     if seen:
         uniq, minutes = [], set()
         for r in sorted(hist, key=lambda x: x.get("created") or ""):
