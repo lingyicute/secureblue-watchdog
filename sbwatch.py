@@ -3200,7 +3200,22 @@ def tag_exists(reg: Registry, tag: str, warn: list | None = None) -> str | None:
     """
     try:
         with reg._open(f"manifests/{tag}", MANIFEST_ACCEPT) as r:
-            return r.headers.get("Docker-Content-Digest")
+            dig = r.headers.get("Docker-Content-Digest")
+            if dig:
+                return dig
+            # Same fallback as index_digest()/resolve(): a registry that omits
+            # the header still answered 200, and reporting None here made every
+            # dated tag of such a registry read as "no build that day".
+            try:
+                body = reg._read_all(r, f"manifest {tag}")
+            except RegistryError:
+                raise
+            except SystemExit as e:
+                # _read_all() reports a failed read as a bare SystemExit, which
+                # would kill the run here; the contract of this function is that
+                # anything other than a 404 is "unknown" and goes through `warn`.
+                raise RegistryError(str(e.code)) from None
+            return "sha256:" + hashlib.sha256(body).hexdigest()
     except RegistryError as e:
         if e.http_code == 404:
             return None

@@ -2392,6 +2392,30 @@ class TestTagLabelCostsOneRequest(unittest.TestCase):
         self.assertEqual(reg.index_digest("t"),
                          "sha256:" + hashlib.sha256(b'{"manifests": []}').hexdigest())
 
+    def test_tag_exists_hashes_the_manifest_when_the_header_is_missing(self):
+        import hashlib
+        reg = self._reg({"Docker-Content-Digest": self.DIG})
+        self.assertEqual(S.tag_exists(reg, "20260917"), self.DIG)
+        reg = self._reg({}, b'{"manifests": []}')
+        warn = []
+        self.assertEqual(S.tag_exists(reg, "20260917", warn=warn),
+                         "sha256:" + hashlib.sha256(b'{"manifests": []}').hexdigest())
+        self.assertEqual(warn, [])
+
+    def test_tag_exists_warns_instead_of_exiting_when_the_body_read_fails(self):
+        import contextlib
+        import io
+        reg = self._reg({}, b"")
+
+        def broken(resp, what):
+            raise SystemExit("failed reading " + what)
+
+        reg._read_all = broken
+        warn = []
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertIsNone(S.tag_exists(reg, "20260917", warn=warn))
+        self.assertEqual(len(warn), 1)
+
     def test_history_labels_rows_without_resolving_dated_tags(self):
         cur = dict(TestHistoryReusesTheResolvedImage.CUR)
         probed = []
