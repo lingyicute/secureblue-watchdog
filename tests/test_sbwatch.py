@@ -3910,5 +3910,21 @@ class TestChangelogCapsDoNotBiteOnRealChangelogs(unittest.TestCase):
         self.assertGreaterEqual(min(S.NEW_LOG_CAP, S.OLD_LOG_CAP), 2 * 435)
 
 
+class TestAlreadyHadErrataAreNotLabelledAsStaying(unittest.TestCase):
+    def test_line_names_the_old_build_without_claiming_it_stays(self):
+        """`python3.15` (staying at 3.15.0-1.fc45) headed an erratum list for an
+        update that moves python3.15 to 3.15.2."""
+        d = S.pkg_diff({"python3": pkg("python3", "3.15.0-1.fc45", "python3.15")},
+                       {"python3": pkg("python3", "3.15.2-1.fc45", "python3.15")})
+        d["changed"][0]["cls"] = {"already_had": [{"alias": "FEDORA-2026-380e864baa"}]}
+        a = {"ref": "A", "digest": "sha256:" + "a" * 64, "annotations": {}, "layers": []}
+        ld = S.layer_diff(a, a)
+        md = S.render_markdown("t", a, a, d, ld, S.verdict_of(d, ld, {}, {}), [])
+        self.assertIn("- `python3.15` (for 3.15.0-1.fc45, the build you already had): "
+                      "FEDORA-2026-380e864baa", md)
+        self.assertNotIn("staying at", md)
+        self.assertNotIn("停留在", md)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

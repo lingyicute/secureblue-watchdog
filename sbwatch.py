@@ -2730,7 +2730,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             for g in g_had:
                 al = clip_list((x["alias"] for x in g["already_had"]), 4,
                                lang="zh", joiner="，")
-                W(f"- `{g['src']}`（停留在 {g['old_evr']}）: {al}")
+                W(f"- `{g['src']}`（针对你原有的 {g['old_evr']}）: {al}")
         else:
             W(f"## Errata you already had before this update ({len(g_had)})")
             W("")
@@ -2740,7 +2740,9 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("")
             for g in g_had:
                 al = clip_list((x["alias"] for x in g["already_had"]), 4)
-                W(f"- `{g['src']}` (staying at {g['old_evr']}): {al}")
+                # "staying at": the package is in this list because it moves
+                # away from that build, so the old label said the opposite
+                W(f"- `{g['src']}` (for {g['old_evr']}, the build you already had): {al}")
         W("")
 
     g_un = [g for g in groups if g.get("unreleased")]
