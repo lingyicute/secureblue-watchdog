@@ -114,6 +114,7 @@ BODHI_CACHE_VERSION = 2  # v1 clipped bug titles (200) and notes (1500) BEFORE
 #                          extracting CVE ids from them, so a v1 cache can be
 #                          missing CVEs. A cache without this marker is refetched.
 OLD_LOG_CAP = 1000  # changelog entries (dropped by this build) scanned for lost fixes
+RETAINED_LOG_CAP = 1000  # unchanged entries that may still mention a purportedly gained/lost CVE
 TAG_LIST_RETRIES = 4                        # ghcr is flaky on tags/list pagination
 CACHE_KEEP_DAYS = 14        # `check --prune-days`: age at which cache files are dropped
 MANIFEST_ACCEPT = ",".join([
@@ -1490,7 +1491,8 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
             # Kept separate so they can never inflate the verdict for this update.
             "already_had": [], "not_pushed": [],
             "changelog_scan": {"new_total": 0, "new_scanned": 0,
-                               "dropped_total": 0, "dropped_scanned": 0}}
+                               "dropped_total": 0, "dropped_scanned": 0,
+                               "retained_total": 0, "retained_scanned": 0}}
 
     def add_cves(text, into=None):
         for c in find_cves(text):
@@ -1524,13 +1526,21 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
     # rebase (7.2.15 -> 7.3.3: 66 entries "new", 76 "dropped"), which reported
     # CVE-2023-6240 as a fix gained by that update and, in the same headline, as
     # an id the new changelog no longer mentions.
-    both = info["cves"] & info["cves_dropped"]
+    # A repeated mention may only be new/dropped in ONE entry while an
+    # unchanged entry still names it. Include that shared part of the multiset,
+    # not just the intersection of the new and dropped entry scans.
+    retained_entries = _missing_entries(old_log, dropped_entries)
+    retained_cves = {cve for c in retained_entries[:RETAINED_LOG_CAP]
+                     for cve in find_cves(c.get("text"))}
+    both = (info["cves"] & info["cves_dropped"]) | retained_cves
     info["cves"] -= both
     info["cves_dropped"] -= both
     info["changelog_scan"] = {
         "new_total": len(new_entries), "new_scanned": min(len(new_entries), NEW_LOG_CAP),
         "dropped_total": len(dropped_entries),
         "dropped_scanned": min(len(dropped_entries), OLD_LOG_CAP),
+        "retained_total": len(retained_entries),
+        "retained_scanned": min(len(retained_entries), RETAINED_LOG_CAP),
     }
     if info["cves"]:
         info["security"] = True
@@ -3822,16 +3832,18 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
     trunc = []
     for c in diff["changed"]:
         s = (c.get("cls") or {}).get("changelog_scan") or {}
-        if s.get("new_total", 0) > s.get("new_scanned", 0) or \
-           s.get("dropped_total", 0) > s.get("dropped_scanned", 0):
+        if any(s.get(f"{kind}_total", 0) > s.get(f"{kind}_scanned", 0)
+               for kind in ("new", "dropped", "retained")):
             trunc.append(c["name"])
     if trunc:
         notes.append(T(
-            f"changelog scan capped at {NEW_LOG_CAP} new / {OLD_LOG_CAP} dropped entries "
+            f"changelog scan capped at {NEW_LOG_CAP} new / {OLD_LOG_CAP} dropped / "
+            f"{RETAINED_LOG_CAP} retained entries "
             f"per package; {len(trunc)} package(s) had more and were only partially read "
             f"({clip_list(sorted(trunc), 6)}) - CVE mentions "
             f"beyond the cap were NOT read for them",
-            f"更新日志扫描上限为每包 {NEW_LOG_CAP} 条新增 / {OLD_LOG_CAP} 条丢失条目；"
+            f"更新日志扫描上限为每包 {NEW_LOG_CAP} 条新增 / {OLD_LOG_CAP} 条丢失 / "
+            f"{RETAINED_LOG_CAP} 条保留条目；"
             f"{len(trunc)} 个软件包超出上限、只被部分读取"
             f"（{clip_list(sorted(trunc), 6, lang='zh', joiner='，')}）——"
             f"超出部分的 CVE 提及未被读取"))
