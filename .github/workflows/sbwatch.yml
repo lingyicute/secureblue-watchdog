@@ -166,7 +166,10 @@ jobs:
           fi
           echo 'sbwatch exit code: '"$rc"
           echo "fail_on_security=$([ "$rc" = 10 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-          [ -f report.md ] && cat report.md >> "$GITHUB_STEP_SUMMARY"
+          # `if`, not `[ -f ] &&`: as the last command of the script the failed
+          # test became the step's exit status, so a missing report.md turned a
+          # successful analysis red.
+          if [ -f report.md ]; then cat report.md >> "$GITHUB_STEP_SUMMARY"; fi
 
       - name: Save sbwatch cache
         # Not after a `no-update` run: that path writes nothing into the cache
