@@ -3187,6 +3187,15 @@ class TestRegistrySplit(unittest.TestCase):
         self.assertEqual(S.Registry._split(f"ghcr.io/secureblue/x:latest@{dig}"),
                          ("ghcr.io", ("secureblue/x", dig)))
 
+    def test_trailing_colon_defaults_to_latest(self):
+        self.assertEqual(S.Registry._split("secureblue/x:"),
+                         ("ghcr.io", ("secureblue/x", "latest")))
+
+    def test_empty_repo_is_rejected(self):
+        for bad in ("ghcr.io/", "foo/"):
+            with self.assertRaises(SystemExit):
+                S.Registry._split(bad)
+
 
 class TestImageTagIsTheDefaultRef(unittest.TestCase):
     """`--image ns/name:44` parsed the tag into Registry.default_ref and then every
