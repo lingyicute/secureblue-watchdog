@@ -134,7 +134,7 @@ python3 sbwatch.py --help
 sbwatch tags                  # 当前镜像 + 近期 dated tag
 sbwatch history               # 列出最近 N 次真实构建 (通过 sig 标签发现，处理一天多推)
 sbwatch layers A B            # chunk 级别 diff + 预估下载大小
-sbwatch pkgs A                # 某个镜像的精确包列表
+sbwatch pkgs [ref]            # 某个镜像的精确包列表
 sbwatch diff A B              # 精确包 diff + CVE 分类
 sbwatch backlog [ref]         # 这个镜像还缺哪些已发布的 stable 安全更新
                               #   --backlog-candidates N：审计最多看多少个候选源码包（默认 45）
