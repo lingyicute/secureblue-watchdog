@@ -1975,7 +1975,8 @@ class TestFixesThatUsedToBeSilent(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "report.md")
             S._atomic_write_text(path, "hello\n")
-            self.assertEqual(open(path).read(), "hello\n")
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "hello\n")
             self.assertEqual([f for f in os.listdir(d) if "tmp" in f], [])
 
     def test_bodhi_unavailable_is_not_blamed_on_no_bodhi(self):
@@ -2195,7 +2196,8 @@ class TestWorkflowHygiene(unittest.TestCase):
     REPO = os.path.dirname(HERE)
 
     def _workflow(self):
-        return open(os.path.join(self.REPO, ".github", "workflows", "sbwatch.yml")).read()
+        with open(os.path.join(self.REPO, ".github", "workflows", "sbwatch.yml"), encoding="utf-8") as fh:
+            return fh.read()
 
     def test_every_action_is_pinned_to_a_commit_sha(self):
         wf = self._workflow()
@@ -2895,7 +2897,8 @@ class TestClipTextHonoursBoth(unittest.TestCase):
     def test_the_english_half_of_a_note_does_not_carry_chinese(self):
         # cmd_check's "not the only new one" note builds its English half from
         # clip_text(seen, 16); the Chinese half has its own lang='zh' call
-        src = open(os.path.join(os.path.dirname(HERE), "sbwatch.py"), encoding="utf-8").read()
+        with open(os.path.join(os.path.dirname(HERE), "sbwatch.py"), encoding="utf-8") as fh:
+            src = fh.read()
         self.assertNotIn("clip_text(seen, 16, lang='both')", src)
 
 
