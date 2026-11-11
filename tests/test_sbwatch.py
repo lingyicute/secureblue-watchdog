@@ -3482,5 +3482,49 @@ class TestBodhiGivesUpWhenItIsDown(unittest.TestCase):
         self.assertEqual(b.failed, 4)
 
 
+class TestCheckPrunesItsCache(unittest.TestCase):
+    """Each analysed build leaves an ~11 MB pkglist behind; nothing removed one, and
+    CI restores and saves the whole cache directory on every run."""
+
+    def _dir(self, d):
+        import time
+        old = time.time() - 30 * 86400
+        for name, mtime in (("pkglist-sha256aaa.json", old), ("pkglist-sha256bbb.json", old),
+                            ("pkglist-sha256ccc.json", None), ("bodhi-kernel_F44.json", old),
+                            ("bodhi-curl_F44.json", None), ("state.json", old),
+                            ("notes.txt", old)):
+            path = os.path.join(d, name)
+            with open(path, "w") as fh:
+                fh.write("{}")
+            if mtime:
+                os.utime(path, (mtime, mtime))
+
+    def test_old_files_go_except_the_kept_digests_and_the_state(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._dir(d)
+            self.assertEqual(S.prune_cache(d, ["sha256:aaa", None], 14), 2)
+            self.assertEqual(sorted(os.listdir(d)),
+                             ["bodhi-curl_F44.json", "notes.txt", "pkglist-sha256aaa.json",
+                              "pkglist-sha256ccc.json", "state.json"])
+
+    def test_zero_days_keeps_everything(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._dir(d)
+            self.assertEqual(S.prune_cache(d, [], 0), 0)
+            self.assertEqual(len(os.listdir(d)), 7)
+            self.assertEqual(S.prune_cache(os.path.join(d, "missing"), [], 14), 0)
+
+    def test_check_prunes_by_default(self):
+        saved, seen = S.cmd_check, {}
+        S.cmd_check = lambda args: seen.update(vars(args))
+        try:
+            S.main(["check"])
+            self.assertEqual(seen["prune_days"], S.CACHE_KEEP_DAYS)
+            S.main(["check", "--prune-days", "0"])
+            self.assertEqual(seen["prune_days"], 0)
+        finally:
+            S.cmd_check = saved
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

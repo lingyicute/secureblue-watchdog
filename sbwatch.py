@@ -108,6 +108,7 @@ BODHI_CACHE_VERSION = 2  # v1 clipped bug titles (200) and notes (1500) BEFORE
 #                          missing CVEs. A cache without this marker is refetched.
 OLD_LOG_CAP = 40    # changelog entries (dropped by this build) scanned for lost fixes
 TAG_LIST_RETRIES = 4                        # ghcr is flaky on tags/list pagination
+CACHE_KEEP_DAYS = 14        # `check --prune-days`: age at which cache files are dropped
 MANIFEST_ACCEPT = ",".join([
     "application/vnd.oci.image.index.v1+json",
     "application/vnd.oci.image.manifest.v1+json",
@@ -3488,6 +3489,35 @@ def load_pkglist(reg, img, ref, cache_dir, notes):
     return pk
 
 
+def prune_cache(cache_dir: str, keep_digests, max_age_days: float) -> int:
+    """Delete cached package lists / Bodhi answers nothing will read again.
+
+    Every analysed build leaves an ~11 MB `pkglist-<digest>.json` behind and
+    nothing ever removed one, while CI restores and saves the whole directory on
+    every run: at three builds a day that is about a gigabyte a month. `check`
+    only reads a list again as the next baseline, so `keep_digests` are spared
+    and everything else goes once it is older than `max_age_days` (a Bodhi answer
+    is refetched after six hours anyway). Returns the number of files removed.
+    """
+    if max_age_days <= 0 or not os.path.isdir(cache_dir):
+        return 0
+    keep = {f"pkglist-{d.replace(':', '')}.json" for d in keep_digests if d}
+    cutoff = time.time() - max_age_days * 86400
+    removed = 0
+    for name in os.listdir(cache_dir):
+        if (name in keep or not name.endswith(".json")
+                or not name.startswith(("pkglist-", "bodhi-"))):
+            continue
+        path = os.path.join(cache_dir, name)
+        try:
+            if os.path.getmtime(path) < cutoff:
+                os.unlink(path)
+                removed += 1
+        except OSError:
+            continue        # raced with another run, or not ours to delete
+    return removed
+
+
 def orient(a: dict, b: dict, keep_order: bool = False) -> tuple:
     """Return (older, newer) of two resolved images.
 
@@ -4039,6 +4069,14 @@ def cmd_check(args):
                "backlog_coverage": res.get("backlog_coverage")})
     save_state({"prev_digest": prev["digest"], "prev_label": label_a,
                 "last_verdict": v["level"]})
+    prune_days = getattr(args, "prune_days", 0) or 0
+    if prune_days > 0:
+        pruned = prune_cache(getattr(args, "cache_dir", None)
+                             or os.path.expanduser("~/.cache/sbwatch"),
+                             (cur["digest"], prev["digest"]), prune_days)
+        if pruned:
+            log(T(f"  pruned {pruned} cache file(s) older than {prune_days} day(s)",
+                  f"  已清理 {pruned} 个超过 {prune_days} 天的缓存文件"))
     # Why `--fail-on security` trips, in the CI outputs: `update-now` is also
     # reached by a changelog CVE mention or by secureblue escalating an update it
     # considers major, and a red run that says only "security" gives the reader no
@@ -4209,6 +4247,12 @@ def main(argv=None):
                    help="skip the 'behind on stable security updates' check / "
                         "跳过“落后于 stable 安全更新”的检查")
     p.set_defaults(audit=True)
+    p.add_argument("--prune-days", type=int, default=CACHE_KEEP_DAYS,
+                   help="after an analysis, delete cached package lists / Bodhi answers "
+                        "older than this many days, except those of the two images just "
+                        "compared (0 = keep everything, default: %(default)s) / "
+                        "分析完成后删除超过这么多天的软件包列表与 Bodhi 缓存"
+                        "（刚对比的两个镜像除外；0 = 全部保留，默认 %(default)s）")
     p.add_argument("--fail-on", choices=["nothing", "security"], default="nothing",
                    help="exit 10 when the report contains security fixes / "
                         "报告包含安全修复时以退出码 10 结束")
