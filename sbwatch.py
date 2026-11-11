@@ -1495,10 +1495,10 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
 # analyses
 # --------------------------------------------------------------------------- #
 def layer_diff(a: dict, b: dict) -> dict:
-    da = {l["digest"]: l for l in a["layers"]}
+    da = {l["digest"] for l in a["layers"]}
     db = {l["digest"]: l for l in b["layers"]}
     changed = sorted((l for d, l in db.items() if d not in da), key=lambda l: -l["size"])
-    dl_bytes = sum(l["size"] for d, l in db.items() if d not in da)
+    dl_bytes = sum(l["size"] for l in changed)
     pkgs = sorted({c[4:] for l in changed for c in l["components"] if c.startswith("rpm/")})
     total_b = sum(l["size"] for l in b["layers"])
     return {
