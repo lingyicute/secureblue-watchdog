@@ -1637,6 +1637,9 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
             # release marker: real fix content, but not an advisory of this build
             # (so it never drives the notification prediction).
             "advisory_corresponding": False,
+            # CVE ids gained through the new changelog entries alone: all that
+            # the "changelog CVE" evidence label may claim.
+            "changelog_cves": [],
             # errata that only matched the OLD build: fixes the user already has.
             # Kept separate so they can never inflate the verdict for this update.
             "already_had": [], "not_pushed": [],
@@ -1696,6 +1699,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
         "retained_scanned": min(len(retained_entries), RETAINED_LOG_CAP),
     }
     chlog_cves = sorted(info["cves"])
+    info["changelog_cves"] = chlog_cves
     if chlog_cves:
         info["security"] = True
         info["why"].insert(0, "changelog CVEs/更新日志中的 CVE: "
@@ -2156,7 +2160,15 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             return "corresponding Fedora erratum 对应 Fedora 勘误（归一化匹配）"
         if g.get("passed_over"):
             return "security erratum of a passed-over build 被越过构建的安全勘误"
-        return "changelog CVE 更新日志 CVE"
+        # Anything else that set `security` is a released erratum of another
+        # type (bugfix, enhancement) listing CVE ids or ranking high/urgent,
+        # and calling that a changelog CVE named evidence the rpmdb never
+        # showed. `aliases` holds only such released errata, so a group
+        # without one can only have got its flag from the changelog.
+        if g.get("changelog_cves") or not g.get("aliases"):
+            return "changelog CVE 更新日志 CVE"
+        return ("non-security erratum (CVE ids or high severity) "
+                "非安全类勘误（含 CVE 或高严重度）")
 
     moved_names = {c["name"] for c in diff["changed"] if c.get("dir") != "downgrade"}
     kernel_in_diff = "kernel" in moved_names
@@ -2522,6 +2534,7 @@ def group_by_src(changed: list) -> list:
                                "why": [], "sev_rank": 0, "important": False,
                                "downgrade": False, "has_security_erratum": False,
                                "advisory_corresponding": False,
+                               "changelog_cves": set(),
                                "erratum_severity": "",
                                "already_had": [], "unreleased": [], "passed_over": []}
         g["pkgs"].append(c)
@@ -2530,6 +2543,7 @@ def group_by_src(changed: list) -> list:
         g["important"] = g["important"] or bool(cls.get("important_src"))
         g["cves"].update(cls.get("cves") or [])
         g["dropped"].update(cls.get("cves_dropped") or [])
+        g["changelog_cves"].update(cls.get("changelog_cves") or [])
         if cls.get("advisory_corresponding"):
             g["advisory_corresponding"] = True
         if cls.get("has_security_erratum"):
@@ -2569,6 +2583,7 @@ def group_by_src(changed: list) -> list:
     for g in out:
         g["cves"] = sorted(g["cves"])
         g["dropped"] = sorted(g["dropped"])
+        g["changelog_cves"] = sorted(g["changelog_cves"])
         o, n = g["pkgs"][0]["old"], g["pkgs"][0]["new"]
         g["old_evr"], g["new_evr"] = _build_evr(o), _build_evr(n)
     return out
