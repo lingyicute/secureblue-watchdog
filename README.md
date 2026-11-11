@@ -270,7 +270,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/` 包含 **387 项离线回归测试**，不需要网络、不访问 registry
+`tests/` 包含 **391 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -339,6 +339,7 @@ python3 -m unittest discover -s tests -v
 - `test_rpm_header_blob_type.py`：`Packages` 表中 blob 为 NULL、文本或数字的行计为被拒头部并在报告中披露，不再让整次运行崩溃。
 - `test_epoch_spelling.py`：缺失 epoch 与显式 `Epoch: 0` 视为同一个 epoch，不得在 diff 里冒出一个版本完全相同的「重建」；真正的 epoch 变化仍然可见，且报告把两侧的 epoch 都写出来（不再是 `1.2-3 → 1.2-3`）。
 - `test_output_files.py`：`--report` / `--markdown` / `--json-out` / `--json` 写入尚不存在的目录时自动建目录；JSON 输出与报告一样走原子写入，不会留下半截文件或 `.tmp` 残留。
+- `test_cache_unwritable.py`：缓存目录建不出来、或缓存文件写不进去（只读 HOME、磁盘已满）时，软件包列表与 Bodhi 查询照常返回结果，只记一条警告，不再在刚下载完 rpmdb 之后抛 traceback。
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。

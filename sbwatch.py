@@ -1367,7 +1367,14 @@ class Bodhi:
         self._streak = 0         # failed queries in a row
         self.down = False        # set after BODHI_GIVE_UP_AFTER of them: stop asking
         if cache_dir:
-            os.makedirs(cache_dir, exist_ok=True)
+            try:
+                os.makedirs(cache_dir, exist_ok=True)
+            except OSError as e:
+                # the cache is an optimisation: no directory means no cache, not no run
+                log(T(f"  ! cannot use the Bodhi cache directory {cache_dir}: {e} - "
+                      f"continuing without a cache",
+                      f"  ！无法使用 Bodhi 缓存目录 {cache_dir}：{e}——不使用缓存继续"))
+                self.cache_dir = None
 
     def _cf(self, key):
         """Cache file of one `<src>-<release>` key, never shared with another key.
@@ -1567,9 +1574,9 @@ class Bodhi:
         # never cache a failed query: an empty answer would blind later runs. A
         # budget-cut one is not cached either - the next run may have the budget.
         if cf and ok and not budget_cut:
-            _atomic_write_json(cf, {"cache_version": BODHI_CACHE_VERSION,
-                                    "total": total, "truncated": truncated,
-                                    "updates": res})
+            _cache_write(cf, {"cache_version": BODHI_CACHE_VERSION,
+                              "total": total, "truncated": truncated,
+                              "updates": res}, "Bodhi")
         self._mem[key] = {"total": total, "truncated": truncated, "updates": res}
         return res
 
@@ -3968,8 +3975,27 @@ def _atomic_write_json(path: str, data, indent=None) -> None:
             pass
 
 
+def _cache_write(path: str, data, what: str) -> None:
+    """Best-effort _atomic_write_json() for a cache file.
+
+    A read-only HOME or a full disk costs a refetch on the next run. It must not
+    cost the analysis whose input was just downloaded: the traceback came after the
+    33 MB rpmdb chunk (or the Bodhi answers) had been fetched and parsed.
+    """
+    try:
+        _atomic_write_json(path, data)
+    except OSError as e:
+        log(T(f"  ! cannot write the {what} cache {os.path.basename(path)}: {e} - "
+              f"continuing without it",
+              f"  ！无法写入{what}缓存 {os.path.basename(path)}：{e}——不使用它继续"))
+
+
 def load_pkglist(reg, img, ref, cache_dir, notes):
-    os.makedirs(cache_dir, exist_ok=True)
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except OSError as e:
+        log(T(f"  ! cannot use the cache directory {cache_dir}: {e} - continuing without a cache",
+              f"  ！无法使用缓存目录 {cache_dir}：{e}——不使用缓存继续"))
     cf = os.path.join(cache_dir, f"pkglist-{img['digest'].replace(':', '')}.json")
     if os.path.exists(cf) and os.path.getsize(cf) > 10_000:
         try:
@@ -3995,9 +4021,9 @@ def load_pkglist(reg, img, ref, cache_dir, notes):
     # The table's own bookkeeping rides along in the cache: writing the flat map
     # (and reading it back as one) would make "parse problems" and "shadowed
     # multilib packages" vanish on every cache hit.
-    _atomic_write_json(cf, {"packages": pk, "collisions": pk.collisions,
-                            "headers_rejected": pk.headers_rejected,
-                            "fields_skipped": pk.fields_skipped})
+    _cache_write(cf, {"packages": pk, "collisions": pk.collisions,
+                      "headers_rejected": pk.headers_rejected,
+                      "fields_skipped": pk.fields_skipped}, "package list")
     # This image's own numbers: the fixed "~33 MB fetched, ~3.7 GiB avoided" was
     # only ever true for one variant on one architecture.
     layers = img.get("layers") or []
