@@ -2792,7 +2792,8 @@ BACKLOG_POOL = {
 }
 
 
-def _is_behind(p: dict, cand_version: str, cand_release: str) -> bool:
+def _is_behind(p: dict, cand_version: str, cand_release: str,
+               use_build_evr: bool = False) -> bool:
     """Is the image's package older than an erratum's build?
 
     Deliberately ignores the epoch: Bodhi's NVR strings never carry one, so
@@ -2807,10 +2808,15 @@ def _is_behind(p: dict, cand_version: str, cand_release: str) -> bool:
     `secureblue` segment rpm-compares above `fc`, i.e. the local rebuild would
     claim to be newer than its own Fedora original.
     """
-    dv = rpmvercmp(p.get("version", ""), cand_version)
+    ver, rel = p.get("version", ""), p.get("release", "")
+    if use_build_evr:
+        bevr = _build_evr(p)
+        if bevr and bevr != "?" and "-" in bevr:
+            ver, rel = bevr.rsplit("-", 1)
+    dv = rpmvercmp(ver, cand_version)
     if dv:
         return dv < 0
-    rel = re.sub(r"\.secureblue\.\d+", "", p.get("release", ""))
+    rel = re.sub(r"\.secureblue\.\d+", "", rel)
     return rpmvercmp(rel, cand_release) < 0
 
 
@@ -2869,13 +2875,15 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi, limit: int = 45) -> tup
                     if bn != n and bn != p["src"]:
                         continue
                     cand = {"name": n, "version": bv, "release": br}
-                    if _is_behind(p, bv, br) and (best is None or evr_cmp(best, cand) < 0):
+                    if _is_behind(p, bv, br, use_build_evr=(bn != n)) and (
+                            best is None or evr_cmp(best, cand) < 0):
                         best = cand
                 if best is None:
                     continue
                 # full lists: the CLI preview and the report both clip *with a
                 # stated count*, and the JSON export must stay complete
-                rows.append({"name": n, "src": src, "have": p["evr"],
+                rows.append({"name": n, "src": src,
+                             "have": _build_evr(p) if n != src else p["evr"],
                              "want": f"{best['version']}-{best['release']}",
                              "alias": u["alias"], "severity": u.get("severity"),
                              "cves": u.get("cves") or [],
