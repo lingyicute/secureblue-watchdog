@@ -798,8 +798,16 @@ class Registry:
                     f"run `sbwatch.py history` for valid refs",
                     f"没有这个 tag 或 digest：{self.repo}/{path}——"
                     f"用 `sbwatch.py history` 查看可用引用"), http_code=404) from None
-            raise RegistryError(T(f"registry error {e.code} for {self.repo}/{path}",
-                                  f"registry 返回 {e.code}：{self.repo}/{path}"),
+            hint_en = hint_zh = ""
+            if e.code in (401, 403):
+                # ghcr answers 401, not 404, for a repository that does not exist
+                # (and 403 to its token request): a mistyped --image read as
+                # nothing more than "registry error 401".
+                hint_en = (" - most likely there is no such repository, or it is not "
+                           "public (check --image)")
+                hint_zh = "——很可能没有这个仓库，或它不是公开的（请检查 --image）"
+            raise RegistryError(T(f"registry error {e.code} for {self.repo}/{path}{hint_en}",
+                                  f"registry 返回 {e.code}：{self.repo}/{path}{hint_zh}"),
                                 http_code=e.code) from None
         except (urllib.error.URLError, TimeoutError, OSError,
                 http.client.HTTPException) as e:
