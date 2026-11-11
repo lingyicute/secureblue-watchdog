@@ -170,7 +170,9 @@ def T(en: str, zh: str) -> BiText:
 def human(nbytes) -> str:
     n = float(nbytes)
     for unit in ("B", "KiB", "MiB", "GiB"):
-        if abs(n) < 1024.0:
+        # test the *rounded* value: 1023.99 passed the `< 1024` check and was
+        # then printed as "1024.0 B" instead of moving up to "1.0 KiB"
+        if round(abs(n), 1) < 1024.0:
             return f"{n:.1f} {unit}"
         n /= 1024.0
     return f"{n:.1f} TiB"

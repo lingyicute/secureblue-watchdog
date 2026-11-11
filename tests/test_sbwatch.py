@@ -3059,5 +3059,19 @@ class TestImageTagIsTheDefaultRef(unittest.TestCase):
             S.cmd_tags, S.cmd_check, S.cmd_backlog = saved
 
 
+class TestHumanSizes(unittest.TestCase):
+    def test_values_that_round_to_1024_move_up_a_unit(self):
+        self.assertEqual(S.human(1023.99), "1.0 KiB")
+        self.assertEqual(S.human(1048575.9), "1.0 MiB")
+        self.assertEqual(S.human(-1023.96), "-1.0 KiB")
+
+    def test_ordinary_values_are_unchanged(self):
+        self.assertEqual(S.human(0), "0.0 B")
+        self.assertEqual(S.human(1023), "1023.0 B")
+        self.assertEqual(S.human(1024), "1.0 KiB")
+        self.assertEqual(S.human(33 * 1024 * 1024), "33.0 MiB")
+        self.assertEqual(S.human(4 * 1024 ** 4), "4.0 TiB")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
