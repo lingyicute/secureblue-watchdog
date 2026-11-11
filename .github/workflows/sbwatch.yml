@@ -52,10 +52,6 @@ env:
   # instead of silently changing what "verified" means.
   COSIGN_PUB_SHA256: "9cbd48de48d467f86e0f31f9454c6e0bb663f3d033ecd92143f62577eb1cb5eb"
 
-concurrency:
-  group: sbwatch-${{ inputs.image || 'secureblue/silverblue-main-hardened' }}-${{ inputs.arch || 'amd64' }}
-  cancel-in-progress: false
-
 jobs:
   test:
     name: Tests
@@ -92,6 +88,12 @@ jobs:
     name: Update watch
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    # One watch per image/arch at a time. Scoped to this job: at workflow level
+    # a push's Tests job had to queue behind a running watch too, and a run that
+    # is still queued is cancelled as soon as a newer one joins the group.
+    concurrency:
+      group: sbwatch-${{ inputs.image || 'secureblue/silverblue-main-hardened' }}-${{ inputs.arch || 'amd64' }}
+      cancel-in-progress: false
     permissions:
       contents: read
       issues: write   # sticky issue comment
