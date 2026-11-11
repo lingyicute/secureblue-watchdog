@@ -1318,8 +1318,21 @@ class Bodhi:
             os.makedirs(cache_dir, exist_ok=True)
 
     def _cf(self, key):
-        return os.path.join(self.cache_dir, "bodhi-" + re.sub(r"\W+", "_", key) + ".json") \
-            if self.cache_dir else None
+        """Cache file of one `<src>-<release>` key, never shared with another key.
+
+        `\\W+ -> _` alone is lossy: `foo-bar`, `foo_bar`, `foo.bar` and `foo+bar`
+        all landed in one file, and nothing in it says whose answer it is - so
+        one source package's errata were served as another's, whose own errata
+        were then never read. A key the substitution cannot confuse (`name-F44`)
+        keeps its readable name; any other one gets a digest of its exact
+        spelling appended.
+        """
+        if not self.cache_dir:
+            return None
+        safe = re.sub(r"\W+", "_", key)
+        if not re.fullmatch(r"[A-Za-z0-9]+-[A-Za-z0-9]+", key):
+            safe += "-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+        return os.path.join(self.cache_dir, f"bodhi-{safe}.json")
 
     def _read_cache_entry(self, cf):
         """Full cache entry {"total", "truncated", "updates"}, or None.
