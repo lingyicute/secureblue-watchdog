@@ -321,8 +321,13 @@ jobs:
 
       - name: Red run when security fixes are waiting
         if: env.FAIL_ON_SECURITY == 'true' && steps.check.outputs.fail_on_security == 'true'
+        env:
+          FAIL_REASON: ${{ steps.check.outputs.fail_reason }}
         run: |
-          echo "::error::new image has security fixes (${{ steps.check.outputs.fail_reason }}) -> rpm-ostree upgrade && systemctl reboot"
+          # Through env, never inline: fail_reason carries package names read from
+          # the image's rpmdb, and an inline expression is pasted into the script
+          # text before the shell parses it.
+          echo "::error::new image has security fixes (${FAIL_REASON}) -> rpm-ostree upgrade && systemctl reboot"
           exit 10
 
       # `unknown` means the watch could not conclude anything: no baseline image

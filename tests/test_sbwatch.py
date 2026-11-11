@@ -2222,6 +2222,18 @@ class TestWorkflowHygiene(unittest.TestCase):
         self.assertNotIn("actions: write", head)
         self.assertNotIn("issues: write", head)
 
+    def test_image_derived_text_reaches_the_shell_through_env_only(self):
+        # fail_reason / summary carry package names read from the image's rpmdb;
+        # `${{ }}` inside a run: block is pasted into the script before bash
+        # parses it, so a crafted name would run as code
+        wf = self._workflow()
+        lines = [ln.strip() for ln in wf.splitlines()
+                 if "outputs.fail_reason" in ln or "outputs.summary" in ln]
+        self.assertGreaterEqual(len(lines), 3)
+        for ln in lines:
+            self.assertRegex(
+                ln, r"^[A-Z_]+: \$\{\{ steps\.check\.outputs\.(fail_reason|summary) \}\}$")
+
     def test_an_inconclusive_run_is_not_green(self):
         wf = self._workflow()
         self.assertIn("steps.check.outputs.verdict == 'unknown'", wf)
