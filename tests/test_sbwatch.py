@@ -1611,6 +1611,13 @@ class TestAdvisoryAttachment(unittest.TestCase):
         self.assertEqual(sbn["level"], "major")
         self.assertEqual(sbn["max_advisory_severity"], "critical")
 
+    def test_highest_erratum_severity_wins_when_multiple_errata_match(self):
+        new, old = pkg("curl", "8.1-1.fc44"), pkg("curl", "8.0-1.fc44")
+        ups = [_upd_for("curl-8.1-1.fc44", sev="urgent", alias="FEDORA-2026-1"),
+               _upd_for("curl-8.1-1.fc44", sev="low", alias="FEDORA-2026-2")]
+        cls = S.classify_change(old, new, "F44", FakeBodhi({"curl": ups}))
+        self.assertEqual(cls["erratum_severity"], "Critical")
+
     def test_added_package_advisory_also_drives_the_prediction(self):
         # rpmostree_advisories_variant() sees every package that is *new* in the
         # deployment, including added ones - predicting "none" here was wrong.
