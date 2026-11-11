@@ -799,6 +799,15 @@ class TestBacklogMatching(unittest.TestCase):
             pkgs, "F44", FakeBodhi({"kernel": self._upd("kernel-7.2.5-200.fc44")}), limit=10)
         self.assertEqual([r["name"] for r in rows], ["kernel"])
 
+    def test_subpackage_with_own_version_compares_by_source_build_evr(self):
+        nspr = pkg("nspr", "4.39.0-9.fc44", src="nss")
+        nspr["srpm"] = "nss-3.130.0-1.fc44"
+        rows, _ = S.security_backlog(
+            {"nspr": nspr}, "F44",
+            FakeBodhi({"nss": self._upd("nss-3.131.0-1.fc44")}), limit=10)
+        self.assertEqual([(r["name"], r["have"], r["want"]) for r in rows],
+                         [("nspr", "3.130.0-1.fc44", "3.131.0-1.fc44")])
+
     def test_epoch_package_can_be_behind(self):
         # live example: cups has epoch 1 in the image; Bodhi NVRs carry no epoch,
         # so the old evr_cmp made cups permanently "newer" than every update
