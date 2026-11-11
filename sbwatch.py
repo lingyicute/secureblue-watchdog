@@ -3104,7 +3104,11 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi, limit: int = 45) -> tup
     for n, p in pkgs.items():
         if _src_matches_pool(p["src"], BACKLOG_POOL):
             want.setdefault(p["src"], []).append((n, p))
-    candidates = sorted(want)
+    # Security-sensitive sources first, as in classify_order(): `limit` and
+    # --max-bodhi both cut this list from its end, and in plain name order the
+    # live image's 55 candidates lost systemd, webkitgtk and xdg-desktop-portal
+    # to the default limit of 45 on every single run.
+    candidates = sorted(want, key=lambda s: (not _src_matches_pool(s, IMPORTANT_SRC), s))
     chosen = candidates[:limit]
     # a pool entry counts as covered when some in-image source maps onto it
     # (directly, or via the versioned-name rule: python3.14 -> python3)
