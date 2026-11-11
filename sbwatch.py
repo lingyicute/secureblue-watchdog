@@ -1507,6 +1507,14 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
     dropped_entries = _missing_entries(old_log, new_log)
     for c in dropped_entries[:OLD_LOG_CAP]:
         add_cves(c["text"], info["cves_dropped"])
+    # An id named on both sides is neither gained nor lost: its entry was only
+    # reworded or regenerated. Fedora rewrites the whole kernel changelog on a
+    # rebase (7.2.15 -> 7.3.3: 66 entries "new", 76 "dropped"), which reported
+    # CVE-2023-6240 as a fix gained by that update and, in the same headline, as
+    # an id the new changelog no longer mentions.
+    both = info["cves"] & info["cves_dropped"]
+    info["cves"] -= both
+    info["cves_dropped"] -= both
     info["changelog_scan"] = {
         "new_total": len(new_entries), "new_scanned": min(len(new_entries), NEW_LOG_CAP),
         "dropped_total": len(dropped_entries),
