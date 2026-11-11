@@ -76,6 +76,14 @@ class TestCheckState(unittest.TestCase):
         self.assertEqual(resolved, ["latest", _image(1)["digest"]])
         self.assertEqual(saved["arch"], "amd64")
 
+    def test_state_that_is_not_an_object_counts_as_no_state(self):
+        for text in ("[]", "null", '"x"', "7"):
+            with self.subTest(text=text):
+                resolved, saved, output, _err = self._check(text)
+                self.assertEqual(resolved, ["latest"])
+                self.assertIn("verdict=unknown\n", output)
+                self.assertEqual(saved["digest"], _image(2)["digest"])
+
 
 if __name__ == "__main__":
     unittest.main()
