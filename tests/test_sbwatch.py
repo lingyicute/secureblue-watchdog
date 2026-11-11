@@ -3179,6 +3179,15 @@ class TestTagsProbeIncludesToday(unittest.TestCase):
         self.assertEqual(probed, ["20260919", "20260918", "20260917"])
 
 
+class TestRegistrySplit(unittest.TestCase):
+    def test_tag_plus_digest_strips_the_tag_from_repo(self):
+        dig = "sha256:" + "a" * 64
+        self.assertEqual(S.Registry._split(f"secureblue/x:44@{dig}"),
+                         ("ghcr.io", ("secureblue/x", dig)))
+        self.assertEqual(S.Registry._split(f"ghcr.io/secureblue/x:latest@{dig}"),
+                         ("ghcr.io", ("secureblue/x", dig)))
+
+
 class TestImageTagIsTheDefaultRef(unittest.TestCase):
     """`--image ns/name:44` parsed the tag into Registry.default_ref and then every
     command looked at `latest` anyway. The image's tag is now the fallback for
