@@ -955,20 +955,26 @@ def read_header(blob: bytes, stats: dict | None = None) -> dict:
         p = store + off
         try:
             if name == "changelogtime":
+                if typ != 4:
+                    raise ValueError("changelogtime must be INT32")
                 out[name] = list(struct.unpack(">%dI" % cnt, blob[p:p + 4 * cnt]))
                 continue
             if name == "epoch":
+                if typ != 4 or cnt < 1:
+                    raise ValueError("epoch must be INT32 with count >= 1")
                 out[name] = str(struct.unpack(">I", blob[p:p + 4])[0])
                 continue
             if typ in STR_TYPES:
-                if cnt > 1:                              # array of strings
+                if name in ("changelogname", "changelogtext") or typ == 8:
                     arr, q = [], p
                     for _ in range(cnt):
                         e = blob.index(b"\0", q)
                         arr.append(blob[q:e].decode("utf-8", "replace"))
                         q = e + 1
-                    out[name] = arr
+                    out[name] = arr if cnt > 1 else (arr[0] if arr else "")
                 else:
+                    if cnt != 1:
+                        raise ValueError("scalar string tag with count != 1")
                     out[name] = blob[p:blob.index(b"\0", p)].decode("utf-8", "replace")
         except (ValueError, struct.error):
             stats["fields_skipped"] = stats.get("fields_skipped", 0) + 1
