@@ -82,7 +82,7 @@ jobs:
       - name: Lint (dead imports / undefined names)
         run: |
           python3 -m pip install --quiet pyflakes
-          python3 -m pyflakes sbwatch.py tests/test_sbwatch.py
+          python3 -m pyflakes sbwatch.py tests/
 
   watch:
     name: Update watch
