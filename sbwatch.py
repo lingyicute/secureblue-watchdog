@@ -3812,7 +3812,10 @@ def _atomic_write_json(path: str, data) -> None:
     tmp = path + f".tmp.{os.getpid()}"
     try:
         with open(tmp, "w") as f:
-            json.dump(data, f)
+            # dumps(), not dump(): dump() always walks the document with the
+            # pure-Python encoder - three times as long for an 11 MB package
+            # list (0.21 s against 0.07 s for the live image's)
+            f.write(json.dumps(data))
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)
