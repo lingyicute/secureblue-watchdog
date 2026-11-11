@@ -2618,7 +2618,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                          if g["aliases"] else "")
                 why_desc = clip_text("; ".join(g["why"]), WHY_CAP, lang="zh") \
                     or "无安全相关更新日志"
-                W(f"- `{g['src']}` {g['old_evr']} → {g['new_evr']} — {len(g['pkgs'])} 个包{extra}; {why_desc}")
+                W(f"- `{g['src']}` {g['old_evr']} → {g['new_evr']} — {fmt_pkgs(g, 'zh')}{extra}; {why_desc}")
         else:
             W(f"## Bumps in security-sensitive packages, no CVE mentioned ({len(g_imp)})")
             W("")
@@ -2626,7 +2626,9 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                 extra = f" (errata: {clip_list(g['aliases'], 2)})" if g["aliases"] else ""
                 why_desc = clip_text("; ".join(g["why"]), WHY_CAP) \
                     or "no security changelog entry"
-                W(f"- `{g['src']}` {g['old_evr']} → {g['new_evr']} — {len(g['pkgs'])} pkg(s){extra}; {why_desc}")
+                # the binaries by name, not a bare count: "`kernel` ... 3 pkg(s)"
+                # read as a kernel update when only kernel-tools had moved
+                W(f"- `{g['src']}` {g['old_evr']} → {g['new_evr']} — {fmt_pkgs(g)}{extra}; {why_desc}")
         W("")
 
     if g_other:
