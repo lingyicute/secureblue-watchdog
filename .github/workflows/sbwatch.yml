@@ -290,8 +290,11 @@ jobs:
               with open("body.md", "w", encoding="utf-8") as fh:
                   fh.write(s)
           PY
+          # Compared for equality below: the search only matches words, so any
+          # open issue whose title merely contained them received the reports.
           num=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
-                  --search "in:title $title" --json number --jq '.[0].number // empty')
+                  --search "in:title \"$title\"" --json number,title \
+                  --jq "map(select(.title == \"$title\")) | .[0].number // empty")
           if [ -n "$num" ]; then
             gh issue comment "$num" --repo "$GITHUB_REPOSITORY" --body-file body.md
           else
