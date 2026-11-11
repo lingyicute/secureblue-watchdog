@@ -611,7 +611,7 @@ def evr_cmp(a: dict, b: dict) -> int:
 # OCI registry client (anonymous, stdlib only)
 # --------------------------------------------------------------------------- #
 class _SameHostAuthRedirect(urllib.request.HTTPRedirectHandler):
-    """Follow redirects, but keep the bearer token on the registry's own host.
+    """Follow redirects, but keep the bearer token on the same origin.
 
     urllib copies every header onto the redirected request, and a blob GET is
     always redirected to storage on another host (ghcr.io ->
@@ -622,9 +622,12 @@ class _SameHostAuthRedirect(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         new = super().redirect_request(req, fp, code, msg, headers, newurl)
-        if new is not None and (urllib.parse.urlsplit(newurl).netloc
-                                != urllib.parse.urlsplit(req.full_url).netloc):
-            new.headers.pop("Authorization", None)
+        if new is not None:
+            old_url = urllib.parse.urlsplit(req.full_url)
+            new_url = urllib.parse.urlsplit(new.full_url)
+            # An HTTPS -> HTTP redirect is not the same origin, even on one host.
+            if (old_url.scheme, old_url.netloc) != (new_url.scheme, new_url.netloc):
+                new.remove_header("Authorization")
         return new
 
 
@@ -3190,7 +3193,7 @@ def list_tags(reg: Registry, max_pages: int = 12) -> list:
                 tok = reg._token()
                 if tok:
                     req.add_header("Authorization", "Bearer " + tok)
-                with urllib.request.urlopen(req, timeout=reg.timeout) as r:
+                with _OPENER.open(req, timeout=reg.timeout) as r:
                     body, hdrs = reg._read_all(r, "tag list"), r.headers
                 # Parsed inside the retry: a non-JSON or cut-short body (a proxy
                 # error page, a truncated 200) is as transient as a 5xx, and
@@ -3198,9 +3201,16 @@ def list_tags(reg: Registry, max_pages: int = 12) -> list:
                 # So is a read that dies mid-transfer: _read_all() reports it as a
                 # RegistryError, which is retried below. Any other SystemExit (the
                 # size cap) is no Exception and still ends the run.
-                page = json.loads(body)
-                if not isinstance(page, dict):
-                    raise ValueError("tag list is not a JSON object")
+                candidate = json.loads(body)
+                if not isinstance(candidate, dict) or "tags" not in candidate:
+                    raise ValueError("tag list is not a JSON object with tags")
+                tags = candidate["tags"]
+                if tags is not None and (not isinstance(tags, list) or
+                                         any(not isinstance(t, str) for t in tags)):
+                    raise ValueError("tags must be a list of strings or null")
+                # Assign only after validation: an invalid non-None page must not
+                # survive exhausted retries and enter the history scan.
+                page = candidate
                 break
             except (Exception, RegistryError) as e:
                 if attempt == TAG_LIST_RETRIES - 1:
@@ -3219,9 +3229,18 @@ def list_tags(reg: Registry, max_pages: int = 12) -> list:
         nxt = re.search(r"<([^>]+)>;\s*rel=\"next\"", hdrs.get("Link") or "")
         if not nxt:
             break
-        url = nxt.group(1)
-        if url.startswith("/"):
-            url = f"https://{reg.host}{url}"
+        try:
+            next_url = urllib.parse.urljoin(url, nxt.group(1))
+            target = urllib.parse.urlsplit(next_url)
+            # Each page gets a fresh bearer token header, so redirect stripping
+            # alone cannot protect an attacker-controlled Link target.
+            if (target.scheme, target.netloc) != ("https", reg.host):
+                raise ValueError("pagination left the registry origin")
+        except ValueError:
+            log(T("  ! unsafe tag pagination link refused - history may be incomplete",
+                  "  ！已拒绝不安全的 tag 分页链接——历史记录可能不完整"))
+            break
+        url = next_url
     else:
         # Every allowed page was read and the registry still offered another one.
         # ghcr lists tags in push order, so a capped walk loses the NEWEST builds.

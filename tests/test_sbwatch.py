@@ -2381,13 +2381,13 @@ class TestTagListCapIsReported(unittest.TestCase):
 
         reg = types.SimpleNamespace(host="h", repo="x/y", timeout=1, _token=lambda: None,
                                     _read_all=lambda r, what: b'{"tags": ["t"]}')
-        real = S.urllib.request.urlopen
-        S.urllib.request.urlopen = lambda req, timeout=None: Page()
+        real = S._OPENER.open
+        S._OPENER.open = lambda req, timeout=None: Page()
         try:
             with contextlib.redirect_stderr(io.StringIO()) as err:
                 tags = S.list_tags(reg, max_pages=3)
         finally:
-            S.urllib.request.urlopen = real
+            S._OPENER.open = real
         self.assertEqual(tags, ["t", "t", "t"])
         self.assertIn("capped at 3 pages", err.getvalue())
 
@@ -2408,14 +2408,14 @@ class TestTagListCapIsReported(unittest.TestCase):
         bodies = [b"<html>502 Bad Gateway</html>", b'{"tags": ["ok"]}']
         reg = types.SimpleNamespace(host="h", repo="x/y", timeout=1, _token=lambda: None,
                                     _read_all=lambda r, what: bodies.pop(0))
-        real_open, real_sleep = S.urllib.request.urlopen, S.time.sleep
-        S.urllib.request.urlopen = lambda req, timeout=None: Page()
+        real_open, real_sleep = S._OPENER.open, S.time.sleep
+        S._OPENER.open = lambda req, timeout=None: Page()
         S.time.sleep = lambda s: None
         try:
             with contextlib.redirect_stderr(io.StringIO()):
                 tags = S.list_tags(reg, max_pages=3)
         finally:
-            S.urllib.request.urlopen, S.time.sleep = real_open, real_sleep
+            S._OPENER.open, S.time.sleep = real_open, real_sleep
         self.assertEqual(tags, ["ok"])
         self.assertEqual(bodies, [])
 
@@ -3771,14 +3771,14 @@ class TestTagListRetriesAReadCutShort(unittest.TestCase):
 
         reg = types.SimpleNamespace(host="h", repo="x/y", timeout=1, _token=lambda: None,
                                     _read_all=read_all)
-        real_open, real_sleep = S.urllib.request.urlopen, S.time.sleep
-        S.urllib.request.urlopen = lambda req, timeout=None: self._Page()
+        real_open, real_sleep = S._OPENER.open, S.time.sleep
+        S._OPENER.open = lambda req, timeout=None: self._Page()
         S.time.sleep = lambda s: None
         try:
             with contextlib.redirect_stderr(io.StringIO()):
                 return S.list_tags(reg), calls
         finally:
-            S.urllib.request.urlopen, S.time.sleep = real_open, real_sleep
+            S._OPENER.open, S.time.sleep = real_open, real_sleep
 
     def test_registry_error_from_the_read_is_retried(self):
         tags, calls = self._list(S.RegistryError("failed reading tag list: IncompleteRead"))
