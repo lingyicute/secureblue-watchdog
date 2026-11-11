@@ -3630,13 +3630,14 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
                        f"警告：{bstate['failed']} 次 Bodhi 勘误查询失败；"
                        f"这些软件包仅依据更新日志中的 CVE 判断"))
     if bstate.get("truncated"):
-        tr = clip_list(bstate["truncated"], 8)
+        tr_en = clip_list(bstate["truncated"], 8)
+        tr_zh = clip_list(bstate["truncated"], 8, lang="zh", joiner="，")
         notes.append(T(
-            f"WARNING: could not read every erratum for: {tr} - their verdict is based only "
+            f"WARNING: could not read every erratum for: {tr_en} - their verdict is based only "
             f"on the errata that were read (at most {MAX_BODHI_PAGES * BODHI_PAGE_SIZE} per "
             f"package, fewer if --max-bodhi ran out), so 'no security fix' for them is NOT "
             f"established",
-            f"警告：以下软件包的勘误未能全部读取：{tr}——它们的结论仅基于已读取的勘误"
+            f"警告：以下软件包的勘误未能全部读取：{tr_zh}——它们的结论仅基于已读取的勘误"
             f"（每包最多 {MAX_BODHI_PAGES * BODHI_PAGE_SIZE} 条；若 --max-bodhi 用尽则更少），"
             f"因此对它们而言「没有安全修复」并未被证实"))
     return {"a": a, "b": b, "diff": diff, "layers": ld, "xc": xc, "verdict": v,

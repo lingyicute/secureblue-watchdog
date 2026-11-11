@@ -1847,6 +1847,39 @@ class TestFixesThatUsedToBeSilent(unittest.TestCase):
         self.assertIn("+2 more not shown", note.en)
         self.assertIn("另有 2 个未显示", note.zh)
 
+    def test_truncated_errata_note_is_localised_in_both_halves(self):
+        import types
+
+        class Reg:
+            def _token(self):
+                return None
+
+        class TruncBodhi:
+            failed = 0
+            skipped = 0
+            truncated_src = {f"pkg{i}" for i in range(10)}
+
+            def __init__(self, **kw):
+                pass
+
+            def updates_for_src(self, src, rel):
+                return []
+
+        args = types.SimpleNamespace(exact=1, keep_order=True, no_bodhi=False, audit=False,
+                                     max_bodhi=80, cache_dir=None, cosign_pub=None)
+        img = {"ref": "a", "digest": "sha256:" + "1" * 64, "annotations": {}, "layers": []}
+        orig_load, orig_bodhi = S.load_pkglist, S.Bodhi
+        S.load_pkglist = lambda *a: S.PackageTable({"nano": pkg("nano", "8.0-1.fc44")})
+        S.Bodhi = TruncBodhi
+        try:
+            res = S.do_diff(args, "a", "b", images=(img, dict(img, ref="b")), reg=Reg())
+        finally:
+            S.load_pkglist, S.Bodhi = orig_load, orig_bodhi
+        note = next(n for n in res["notes"] if "could not read every erratum" in n.en)
+        self.assertIn("(+2 more not shown)", note.en)
+        self.assertIn("（另有 2 个未显示）", note.zh)
+        self.assertNotIn("more not shown", note.zh)
+
     def test_group_by_src_accepts_entries_without_dir(self):
         g = S.group_by_src([{"name": "foo", "src": "foo", "cls": {},
                              "old": {"evr": "1-1"}, "new": {"evr": "2-1"}}])
