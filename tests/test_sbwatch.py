@@ -3369,5 +3369,75 @@ class TestBaseKernelAnnotationIsNotAKernelUpdate(unittest.TestCase):
         self.assertIn("the kernel moved", v["level_basis"])
 
 
+class TestCheckSurvivesAPrunedBaseline(unittest.TestCase):
+    """The digest in state.json can be gone from the registry by the next run. Its
+    404 ended `check` before the state was rewritten, so every later run died on
+    the same digest."""
+
+    GONE = "sha256:" + "d" * 64
+    CUR = {"ref": "latest", "digest": "sha256:" + "a" * 64,
+           "index_digest": "sha256:" + "b" * 64, "created": "2026-01-02T00:00:00Z",
+           "annotations": {"org.opencontainers.image.version": "44.20260102.0"},
+           "layers": []}
+    OLD = dict(CUR, digest="sha256:" + "c" * 64, index_digest="sha256:" + "e" * 64,
+               created="2026-01-01T00:00:00Z")
+
+    def _run(self, code):
+        import contextlib
+        import types
+        notes, got = [], {}
+
+        def fake_resolve(reg, ref, light=False):
+            if ref == self.GONE:
+                raise S.RegistryError("gone", http_code=code)
+            return dict(self.CUR if ref == "latest" else self.OLD, ref=ref)
+
+        def fake_diff(args, ref_a, ref_b, images=None, reg=None):
+            a, b = images
+            got["ref_a"] = ref_a
+            diff = {"added": [], "removed": [], "downgrades": [], "changed": [],
+                    "count_a": 0, "count_b": 0, "same_rpmdb": False}
+            ld = S.layer_diff(a, b)
+            xc = S.crosscheck_chunks(ld, diff)
+            return {"a": a, "b": b, "diff": diff, "layers": ld, "xc": xc,
+                    "verdict": S.verdict_of(diff, ld, {}, xc), "notes": notes}
+
+        saved = S._registry, S.resolve, S.do_diff, S.tag_exists
+        saved_env = {k: os.environ.pop(k, None) for k in ("GITHUB_OUTPUT", "GITHUB_ACTIONS")}
+        S._registry = lambda args: types.SimpleNamespace(_token=lambda: None)
+        S.resolve, S.do_diff = fake_resolve, fake_diff
+        S.tag_exists = lambda reg, tag, warn=None: self.OLD["index_digest"]
+        try:
+            with tempfile.TemporaryDirectory() as d, \
+                    contextlib.redirect_stderr(io.StringIO()), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                state = os.path.join(d, "state.json")
+                with open(state, "w") as fh:
+                    json.dump({"digest": self.GONE, "created": "2025-12-01T00:00:00Z"}, fh)
+                args = types.SimpleNamespace(
+                    image="x/y", arch="amd64", to="latest", a=None, scan=0, force=False,
+                    fast=False, fail_on="nothing", state=state,
+                    report=os.path.join(d, "report.md"))
+                rc = S.cmd_check(args)
+                with open(state) as fh:
+                    got["state"] = json.load(fh)
+        finally:
+            S._registry, S.resolve, S.do_diff, S.tag_exists = saved
+            os.environ.update({k: v for k, v in saved_env.items() if v is not None})
+        return rc, got, notes
+
+    def test_a_404_baseline_falls_back_and_the_report_says_so(self):
+        rc, got, notes = self._run(404)
+        self.assertEqual(rc, 0)
+        self.assertNotEqual(got["ref_a"], self.GONE)
+        self.assertEqual(got["state"]["digest"], self.CUR["digest"])
+        self.assertEqual(got["state"]["prev_digest"], self.OLD["digest"])
+        self.assertTrue(any("no longer in the registry" in str(n) for n in notes))
+
+    def test_any_other_registry_error_still_ends_the_run(self):
+        with self.assertRaises(S.RegistryError):
+            self._run(500)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
