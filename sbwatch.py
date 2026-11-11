@@ -590,6 +590,27 @@ def evr_cmp(a: dict, b: dict) -> int:
 # --------------------------------------------------------------------------- #
 # OCI registry client (anonymous, stdlib only)
 # --------------------------------------------------------------------------- #
+class _SameHostAuthRedirect(urllib.request.HTTPRedirectHandler):
+    """Follow redirects, but keep the bearer token on the registry's own host.
+
+    urllib copies every header onto the redirected request, and a blob GET is
+    always redirected to storage on another host (ghcr.io ->
+    pkg-containers.githubusercontent.com, quay.io -> its CDN, S3 for many
+    others). The pull token was therefore handed to that host as well - and a
+    presigned S3 URL answers 400 to a request carrying a second credential.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and (urllib.parse.urlsplit(newurl).netloc
+                                != urllib.parse.urlsplit(req.full_url).netloc):
+            new.headers.pop("Authorization", None)
+        return new
+
+
+_OPENER = urllib.request.build_opener(_SameHostAuthRedirect)
+
+
 class Registry:
     def __init__(self, ref: str, arch: str = "amd64", timeout: int = 90):
         self.arch = arch
@@ -698,7 +719,7 @@ class Registry:
         if tok:
             req.add_header("Authorization", "Bearer " + tok)
         try:
-            return urllib.request.urlopen(req, timeout=self.timeout)
+            return _OPENER.open(req, timeout=self.timeout)
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 raise RegistryError(T(

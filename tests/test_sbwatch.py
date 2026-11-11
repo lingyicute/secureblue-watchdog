@@ -3711,5 +3711,31 @@ class TestTokenUnderEitherKey(unittest.TestCase):
         self.assertIsNone(self._token({}))
 
 
+class TestBearerTokenStaysOnTheRegistryHost(unittest.TestCase):
+    """A blob GET is redirected to storage on another host; urllib forwarded the
+    Authorization header there too."""
+
+    def _redirect(self, newurl):
+        req = S.urllib.request.Request("https://ghcr.io/v2/x/blobs/sha256:1",
+                                       headers={"Accept": "application/octet-stream"})
+        req.add_header("Authorization", "Bearer secret")
+        return S._SameHostAuthRedirect().redirect_request(
+            req, None, 307, "Temporary Redirect", {}, newurl)
+
+    def test_token_is_dropped_when_the_host_changes(self):
+        new = self._redirect("https://pkg-containers.githubusercontent.com/blob?sig=1")
+        self.assertNotIn("Authorization", new.headers)
+        self.assertEqual(new.headers.get("Accept"), "application/octet-stream")
+
+    def test_token_is_kept_on_a_same_host_redirect(self):
+        new = self._redirect("https://ghcr.io/v2/x/blobs/sha256:2")
+        self.assertEqual(new.headers.get("Authorization"), "Bearer secret")
+
+    def test_registry_requests_go_through_that_handler(self):
+        self.assertTrue(any(isinstance(h, S._SameHostAuthRedirect) for h in S._OPENER.handlers))
+        self.assertFalse(any(type(h) is S.urllib.request.HTTPRedirectHandler
+                             for h in S._OPENER.handlers))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
