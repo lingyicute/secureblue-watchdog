@@ -4432,7 +4432,9 @@ def cmd_check(args):
             pd = r.get("platform_digest") or r["digest"]
             if pd != cur["digest"] and (r.get("created") or "9") <= (cur.get("created") or "9"):
                 ref_a = pd
-                label_a = f"{r['version']} @ {ts_short(r['created'])}"
+                # the state file's label rule: a light resolve reads annotations
+                # only, and a build without the version one was titled `None @ ...`
+                label_a = _state_label(dict(r, digest=pd))
                 break
     if not ref_a:
         now = time.time()
