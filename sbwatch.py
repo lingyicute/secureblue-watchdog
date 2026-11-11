@@ -1280,6 +1280,10 @@ class Bodhi:
             return []
         if self.calls >= self.max_calls:
             self.skipped += 1
+            # Classification asks once per binary and the backlog asks again.
+            # Count this unqueried source/release once, without re-reading a stale
+            # disk cache each time. Never persist a budget miss as a clean answer.
+            self._mem[key] = {"total": None, "truncated": False, "updates": []}
             return []
 
         res: list = []
