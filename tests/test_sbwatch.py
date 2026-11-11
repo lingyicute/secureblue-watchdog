@@ -1863,6 +1863,24 @@ class TestFixesThatUsedToBeSilent(unittest.TestCase):
                          S.crosscheck_chunks(LD_FIX, d, {"foo": "foo"}))
         self.assertEqual(v["level"], "consider")
 
+    def test_downgraded_sensitive_package_is_not_called_a_version_bump(self):
+        cls = {"cves": [], "cves_dropped": [], "security": False, "important_src": True,
+               "has_security_erratum": False, "aliases": [], "already_had": [],
+               "not_pushed": [], "why": [], "erratum": None, "erratum_severity": "",
+               "sev_rank": 0}
+        d = {"added": [], "removed": [], "downgrades": [{"name": "openssl"}],
+             "changed": [{"name": "openssl", "src": "openssl", "dir": "downgrade",
+                          "old": {"evr": "3.2.1-1.fc44"}, "new": {"evr": "3.2.0-1.fc44"},
+                          "cls": cls}],
+             "count_a": 5, "count_b": 5}
+        v = S.verdict_of(d, LD_FIX, {"kernel_a": "1", "kernel_b": "1"},
+                         S.crosscheck_chunks(LD_FIX, d, {"openssl": "openssl"}))
+        self.assertEqual(v["level"], "consider")
+        self.assertEqual(v["important_pkgs"], [])
+        self.assertNotIn("version bump", v["headline"])
+        self.assertIn("downgrades openssl", v["headline"])
+        self.assertEqual(v["downgrades"], ["openssl"])
+
     def test_changelog_cves_dropped_no_longer_escalates(self):
         d = {"added": [], "removed": [], "downgrades": [],
              "changed": [{"name": "foo", "src": "foo", "dir": "upgrade",
