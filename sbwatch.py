@@ -1178,6 +1178,12 @@ def read_header(blob: bytes, stats: dict | None = None) -> dict:
     """
     if stats is None:
         stats = {}
+    if not isinstance(blob, (bytes, bytearray)):
+        # NULL, TEXT or a number in the blob column: rpm never writes one, but a
+        # damaged or crafted rpmdb can, and slicing it was a TypeError that ended
+        # the whole run instead of costing one header.
+        stats["headers_rejected"] = stats.get("headers_rejected", 0) + 1
+        return {}
     if blob[:3] == b"\x8e\xad\xe8":          # legacy header w/ magic + reserved
         # magic(3) + version(1) + reserved(4) = 8 bytes, then nindex and hlen:
         # the same four words rpm's hdrblobRead() reads before the index
