@@ -56,6 +56,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import stat
 import struct
 import subprocess
 import sys
@@ -3932,12 +3933,34 @@ def cmd_pkgs(args):
     return 0
 
 
+def _swap_target(path: str):
+    """Where an atomic write may swap its temp file in, or None for "write in place".
+
+    A device or a pipe (`--json-out /dev/stdout`) cannot be replaced: the temp file
+    would be made next to it, in a directory that is rarely writable, and the final
+    rename would try to replace the device node itself. A symlink to a regular file
+    is followed, so the rename updates the file it points at and keeps the link.
+    """
+    try:
+        if not stat.S_ISREG(os.stat(path).st_mode):
+            return None
+    except OSError:
+        pass                  # does not exist yet (or a dangling link): a normal write
+    return os.path.realpath(path) if os.path.islink(path) else path
+
+
 def _atomic_write_text(path: str, text: str) -> None:
     """Same crash-safety as _atomic_write_json, for the markdown report.
 
     A half-written report.md is what the artifact upload and the sticky-issue
     comment would otherwise pick up if the process died mid-write.
     """
+    target = _swap_target(path)
+    if target is None:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        return
+    path = target
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + f".tmp.{os.getpid()}"
     try:
@@ -3957,6 +3980,12 @@ def _atomic_write_text(path: str, text: str) -> None:
 
 def _atomic_write_json(path: str, data, indent=None) -> None:
     """ atomic write to avoid cache corruption on concurrent runs."""
+    target = _swap_target(path)
+    if target is None:
+        with open(path, "w") as f:
+            f.write(json.dumps(data, indent=indent))
+        return
+    path = target
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + f".tmp.{os.getpid()}"
     try:
