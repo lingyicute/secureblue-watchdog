@@ -1032,10 +1032,13 @@ class Registry:
 
         try:
             try:
-                with tarfile.open(blob_path) as tf:
+                # "r:", a plain tar: fetch_blob() already gunzipped the layer under
+                # its caps, and tarfile's default mode would transparently decompress
+                # an inner gzip/bzip2/xz stream once more - under no cap at all.
+                with tarfile.open(blob_path, "r:") as tf:
                     chosen, target = pick_tar_member(tf, match, d)
                 if chosen is None and target:      # the entry is a symlink into the layer
-                    with tarfile.open(blob_path) as tf:
+                    with tarfile.open(blob_path, "r:") as tf:
                         chosen = scan_target(tf, target)
             except tarfile.TarError as e:
                 raise SystemExit(T(f"not a readable tar (layer {d}): {e}",
@@ -1050,7 +1053,7 @@ class Registry:
                     f"tar 成员 {chosen.name} 大小 {human(chosen.size)} 超过 "
                     f"{human(MAX_TAR_FILE_SIZE)} 限制"))
             try:
-                with tarfile.open(blob_path) as tf:
+                with tarfile.open(blob_path, "r:") as tf:
                     f = tf.extractfile(chosen)
                     if f is None:
                         raise SystemExit(T("unreadable tar member", "无法读取的 tar 成员"))
