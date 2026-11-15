@@ -216,7 +216,7 @@ python3 sbwatch.py backlog latest --max-bodhi 80
 | `update-now` | 含 CVE / security erratum，或 critical/high severity，**或 secureblue 会弹重大通知** | 立刻 `rpm-ostree upgrade && systemctl reboot` |
 | `consider` | kernel 变了 / 安全敏感包 bump / silent rebuild 含重要包 | 看下载量决定 |
 | `skip` | 常规 churn，无 CVE，无 security erratum | 可跳过 |
-| `no-change` | **rpmdb 里没有任何软件包发生变化**（且确实读过版本），chunk 只是重发 | 跳过，更新无意义 |
+| `no-change` | **rpmdb 里没有任何软件包发生变化**（且确实读过版本）。不属于任何软件包的文件（`chunkah/unclaimed`，secureblue 自己的配置就在其中）不在检查范围，变了会在 headline 里注明 | 就软件包而言可跳过 |
 | `no-update` | registry digest 未变 | 无新构建 |
 | `unknown` | 未读取包版本（`--exact 0`）或无法得出结论 | 需要更多信息，不能据此跳过 |
 

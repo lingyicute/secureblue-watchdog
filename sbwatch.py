@@ -2352,6 +2352,18 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                          f"for no new package content")
         v["headline_zh"] = (f"{ev_zh}。更新需重新下载 {v['download_human']}，"
                             f"不会带来新的软件包内容")
+        # "Rebuild only" was a guess. Files no package owns travel in
+        # `chunkah/unclaimed`, secureblue's own configuration among them, and nothing
+        # here looks inside that chunk: 45.20261114.0 was rebuilt for an edit to
+        # hardening.conf and its report was badged "REBUILD ONLY - SKIP".
+        loose = sum(ch["size"] for ch in ldiff.get("changed_chunks") or []
+                    if "chunkah/unclaimed" in (ch.get("components") or []))
+        if loose:
+            v["headline"] += (f". Not inspected: {human(loose)} of files that no package "
+                              f"owns (chunkah/unclaimed, secureblue's own configuration "
+                              f"among them) changed as well")
+            v["headline_zh"] += (f"。未检查：另有 {human(loose)} 不属于任何软件包的文件"
+                                 f"（chunkah/unclaimed，secureblue 自己的配置就在其中）发生了变化")
     elif sec:
         v["level"] = "update-now"
         # Two separate renderings: the trivia (", " vs "，", the count wording)
@@ -2593,14 +2605,14 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
 ICON_ZH = {"update-now": "[!] 立即更新",
            "consider": "[~] 可选更新",
            "skip": "[ok] 可跳过",
-           "no-change": "[ok] 仅重建——可跳过",
+           "no-change": "[ok] 软件包无变化",
            "no-update": "[ok] 无新构建",
            "unknown": "[?] 未知"}
 
 ICON_EN = {"update-now": "[!] UPDATE NOW",
            "consider": "[~] OPTIONAL",
            "skip": "[ok] SKIP OK",
-           "no-change": "[ok] REBUILD ONLY - SKIP",
+           "no-change": "[ok] NO PACKAGE CHANGE",
            "no-update": "[ok] NO NEW BUILD",
            "unknown": "[?] UNKNOWN"}
 
