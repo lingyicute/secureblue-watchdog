@@ -1635,16 +1635,17 @@ class TestAdvisoryAttachment(unittest.TestCase):
         cls = S.classify_change(old, new, "F44", FakeBodhi({"curl": ups}))
         self.assertEqual(cls["erratum_severity"], "Critical")
 
-    def test_added_package_advisory_also_drives_the_prediction(self):
-        # rpmostree_advisories_variant() sees every package that is *new* in the
-        # deployment, including added ones - predicting "none" here was wrong.
-        new = pkg("cups", "2.4.16-1.fc44")
-        added_cls = {"cups": S.classify_change(None, new, "F44",
-                                               FakeBodhi({"cups": [_upd_for("cups-2.4.16-1.fc44")]}))}
+    def test_added_package_advisory_does_not_drive_the_prediction(self):
+        # rpm-ostree looks advisories up for the packages whose version moved
+        # (rpm_diff_add_db_diff: `modified_new`); an added one is never asked about.
         diff = {"added": ["cups"], "removed": [], "changed": []}
-        sbn = S.secureblue_notification(diff, [], added_cls)
-        self.assertEqual(sbn["level"], "major")
-        self.assertEqual(sbn["added_packages_with_advisories"], ["cups"])
+        sbn = S.secureblue_notification(diff, [])
+        self.assertEqual(sbn["level"], "none")
+        self.assertNotIn("added_packages_with_advisories", sbn)
+
+    def test_added_packages_cost_no_bodhi_lookup(self):
+        with open(os.path.join(os.path.dirname(HERE), "sbwatch.py"), encoding="utf-8") as fh:
+            self.assertNotIn("added_cls", fh.read())
 
 
 # --------------------------------------------------------------------------- #
@@ -2177,8 +2178,7 @@ class TestNoSilentTruncation(unittest.TestCase):
         path = os.path.join(os.path.dirname(HERE), "sbwatch.py")
         with open(path, encoding="utf-8") as fh:
             src = fh.read()
-        for name in ("cves", "aliases", "dropped", "security_pkgs", "cves_dropped",
-                     "added_packages_with_advisories"):
+        for name in ("cves", "aliases", "dropped", "security_pkgs", "cves_dropped"):
             self.assertIsNone(
                 re.search(r'\["' + name + r'"\]\s*\[:', src),
                 f'["{name}"][:...] is back: slice it through clip_list() instead')

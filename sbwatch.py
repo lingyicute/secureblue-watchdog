@@ -2145,8 +2145,7 @@ def _sev_rank_for_upstream(s) -> int:
     return -1 if not s else rpmostree_str2severity(s)
 
 
-def secureblue_notification(diff: dict, groups: list | None = None,
-                            added_cls: dict | None = None) -> dict:
+def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
     """Which notification (if any) secureblue will pop after this update.
 
     Uses the *binary package names* that actually moved, exactly as rpm-ostree's
@@ -2175,19 +2174,11 @@ def secureblue_notification(diff: dict, groups: list | None = None,
     # matched after stripping `.secureblue.N` cannot inflate the prediction.
     sevs = [rpmostree_str2severity((g.get("erratum_severity") or "")) for g in groups
             if g.get("has_security_erratum")]
-    # rpm-ostree looks at every package that is *new* in the deployment, not just
-    # at the ones whose version moved: rpmostreed-deployment-utils.cxx merges the
-    # ostree- and rpm-"modified" sets before calling rpmostree_advisories_variant().
-    # So a package that this update only *added* can pop a notification too, and
-    # predicting "none" for it would simply be wrong.
-    added_hits = []
-    for _n, _cls in sorted((added_cls or {}).items()):
-        if not (_cls or {}).get("has_security_erratum"):
-            continue
-        _spelling = _cls.get("erratum_severity") or ""
-        _sev = rpmostree_str2severity(_spelling)
-        sevs.append(_sev)
-        added_hits.append((_n, _spelling, _sev))
+    # Only packages whose version moved are looked up: rpm_diff_add_db_diff() in
+    # rpmostreed-deployment-utils.cxx hands rpmostree_advisories_variant() the new
+    # side of the *modified* packages (upgraded and downgraded). One the update
+    # merely adds goes to .rpm-diff.added and is never asked about, so its
+    # erratum cannot pop a notification.
     max_sev_int = max(sevs) if sevs else None
     max_sev = ("none" if max_sev_int is None else
                {1: "low", 2: "moderate", 3: "important", 4: "critical"}.get(
@@ -2211,15 +2202,9 @@ def secureblue_notification(diff: dict, groups: list | None = None,
     if max_sev in ("critical", "important", "unknown"):
         why.append(f"security advisory with rpm-ostree severity '{max_sev}'")
         why_zh.append(f"存在 rpm-ostree 严重等级为 '{max_sev}' 的安全勘误")
-    for _n, _spelling, _sev in added_hits:
-        why.append(f"newly added package {_n} carries a security advisory "
-                   f"(updateinfo severity '{_spelling}', rpm-ostree rank {_sev})")
-        why_zh.append(f"本次新增的软件包 {_n} 自带安全勘误"
-                      f"（updateinfo 严重度 '{_spelling}'，rpm-ostree 等级 {_sev}）")
     return {"level": level, "message": msg, "max_advisory_severity": max_sev,
             "kernel_updated": kernel_updated, "trivalent_updated": trivalent_updated,
             "security_advisory_count": len(sevs),
-            "added_packages_with_advisories": [n for n, _s, _r in added_hits],
             "severity_basis": ("rpm-ostree .advisories: released security errata whose "
                                "EVR matches a package in the new image exactly; errata "
                                "matched only after stripping .secureblue.N are excluded"),
@@ -2283,7 +2268,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     # kernel moved" was reported for an update that did not touch it.
     kernel_moved = kernel_in_diff or (kernel_annot_moved
                                       and not meta.get("kernel_pkg_unchanged"))
-    sbn = secureblue_notification(diff, groups, diff.get("added_cls"))
+    sbn = secureblue_notification(diff, groups)
     if diff.get("count_a") == "?" and not diff.get("same_rpmdb"):
         # manifest-only mode (--exact 0): no rpmdb was read, so the package set
         # is unknown and "no notification" would be an unfounded claim.
@@ -2783,9 +2768,6 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             t_up = "是" if _sbn.get("trivalent_updated") else "否"
             W(f"- 内核已升级: {k_up} · trivalent 已升级: {t_up} · "
               f"最高勘误等级 (rpm-ostree 体系): `{_sbn.get('max_advisory_severity')}`")
-            if _sbn.get("added_packages_with_advisories"):
-                W(f"- 本次新增且自带安全勘误的包: "
-                  f"{clip_list(_sbn['added_packages_with_advisories'], 8, lang='zh', joiner='，')}")
             W("")
             W("> 这里的 severity 只取 *精确* EVR 命中：rpm-ostree 用 "
               "`dnf_package_get_advisories(pkg, HY_EQ)` 填充 `.advisories`，"
@@ -2814,9 +2796,6 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W(f"- kernel upgraded: {bool(_sbn.get('kernel_updated'))} · "
               f"trivalent upgraded: {bool(_sbn.get('trivalent_updated'))} · "
               f"max advisory severity (rpm-ostree scale): `{_sbn.get('max_advisory_severity')}`")
-            if _sbn.get("added_packages_with_advisories"):
-                W(f"- newly added packages that carry a security advisory: "
-                  f"{clip_list(_sbn['added_packages_with_advisories'], 8)}")
             W("")
             W("> The severity used here only counts *exact* EVR hits: rpm-ostree fills "
               "`.advisories` via `dnf_package_get_advisories(pkg, HY_EQ)`, and libdnf "
@@ -4214,17 +4193,6 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
                                                          max_calls=args.max_bodhi)
     for c in classify_order(diff["changed"]):       # report order stays by name
         c["cls"] = classify_change(c["old"], c["new"], rel, bodhi)
-    # rpm-ostree attaches advisories to every package that is *new* in the
-    # deployment, so packets that this update merely adds need classifying too -
-    # otherwise the prediction says "no notification" for an update whose desktop
-    # does pop one. They never raise the verdict: gaining a package is not the
-    # same as gaining a fix.
-    added_cls = {}
-    if bodhi is not None:
-        added_pkgs = [pb[n] for n in diff["added"] if n in pb]
-        for _p in classify_order(added_pkgs):
-            added_cls[_p["name"]] = classify_change(None, _p, rel, bodhi)
-    diff["added_cls"] = added_cls
     # parse-quality notes: both of these used to fail silently, and both make the
     # diff look calmer than the data warrants
     tables = (pb,) if pa is pb else (pa, pb)

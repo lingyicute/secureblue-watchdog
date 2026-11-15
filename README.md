@@ -50,8 +50,8 @@ secureblue 更新后会弹通知，判定逻辑在一个 shell 脚本里
 > 所以 secureblue 自建的内核 `7.2.8-200.secureblue.1.fc44` **不会**因为 Fedora 有
 > `7.2.8-200.fc44` 的勘误而弹窗。`sbwatch` 现在同样处理：这类命中标为
 > 「对应 Fedora 勘误（归一化匹配）」，**计入报告与 CVE 判定，但不计入通知预测**；
-> 反过来，`.advisories` 覆盖「新部署里所有变化的包」，**包含本次新增的包**，
-> 所以新增包上的勘误也会驱动预测。
+> `.advisories` 只查版本变了的包（升级或降级），本次**新增**的包不在其中，
+> 所以新增包上的勘误不驱动预测。
 
 ```json
 {
@@ -298,7 +298,7 @@ python3 -m unittest discover -s tests -v
 | **F** | **secureblue 通知规则**：severity 以 `<severity>` **子元素**（而非属性）发布；Bodhi 原词先经 `severity_updateinfo_str()` 映射成 RHEL 拼写再进 `str2severity`（`urgent→Critical(4)` 触发 `major`、`medium→Moderate(2)` **不弹**、raw Bodhi 词直接进词表一律为 0）；按 Bodhi 原词全链路对拍 + 11 行真值表与上游 `case` 逐条对拍；trivalent 单独升级 ⟹ `major` 且把 verdict 抬到 `update-now`；kernel 靠**包 diff** 识别（`ostree.linux` 相同也要认出来）；kernel 降级不算升级；仅匹配旧构建或未推送的勘误不得触发 |
 | **G** | **`no-change` 的判据**：inputhash 相同但包动了 ⟹ 不得判 `no-change`；`--exact 0` 未读版本 ⟹ 也不得判 `no-change`、不得声称"rpmdb 中无变化"；措辞不得再出现"逐字节一致"；`rpmdb_chunk()` 的选层规则必须与 `package_list()` 一致（否则快速路径会校验 A 层却读 B 层） |
 | **H** | **报告独立双语排版与决策修正**：报告输出格式改为纯中文在上、`---` 分割、纯英文在下，引入结构化双语处理防止含斜杠说明文本截断；trivalent 将判定从 `consider` 提升至 `update-now` 时剥离冲突的“可合理跳过”文案；`check --fast` 命中相同 rpmdb chunk 时端到端保留无变更确证，正确输出 `no-change` |
-| **I** | **勘误附着语义**：剥离 `.secureblue.N` 后的命中要报告（`advisory_corresponding`），但**不得**计入 `has_security_erratum` / 通知预测；精确命中的严重度照旧驱动 `major`；**新增包**上的安全勘误同样驱动预测 |
+| **I** | **勘误附着语义**：剥离 `.secureblue.N` 后的命中要报告（`advisory_corresponding`），但**不得**计入 `has_security_erratum` / 通知预测；精确命中的严重度照旧驱动 `major`；**新增包**上的安全勘误不驱动预测（rpm-ostree 只查版本变了的包） |
 | **J** | **manifest-only 不得给建议**：`--exact 0` 的 `level` 必须是 `unknown`、并给出 `level_basis`；`no-change` 分支不得吞掉后面的 backlog/告警说明；`silent_important` 不再只看前 60 个重建项 |
 | **K** | 静默/致命缺陷：`tag_exists` 只对 404 沉默、其它状态码要告警；backlog 严重度序（`medium` 不得排在 `low` 之后）；Bodhi `nvr=null` 不再崩溃；`coverage_line` 容忍缺键；`group_by_src` 不再要求 `dir`；缺 `ostree.linux` 不再渲染成 `None`；multilib 同名包被记录而非静默丢弃；`read_header` 统计并披露解析失败；报告写入改为原子 |
 | **L** | **CI 供应链**：所有 action 钉到 commit SHA；cosign 公钥入库并校验 sha256（运行时不再联网取钥）；`actions: write` 只给需要的 job；`push` 只触发 main；结论为 `unknown` 的运行不再「绿」 |
