@@ -100,7 +100,7 @@ MAX_TAR_FILE_SIZE = 256 * 1024 * 1024       # 256 MiB single file inside tar
 BODHI_PAGE_SIZE = 100                       # Bodhi's max rows_per_page
 MAX_BODHI_PAGES = 10                        # 1000 errata/src is far beyond any real case
 BODHI_GIVE_UP_AFTER = 3     # failed lookups in a row before Bodhi counts as down: each
-                            # can block for its whole 40 s timeout, and --max-bodhi 80
+                            # can block for its whole 40 s timeout, and --max-bodhi 100
                             # of those outlast the workflow's 25-minute limit. The
                             # first of a streak is tried twice (Bodhi._fetch_page)
 BODHI_TTL = 6 * 3600        # age at which a cached Bodhi answer is refetched
@@ -3315,6 +3315,11 @@ BACKLOG_POOL = {
     "wireless-regdb", "linux-firmware", "runc", "crun", "cri-o",
     "podman", "skopeo", "composefs", "cryptsetup", "keyutils",
 }
+# Default for --backlog-candidates: every pool source the image has. The former 45
+# was fewer than the live image's 55 candidates, so the same ten (keyutils, krb5,
+# openvpn, podman, python-pip, qt6-qtbase, skopeo, unbound, wireguard-tools,
+# wireless-regdb) were cut off on every run and never audited at all.
+BACKLOG_CANDIDATES = len(BACKLOG_POOL)
 
 
 def _is_behind(p: dict, cand_version: str, cand_release: str,
@@ -3345,7 +3350,8 @@ def _is_behind(p: dict, cand_version: str, cand_release: str,
     return rpmvercmp(rel, cand_release) < 0
 
 
-def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi, limit: int = 45) -> tuple:
+def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
+                     limit: int = BACKLOG_CANDIDATES) -> tuple:
     """Stable Fedora security errata whose build is newer than what the image ships.
 
     Returns (rows, coverage). The coverage numbers matter: `limit` truncates the
@@ -4289,7 +4295,7 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
         # larger one - `--max-bodhi 10 --audit` still made up to 45 calls) and one
         # shared answer cache, so a source package already looked up for the diff
         # costs nothing here.
-        n_cand = max(1, int(getattr(args, "backlog_candidates", 45)))
+        n_cand = max(1, int(getattr(args, "backlog_candidates", BACKLOG_CANDIDATES)))
         backlog, coverage = security_backlog(pb, rel, bodhi, limit=n_cand)
     if bodhi is not None:
         bstate = {"failed": bodhi.failed, "skipped": bodhi.skipped,
@@ -4813,9 +4819,9 @@ def add_common(p):
     p.add_argument("--no-bodhi", action="store_true",
                    help="do not query Fedora Bodhi (changelog-CVE matching only) / "
                         "不查询 Fedora Bodhi（仅按更新日志匹配 CVE）")
-    p.add_argument("--max-bodhi", type=int, default=80,
+    p.add_argument("--max-bodhi", type=int, default=100,
                    help="cap on Bodhi API calls / Bodhi API 调用上限")
-    p.add_argument("--backlog-candidates", type=int, default=45,
+    p.add_argument("--backlog-candidates", type=int, default=BACKLOG_CANDIDATES,
                    help="with --audit: how many candidate source packages the "
                         "'still behind' check may look at (it shares the --max-bodhi "
                         "call budget) / 配合 --audit：'仍落后' 检查最多查看多少个候选源码包"
