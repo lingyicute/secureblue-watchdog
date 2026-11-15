@@ -4594,9 +4594,17 @@ def cmd_check(args):
         for i in range(1, 22):
             d = time.strftime("%Y%m%d", time.gmtime(now - i * 86400))
             dig = tag_exists(reg, d, warn=hist_warnings)
-            if dig and dig != cur.get("index_digest"):
-                ref_a, label_a = d, d
-                break
+            if not dig or dig == cur.get("index_digest"):
+                continue
+            # A watched tag that is not the repo's newest build (`44` once `latest`
+            # is on 45) has dated tags *after* it, and the first of them became the
+            # baseline: the report read `44 -> 20261114`, the watched image as the
+            # old side of an update it never received.
+            cand = resolve(reg, d)
+            if (cand.get("created") or "") > (cur.get("created") or "9"):
+                continue
+            ref_a, label_a, prev = d, d, cand
+            break
     if not ref_a:
         msg = T(f"new build ({ver}) but no earlier image available to diff against",
                 f"有新构建（{ver}），但没有可用于对比的更早镜像")
