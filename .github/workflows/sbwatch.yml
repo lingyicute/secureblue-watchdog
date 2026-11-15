@@ -277,7 +277,9 @@ jobs:
           title="secureblue update watch"
           {
             printf '> 🤖 update-watch · %s · verdict: **%s**\n\n' "$(date -u +%F)" "$VERDICT"
-            if [ -n "${FAIL_REASON:-}" ]; then printf '> fail-on-security trigger: %s\n\n' "$FAIL_REASON"; fi
+            # Why the verdict is update-now. It is set whether or not FAIL_ON_SECURITY
+            # is on, so "fail-on-security trigger" read like a run that had failed.
+            if [ -n "${FAIL_REASON:-}" ]; then printf '> why update-now: %s\n\n' "$FAIL_REASON"; fi
             if [ -f report.md ]; then cat report.md; else echo "_no report_"; fi
           } > body.md
           # GitHub refuses an issue/comment body over 65536 characters, and a big
