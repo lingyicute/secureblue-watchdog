@@ -3876,7 +3876,12 @@ def cmd_tags(args):
     reg._token()
     cur = resolve(reg, args.to)
     maybe_verify_resolved(reg, cur, args)
-    print(f"{args.to} -> {cur['digest']}")
+    # The index digest, like the dated tags below: with the platform digest here
+    # the listing read `latest -> sha256:9492...` above `20261114  sha256:2eb4...
+    # == latest`, one image under two digests and no word on which is which.
+    print(f"{args.to} -> {cur.get('index_digest') or cur['digest']}")
+    if cur.get("index_digest") and cur["index_digest"] != cur["digest"]:
+        print(f"  platform manifest 平台 manifest: {cur['digest']}")
     print(f"  version 版本: {cur['annotations'].get('org.opencontainers.image.version')}")
     print(f"  created 构建时间: {cur.get('created')}   kernel 内核: {cur['annotations'].get('ostree.linux')}")
     print(f"  chunks 分块: {len(cur['layers'])}  total 总量: {human(sum(l['size'] for l in cur['layers']))}")
