@@ -2190,6 +2190,13 @@ def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
         level, msg = "normal", "A security vulnerability has been patched"
     else:
         level, msg = "none", None
+    # .advisories only exists where rpm-ostree held rpm-md metadata for the update:
+    # rpmostreed_update_generate_variant() computes it under `if (sack && ...)`, and
+    # the upgrader keeps a sack only when the origin has packages
+    # (prep_local_assembly(): rpmostree_origin_has_any_packages). A stock system
+    # gets no list at all, the script reads its maximum as `none`, and only the
+    # kernel / trivalent arms can fire there.
+    stock = "major" if trivalent_updated else "normal" if kernel_updated else "none"
     why = []
     why_zh = []
     if trivalent_updated:
@@ -2205,6 +2212,7 @@ def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
     return {"level": level, "message": msg, "max_advisory_severity": max_sev,
             "kernel_updated": kernel_updated, "trivalent_updated": trivalent_updated,
             "security_advisory_count": len(sevs),
+            "level_without_advisories": stock, "advisory_driven": stock != level,
             "severity_basis": ("rpm-ostree .advisories: released security errata whose "
                                "EVR matches a package in the new image exactly; errata "
                                "matched only after stripping .secureblue.N are excluded"),
@@ -2451,6 +2459,15 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         v["headline_zh"] += (f" ｜ secureblue 将弹出{tag_zh}通知："
                              f"「{sbn['message']}」"
                              f"（触发原因：{'；'.join(reasons_zh)}）")
+        if sbn.get("advisory_driven"):
+            # the advisory arm needs rpm-md metadata: see secureblue_notification()
+            kernel_only = sbn.get("level_without_advisories") == "normal"
+            v["headline"] += (" - only where rpm-ostree computes advisories, i.e. with "
+                              "layered packages; a stock system gets "
+                              + ("the normal notification for the kernel alone"
+                                 if kernel_only else "no notification"))
+            v["headline_zh"] += ("——仅限 rpm-ostree 会计算勘误的系统，即叠加了软件包的系统；默认安装"
+                                 + ("只因内核升级弹出普通通知" if kernel_only else "不弹通知"))
     if v["same_inputhash_but_packages_moved"]:
         n_moved = n_bin + len(diff["added"]) + len(diff["removed"])
         v["headline"] += (" | NOTE: rpmostree.inputhash is identical on both images yet "
@@ -2762,6 +2779,10 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("")
             msg_str = (f" — \"{_sbn['message']}\"") if _sbn.get("message") else ""
             W(f"- 预测弹窗: {_badge}{msg_str}")
+            if _sbn.get("advisory_driven") and _lvl != "unknown":
+                W("- 未叠加软件包的系统（默认安装）: "
+                  + ("普通 (normal)——仅因内核升级"
+                     if _sbn.get("level_without_advisories") == "normal" else "无 (none)"))
             reasons = _sbn.get("why_zh") or _sbn.get("why") or []
             W(f"- 触发条件: {'，'.join(reasons) or '—'}")
             k_up = "是" if _sbn.get("kernel_updated") else "否"
@@ -2775,6 +2796,10 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               "因此 secureblue 自建包（如 `7.2.8-200.secureblue.1.fc44`）"
               "即使对应着 Fedora 的 `7.2.8-200.fc44` 勘误，桌面也不会因此弹窗——"
               "报告里会把它列为「对应 Fedora 勘误（归一化匹配）」。")
+            W("")
+            W("> `.advisories` 只在 rpm-ostree 持有本次更新的 rpm-md 元数据时才存在，而它只为"
+              "叠加了软件包（`rpm-ostree install`）的系统加载这些元数据。默认安装没有这份列表，"
+              "脚本读到的最高勘误等级恒为 none：那里只有 `kernel` / `trivalent` 升级会触发通知。")
             W("")
             W("> 依据 secureblue 的 `security-update-notification` 脚本：`trivalent` 升级 → 重大通知；"
               "`kernel` 升级或最高勘误等级为 important/unknown → 普通通知。勘误等级取自 updateinfo 的 "
@@ -2791,6 +2816,10 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("")
             msg_str = (f" — \"{_sbn['message']}\"") if _sbn.get("message") else ""
             W(f"- predicted popup: {_badge}{msg_str}")
+            if _sbn.get("advisory_driven") and _lvl != "unknown":
+                W("- on a system without layered packages (a stock install): "
+                  + ("normal - for the kernel upgrade alone"
+                     if _sbn.get("level_without_advisories") == "normal" else "none"))
             reasons = _sbn.get("why") or []
             W(f"- trigger: {', '.join(reasons) or '—'}")
             W(f"- kernel upgraded: {bool(_sbn.get('kernel_updated'))} · "
@@ -2803,6 +2832,11 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               "secureblue-rebuilt package such as `7.2.8-200.secureblue.1.fc44` will not "
               "pop a notification even though Fedora has an erratum for `7.2.8-200.fc44`; "
               "the report lists those as \'corresponding Fedora erratum (normalised match)\'. ")
+            W("")
+            W("> `.advisories` only exists where rpm-ostree held rpm-md metadata for the update, "
+              "and it loads that only on a system with layered packages (`rpm-ostree install`). "
+              "A stock install has no such list and the script reads the maximum severity as "
+              "none: only a `kernel` / `trivalent` upgrade raises a notification there.")
             W("")
             W("> Based on secureblue's `security-update-notification` script: `trivalent` upgraded → major notification; "
               "`kernel` upgraded or max advisory severity important/unknown → normal notification. The severity comes "

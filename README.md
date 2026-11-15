@@ -42,6 +42,15 @@ secureblue 更新后会弹通知，判定逻辑在一个 shell 脚本里
 
 `sbwatch` 按同一条规则预测，结果放在 `verdict.secureblue_notification`（报告里是「secureblue notification 桌面通知预测」小节）：
 
+> [!important]
+> **勘误这一支只对叠加了软件包的系统成立。** rpm-ostree 只有在持有本次更新的 rpm-md
+> 元数据时才计算 `.advisories`（`rpmostreed_update_generate_variant()` 里是
+> `if (sack && …)`），而升级器只在 origin 带软件包时才保留这份元数据
+> （`prep_local_assembly()`：`rpmostree_origin_has_any_packages()`）。默认安装没有
+> `.advisories`，脚本读到的最高等级恒为 `none`，只有 `kernel` / `trivalent` 升级会弹窗。
+> `level` 按「有勘误」预测；`level_without_advisories` 是默认安装会看到的结果，
+> `advisory_driven` 表示两者不同，报告与 headline 会一并写明。
+
 > [!tip]
 > **severity 只取「精确 EVR 命中」。** rpm-ostree 用
 > `dnf_package_get_advisories(pkg, HY_EQ)` 填充 `.advisories`，libdnf 只在
@@ -57,6 +66,8 @@ secureblue 更新后会弹通知，判定逻辑在一个 shell 脚本里
 {
   "level": "major",
   "message": "A major security vulnerability has been patched",
+  "level_without_advisories": "major",
+  "advisory_driven": false,
   "max_advisory_severity": "unknown",
   "kernel_updated": true,
   "trivalent_updated": true,
@@ -87,7 +98,8 @@ Important=112、**Critical=13**（含 2026-09-22 的 chromium）。
 | `low` | `Low` | 1 → `low`（无此分支） | **不弹** |
 | `unspecified`/缺失 | `None` | 0 → `*)` → `unknown` | 普通 |
 
-所以 `major` 有两条触发路径：**trivalent 升级**，或**存在 Bodhi `urgent` 级安全勘误**。
+所以 `major` 有两条触发路径：**trivalent 升级**，或**存在 Bodhi `urgent` 级安全勘误**
+（后者只在叠加了软件包的系统上成立，见上）。
 `sbwatch` 存的就是映射后的拼写再喂 `rpmostree_str2severity()`（若直接喂 Bodhi 原词：
 `urgent` 会被低估成普通、`medium` 会被高估成普通——两个方向都错）。
 
