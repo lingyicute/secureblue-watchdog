@@ -282,7 +282,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/` 包含 **411 项离线回归测试**，不需要网络、不访问 registry
+`tests/` 包含 **457 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -360,6 +360,14 @@ python3 -m unittest discover -s tests -v
 - `test_tags_index_digest.py`：`tags` 首行给出 index digest（与下方日期标签同一口径），平台 digest 另起一行标明。
 - `test_layer_plain_tar.py`：解压后的层只按普通 tar 读取；层内再套一层压缩流（gzip/bz2/xz）会被拒绝，而不是绕过解压上限被透明解开。
 - `test_cve_id_boundary.py`：超过 7 位数字的编号不得被截成另一个 CVE 编号（`CVE-2026-12345678` 不是 `CVE-2026-1234567`）。
+- `test_third_party_vendor.py` / `test_pkglist_cache_version.py`：按 RPM `Vendor` 识别第三方仓库包（`negativo17.org` 的 `ffmpeg`/`mesa`/`libva`、`Fedora Copr`、`NVIDIA` 等），避免裸 NVR 撞上 Fedora epoch 0 勘误造成误报；旧版无 `vendor` 字段的包表缓存自动重取。
+- `test_backlog_pool_sources.py`：`BACKLOG_POOL` 移除无 Fedora 对应包的 `trivalent`，并将默认包管理器 `dnf5` 纳入 `IMPORTANT_SRC` 与 `BACKLOG_POOL`。
+- `test_distless_passed_over.py`：`shim`、`fedora-release` 这类无 `.fcNN` 后缀的 Fedora 包也能匹配被越过构建的安全勘误。
+- `test_multiple_matching_errata.py` / `test_security_advisory_count.py`：同构建命中多条勘误时保留安全/高严重度记录；桌面通知预测按唯一勘误编号去重计数；`level_basis` 不再把高严重度 bugfix 勘误称为安全勘误。
+- `test_backlog_actual_coverage.py`：backlog 覆盖率只统计实际完成查询的源码包，并披露失败、`--max-bodhi` 跳过与分页截断。
+- `test_sourcerpm_name.py` / `test_rpm_header_store_bounds.py` / `test_multilib_handling.py`：兼容非数字开头版本的 SRPM 解析；RPM 头部读取严格限制在数据区边界内；multilib 同版本按架构确定性择优并同时披露旧镜像冲突；JSON diff 输出补齐变化的 epoch。
+- `test_downgrade_headline.py` / `test_already_had_section.py` / `test_report_language_split.py` / `test_manifest_only_footer.py`：内核或常规包降级不再计为正向升级；已拥有勘误去重并排除被降级回退的包；中英文报告半区彻底隔离；`--exact 0` 页脚不再声称拉取了 `rpmdb.sqlite`。
+- `test_tar_links.py` / `test_timestamp_offsets.py` / `test_check_swapped_title.py` / `test_tag_digest_header.py` / `test_token_refresh.py` / `test_image_ref_parsing.py`：tar 软/硬链接可胜过 0 字节占位文件；带时区偏移的 RFC 3339 时间戳按 UTC 时刻排序；排除 `br-*` 分支预览构建与晚于目标的构建、保留同分钟多次构建；校验状态文件监控标签与摘要头；401 时自动刷新过期 pull token；拒绝空 `@` 摘要并忽略主机名大小写。
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
