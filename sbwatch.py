@@ -976,7 +976,7 @@ class Registry:
             check_digest(hashlib.sha256(raw).hexdigest(), cfg_dig,
                          f"image config {clip_hash(cfg_dig, 19)}", required=True)
             cfg = json.loads(raw)
-            ann.update(dict((cfg.get("config") or {}).get("Labels") or {}))
+            ann = {**dict((cfg.get("config") or {}).get("Labels") or {}), **ann}
         out["config"] = cfg
         out["annotations"] = ann
         # RFC3339 with nanoseconds -> whole seconds + zone. Only the fractional
