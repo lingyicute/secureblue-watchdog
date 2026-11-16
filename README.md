@@ -282,7 +282,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/` 包含 **409 项离线回归测试**，不需要网络、不访问 registry
+`tests/` 包含 **411 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -359,6 +359,7 @@ python3 -m unittest discover -s tests -v
 - `test_no_change_wording.py`：`no-change` 只对软件包负责；`chunkah/unclaimed` 变了就在 headline 注明未检查，徽章不再自称「仅重建」。
 - `test_tags_index_digest.py`：`tags` 首行给出 index digest（与下方日期标签同一口径），平台 digest 另起一行标明。
 - `test_layer_plain_tar.py`：解压后的层只按普通 tar 读取；层内再套一层压缩流（gzip/bz2/xz）会被拒绝，而不是绕过解压上限被透明解开。
+- `test_cve_id_boundary.py`：超过 7 位数字的编号不得被截成另一个 CVE 编号（`CVE-2026-12345678` 不是 `CVE-2026-1234567`）。
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
