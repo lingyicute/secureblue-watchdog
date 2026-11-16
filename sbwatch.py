@@ -707,7 +707,7 @@ class _SameHostAuthRedirect(urllib.request.HTTPRedirectHandler):
             old_url = urllib.parse.urlsplit(req.full_url)
             new_url = urllib.parse.urlsplit(new.full_url)
             # An HTTPS -> HTTP redirect is not the same origin, even on one host.
-            if (old_url.scheme, old_url.netloc) != (new_url.scheme, new_url.netloc):
+            if (old_url.scheme, old_url.netloc.lower()) != (new_url.scheme, new_url.netloc.lower()):
                 new.remove_header("Authorization")
         return new
 
@@ -3830,7 +3830,7 @@ def list_tags(reg: Registry, max_pages: int = TAG_LIST_MAX_PAGES) -> list:
             target = urllib.parse.urlsplit(next_url)
             # Each page gets a fresh bearer token header, so redirect stripping
             # alone cannot protect an attacker-controlled Link target.
-            if (target.scheme, target.netloc) != ("https", reg.host):
+            if (target.scheme, target.netloc.lower()) != ("https", reg.host.lower()):
                 raise ValueError("pagination left the registry origin")
         except ValueError:
             log(T("  ! unsafe tag pagination link refused - history may be incomplete",

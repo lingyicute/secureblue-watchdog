@@ -10,6 +10,22 @@ class TestImageRefParsing(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(SystemExit):
                 S.Registry._split(bad)
 
+    def test_tag_pagination_accepts_same_host_in_lowercase_when_ref_used_uppercase(self):
+        import io
+        from unittest.mock import patch
+
+        class _Resp(io.BytesIO):
+            def __init__(self, body, link=None):
+                super().__init__(body)
+                self.headers = {"Link": link} if link else {}
+
+        pages = [_Resp(b'{"tags": ["a"]}',
+                       '<https://ghcr.io/v2/ns/name/tags/list?last=a>; rel="next"'),
+                 _Resp(b'{"tags": ["b"]}')]
+        reg = S.Registry("GHCR.IO/ns/name")
+        with patch.object(reg, "_token", return_value="tok"),                 patch.object(S._OPENER, "open", side_effect=pages):
+            self.assertEqual(S.list_tags(reg), ["a", "b"])
+
 
 if __name__ == "__main__":
     unittest.main()
