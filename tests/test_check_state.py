@@ -84,6 +84,14 @@ class TestCheckState(unittest.TestCase):
                 self.assertIn("verdict=unknown\n", output)
                 self.assertEqual(saved["digest"], _image(2)["digest"])
 
+    def test_state_of_another_watched_tag_is_not_a_baseline(self):
+        resolved, saved, output, err = self._check(
+            _state(image="ghcr.io/x/y", arch="amd64", tag="44"))
+        self.assertEqual(resolved, ["latest"])
+        self.assertIn("verdict=unknown", output)
+        self.assertIn(":44", err)
+        self.assertEqual(saved["tag"], "latest")
+
 
 if __name__ == "__main__":
     unittest.main()

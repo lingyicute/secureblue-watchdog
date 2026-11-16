@@ -4695,15 +4695,19 @@ def cmd_check(args):
     # amd64 run diffed the amd64 build against the arm64 one (same repo, so the
     # digest resolves) and reported nearly every chunk as changed.
     ident = {"image": f"{reg.host}/{reg.repo}", "arch": reg.arch}
+    watch_ident = {**ident, "tag": args.to}
     state_foreign = None
-    if any(state.get(k) and state[k] != v for k, v in ident.items()):
-        theirs = f"{state.get('image') or ident['image']} ({state.get('arch') or ident['arch']})"
+    if any(state.get(k) and state[k] != v for k, v in watch_ident.items()):
+        t_tag = f":{state['tag']}" if state.get("tag") and state["tag"] != args.to else ""
+        w_tag = f":{args.to}" if t_tag else ""
+        theirs = (f"{state.get('image') or ident['image']}{t_tag} "
+                  f"({state.get('arch') or ident['arch']})")
         state_foreign = T(
-            f"the state file was written for {theirs}, not for {ident['image']} "
-            f"({ident['arch']}), so it was ignored - give every watched image/arch "
+            f"the state file was written for {theirs}, not for {ident['image']}{w_tag} "
+            f"({ident['arch']}), so it was ignored - give every watched image/tag/arch "
             f"its own --state",
-            f"状态文件是为 {theirs} 写的，而不是 {ident['image']}（{ident['arch']}），"
-            f"已忽略——请为每个被监控的镜像/架构单独指定 --state")
+            f"状态文件是为 {theirs} 写的，而不是 {ident['image']}{w_tag}"
+            f"（{ident['arch']}），已忽略——请为每个被监控的镜像/标签/架构单独指定 --state")
         log("  ! " + state_foreign)
         state = {}
     cur = resolve(reg, args.to)
