@@ -1337,7 +1337,7 @@ def package_list(reg: Registry, resolved: dict) -> dict:
                           "text": t} for i, t in enumerate(texts)]
                 e = {"name": name, "version": h.get("version", ""), "release": h.get("release", ""),
                      "epoch": h.get("epoch", ""), "arch": h.get("arch", ""), "srpm": srpm, "src": src,
-                     "changelog": chlog}
+                     "vendor": h.get("vendor", ""), "changelog": chlog}
                 e["evr"] = e["version"] + "-" + e["release"]
                 e["nvr"] = f"{name}-{e['version']}-{e['release']}"
                 table_put(pkgs, e)
@@ -1597,6 +1597,23 @@ SEV_RANK = {"critical": 4, "urgent": 4, "important": 3, "high": 3, "moderate": 2
 PUSHED_STATUSES = {"stable"}
 
 
+def _is_third_party(pkg: dict) -> bool:
+    """True when the RPM Vendor header proves the package is not a Fedora build.
+
+    Fedora Koji sets Vendor to `Fedora Project` on every package it builds.
+    secureblue also layers third-party repos (`negativo17.org` ships `ffmpeg`,
+    `mesa` and `libva` at Epoch 1 with `.fcNN` releases; `Fedora Copr - user
+    secureblue`, `NVIDIA CORPORATION` and `secureblue` ship their own packages).
+    Their bare NVRs can equal epoch-0 Fedora builds in Bodhi (`ffmpeg-9.0.2-2.fc45`
+    matched `FEDORA-2026-91259c13b9` and its 40 libxml2 CVEs), yet rpm-ostree
+    never attaches those advisories and Fedora did not build the package. An
+    empty Vendor is left eligible: secureblue's rebuilt `kernel` carries none
+    and still maps to its upstream Fedora build via `.secureblue.N` stripping.
+    """
+    vendor = (pkg.get("vendor") or "").strip()
+    return bool(vendor and vendor != "Fedora Project")
+
+
 def nvr_candidates_split(pkg: dict) -> tuple:
     """(exact spellings, release-normalised spellings) of this NEVRA for Bodhi.
 
@@ -1806,13 +1823,15 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
 
     # (b) the Fedora erratum that shipped the new build
     exact_new, norm_new = nvr_candidates_split(new)
-    exact_new, norm_new = set(exact_new), set(norm_new)
+    third_party = _is_third_party(new)
+    exact_new = set() if third_party else set(exact_new)
+    norm_new = set(norm_new)
     if old:
         old_exact, old_norm = nvr_candidates_split(old)
-        old_all = set(old_exact) | set(old_norm)
+        old_all = set(old_norm) if _is_third_party(old) else (set(old_exact) | set(old_norm))
     else:
         old_all = set()
-    if bodhi is not None:
+    if bodhi is not None and (not third_party or norm_new):
         for u in bodhi.updates_for_src(new["src"], rel):
             nvrs = set(u["nvrs"])
             # exact EVR match = the advisory is attached to this build (this is
@@ -1827,7 +1846,8 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                 # update that passes over this build (curl 8.9.0 -> 8.9.3, past
                 # the security erratum of 8.9.1) gains its fix all the same, and
                 # only a CVE id in the rpm changelog could say so before.
-                passed = _passed_build(old, new, u["nvrs"]) if old else None
+                passed = (_passed_build(old, new, u["nvrs"])
+                          if (old and not third_party and not _is_third_party(old)) else None)
                 if passed and u.get("type") == "security" and status in PUSHED_STATUSES:
                     info["passed_over"].append(
                         {"alias": u["alias"], "severity": u.get("severity"),
