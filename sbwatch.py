@@ -3557,6 +3557,8 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
     cov["checked"] = queried
     cov["failed"] = audit_failed if isinstance(mem, dict) else bodhi.failed
     cov["skipped_queries"] = audit_skipped if isinstance(mem, dict) else bodhi.skipped
+    trunc = getattr(bodhi, "truncated_src", None) or ()
+    cov["truncated"] = sorted(src for src in chosen if src in trunc)
     return rows, cov
 
 
@@ -3628,6 +3630,11 @@ def cmd_backlog(args):
                 "--max-bodhi ran out - those packages were NOT checked",
                 f"  ！{cov['skipped_queries']} 个源码包因 --max-bodhi 用尽而未被查询——"
                 "这些软件包未被检查"))
+    if cov.get("truncated"):
+        tr_en = clip_list(cov["truncated"], 8)
+        tr_zh = clip_list(cov["truncated"], 8, lang="zh", joiner="，")
+        print(T(f"  ! errata list truncated for: {tr_en} - their audit is INCOMPLETE",
+                f"  ！以下软件包的勘误列表被截断：{tr_zh}——其审计不完整"))
     if args.json_out:
         _atomic_write_json(args.json_out, {"ref": args.ref, "digest": img["digest"],
                                            "version": ver, "behind": rows, "coverage": cov},

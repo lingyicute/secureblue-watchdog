@@ -40,6 +40,26 @@ class TestBacklogActualCoverage(unittest.TestCase):
         self.assertIn("0 of 1", S.coverage_line(cov).en)
         self.assertIn("1 failed", S.coverage_line(cov).en)
 
+    def test_truncated_sources_are_recorded_and_printed_by_cmd_backlog(self):
+        class _TruncBodhi:
+            failed = skipped = 0
+            truncated_src = {"kernel", "unrelated"}
+
+            def __init__(self, **kw):
+                pass
+
+            def updates_for_src(self, src, rel):
+                return []
+
+        img = {"digest": "sha256:" + "1" * 64, "layers": [],
+               "annotations": {"org.opencontainers.image.version": "45.20261116.0"}}
+        out = io.StringIO()
+        with patch.object(S.Registry, "_token", return_value=None),                 patch.object(S, "resolve", return_value=img),                 patch.object(S, "load_pkglist",
+                             return_value=S.PackageTable({"kernel": pkg("kernel", "7.3-1.fc45")})),                 patch.object(S, "Bodhi", _TruncBodhi),                 contextlib.redirect_stdout(out):
+            S.main(["backlog", "latest"])
+        self.assertIn("errata list truncated for: kernel", out.getvalue())
+        self.assertNotIn("unrelated", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
