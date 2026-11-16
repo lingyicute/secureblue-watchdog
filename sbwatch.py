@@ -2499,13 +2499,15 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                     f"(initramfs / ostree metadata)")
             tail_zh = (f"；下载中有 {human(v['non_package_bytes'])} 属于非软件包内容"
                        f"（initramfs / ostree 元数据）")
+        up_groups = [g for g in groups if not g["downgrade"]]
+        up_bin = sum(len(g["pkgs"]) for g in up_groups)
         v["level"] = "skip"
-        v["headline"] = (f"routine churn: {plural(len(groups), 'source package')} "
-                         f"({n_bin} binary) bumped, {len(diff['added'])} added / "
+        v["headline"] = (f"routine churn: {plural(len(up_groups), 'source package')} "
+                         f"({up_bin} binary) bumped, {len(diff['added'])} added / "
                          f"{len(diff['removed'])} removed, no CVE and no security erratum"
                          + (f", {len(silent)} chunk(s) rebuilt with identical versions" if silent else "")
                          + tail)
-        v["headline_zh"] = (f"常规更新：{len(groups)} 个源码包（{n_bin} 个二进制包）升级，"
+        v["headline_zh"] = (f"常规更新：{len(up_groups)} 个源码包（{up_bin} 个二进制包）升级，"
                             f"新增 {len(diff['added'])} 个 / 移除 {len(diff['removed'])} 个，"
                             "无 CVE、无安全勘误"
                             + (f"，{len(silent)} 个 chunk 以相同版本重建" if silent else "")

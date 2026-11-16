@@ -23,6 +23,17 @@ class TestDowngradeHeadline(unittest.TestCase):
         self.assertNotIn("Reasonable to skip", v["headline"])
         self.assertIn("downgrades kernel", v["headline"])
 
+    def test_downgraded_packages_are_not_counted_as_routine_bumps(self):
+        d = S.pkg_diff({"nano": pkg("nano", "8.2-1.fc45")},
+                       {"nano": pkg("nano", "8.1-1.fc45")})
+        d["changed"][0]["cls"] = S.classify_change(
+            d["changed"][0]["old"], d["changed"][0]["new"], "F45", None)
+        v = S.verdict_of(d, LD, {}, {})
+        self.assertEqual(v["level"], "consider")
+        self.assertIn("0 source packages (0 binary) bumped", v["headline"])
+        self.assertIn("0 个源码包（0 个二进制包）升级", v["headline_zh"])
+        self.assertIn("WARNING: this update downgrades nano", v["headline"])
+
 
 if __name__ == "__main__":
     unittest.main()
