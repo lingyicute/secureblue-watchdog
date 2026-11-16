@@ -4923,13 +4923,16 @@ def cmd_check(args):
     if seen:
         uniq, minutes = [], set()
         seen_ord = _ts_order(seen)
+        cur_ord = _ts_order(cur.get("created"))
         for r in sorted(hist, key=lambda x: _ts_order(x.get("created"))):
             k = (r.get("created") or "")[:16]
             pd = r.get("platform_digest") or r["digest"]
+            r_ord = _ts_order(r.get("created"))
             # same digest-space as above: index vs platform never compares equal,
             # which used to count the current build as an extra new one
             if (not pd or pd in (cur["digest"], state.get("digest"))
-                    or k in minutes or _ts_order(r.get("created")) < seen_ord):
+                    or k in minutes or not r_ord or r_ord <= seen_ord
+                    or (cur_ord and r_ord > cur_ord)):
                 continue
             minutes.add(k)
             uniq.append(r)
