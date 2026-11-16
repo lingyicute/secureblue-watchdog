@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import datetime
 import gzip
 import hashlib
 import http.client
@@ -281,6 +282,20 @@ def ts_short(s) -> str:
     compares on (builds are identified by digest), so only they are dropped -
     everything else is kept, and no marker is needed for that one loss."""
     return str(s or "")[:19]
+
+
+def _ts_order(s) -> str:
+    """Sortable key for an RFC 3339 timestamp, normalised to UTC when zoned."""
+    raw = str(s or "").strip()
+    if not raw:
+        return ""
+    try:
+        dt = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            return dt.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    except ValueError:
+        pass
+    return raw
 
 
 def rfc3339_seconds(s) -> str:
@@ -3917,7 +3932,7 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
             f"is normal and is not counted here)",
             f"遍历历史时有 {len(probe_failures)} 个构建引用无法解析：{shown}{more}"
             f"——此列表可能不完整（悬空的 .sig 标签是正常的，未计入）"))
-    out = sorted(recs.values(), key=lambda r: r.get("created") or "", reverse=True)
+    out = sorted(recs.values(), key=lambda r: _ts_order(r.get("created")), reverse=True)
     for i, r in enumerate(out):
         if i + 1 < len(out):
             prev = out[i + 1]
@@ -4335,7 +4350,7 @@ def orient(a: dict, b: dict, keep_order: bool = False) -> tuple:
     reversed pair reports "no CVE/erratum found" for an update that carries two
     dozen CVEs, and lists the fixes it *adds* as fixes it *removes*.
     """
-    ca, cb = (a.get("created") or ""), (b.get("created") or "")
+    ca, cb = _ts_order(a.get("created")), _ts_order(b.get("created"))
     if keep_order or not ca or not cb or ca <= cb:
         return a, b, False
     return b, a, True
@@ -4793,7 +4808,7 @@ def cmd_check(args):
         # a first run then reported "no-change" with a 0-byte download.
         for r in hist:
             pd = r.get("platform_digest") or r["digest"]
-            if pd != cur["digest"] and (r.get("created") or "9") <= (cur.get("created") or "9"):
+            if pd != cur["digest"] and (_ts_order(r.get("created")) or "9") <= (_ts_order(cur.get("created")) or "9"):
                 ref_a = pd
                 # the state file's label rule: a light resolve reads annotations
                 # only, and a build without the version one was titled `None @ ...`
@@ -4811,7 +4826,7 @@ def cmd_check(args):
             # baseline: the report read `44 -> 20261114`, the watched image as the
             # old side of an update it never received.
             cand = resolve(reg, d)
-            if (cand.get("created") or "") > (cur.get("created") or "9"):
+            if _ts_order(cand.get("created")) > (_ts_order(cur.get("created")) or "9"):
                 continue
             ref_a, label_a, prev = d, d, cand
             break
@@ -4896,13 +4911,14 @@ def cmd_check(args):
         if not state_lost and prev["digest"] == state.get("digest") else ""
     if seen:
         uniq, minutes = [], set()
-        for r in sorted(hist, key=lambda x: x.get("created") or ""):
+        seen_ord = _ts_order(seen)
+        for r in sorted(hist, key=lambda x: _ts_order(x.get("created"))):
             k = (r.get("created") or "")[:16]
             pd = r.get("platform_digest") or r["digest"]
             # same digest-space as above: index vs platform never compares equal,
             # which used to count the current build as an extra new one
             if (not pd or pd in (cur["digest"], state.get("digest"))
-                    or k in minutes or (r.get("created") or "") < seen):
+                    or k in minutes or _ts_order(r.get("created")) < seen_ord):
                 continue
             minutes.add(k)
             uniq.append(r)
