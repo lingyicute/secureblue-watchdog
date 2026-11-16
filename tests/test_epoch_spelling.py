@@ -42,6 +42,26 @@ class TestChangedEpochIsShown(unittest.TestCase):
         md = S.render_markdown("t", a, a, d, ld, S.verdict_of(d, ld, {}, {}), [])
         self.assertIn("0:1.2-3.fc44 → 1:1.2-3.fc44", md)
 
+    def test_json_diff_output_names_both_epochs_when_epoch_moves(self):
+        import contextlib, io, json, tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        old = pkg("foo", "1.2-3.fc44", epoch="")
+        new = pkg("foo", "1.2-3.fc44", epoch="1")
+        res = {"a": {"ref": "a", "digest": "sha256:" + "a" * 64, "annotations": {}, "layers": []},
+               "b": {"ref": "b", "digest": "sha256:" + "b" * 64, "annotations": {}, "layers": []},
+               "diff": S.pkg_diff({"foo": old}, {"foo": new}),
+               "layers": S.layer_diff({"layers": []}, {"layers": []}),
+               "verdict": S.verdict_of(S.pkg_diff({"foo": old}, {"foo": new}),
+                                       S.layer_diff({"layers": []}, {"layers": []}), {}, {}),
+               "notes": [], "xc": {"versions_known": True, "silent_rebuilds": []}}
+        with tempfile.TemporaryDirectory() as td:
+            out = f"{td}/diff.json"
+            with patch.object(S, "do_diff", return_value=res),                     contextlib.redirect_stdout(io.StringIO()):
+                S.main(["diff", "a", "b", "--json-out", out])
+            item = json.loads(Path(out).read_text(encoding="utf-8"))["changed"][0]
+        self.assertEqual((item["old"], item["new"]), ("0:1.2-3.fc44", "1:1.2-3.fc44"))
+
 
 if __name__ == "__main__":
     unittest.main()

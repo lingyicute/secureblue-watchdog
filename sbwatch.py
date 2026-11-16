@@ -1995,6 +1995,14 @@ def _epoch(e: dict) -> str:
     return str(e.get("epoch") or "0")
 
 
+def _evr_pair(old: dict, new: dict) -> tuple[str, str]:
+    """(old_evr, new_evr), prefixed with their epochs when the epoch moved."""
+    oe, ne = old["evr"], new["evr"]
+    if _epoch(old) != _epoch(new):
+        return f"{_epoch(old)}:{oe}", f"{_epoch(new)}:{ne}"
+    return oe, ne
+
+
 def _evr_tuple(e: dict) -> tuple:
     """(epoch, version, release) as strings - the full comparison identity.
 
@@ -4506,8 +4514,9 @@ def cmd_diff(args):
                    "download_bytes": res["layers"]["download_bytes"],
                    "download_bytes_is_upper_bound": True,
                    "versions_known": xc.get("versions_known", True),
-                   "changed": [{"name": c["name"], "old": c["old"]["evr"],
-                                "new": c["new"]["evr"], "src": c["src"],
+                   "changed": [{"name": c["name"],
+                                "old": _evr_pair(c["old"], c["new"])[0],
+                                "new": _evr_pair(c["old"], c["new"])[1], "src": c["src"],
                                 "dir": c["dir"],
                                 "security": bool((c.get("cls") or {}).get("security")),
                                 "cves": (c.get("cls") or {}).get("cves", []),
@@ -4861,7 +4870,9 @@ def cmd_check(args):
     _atomic_write_json(report + ".json", {"verdict": v, "from": from_lbl, "to": to_lbl,
                "digest": cur["digest"],
                "version": ver, "download_bytes": res["layers"]["download_bytes"],
-               "changed": [{"name": c["name"], "old": c["old"]["evr"], "new": c["new"]["evr"],
+               "changed": [{"name": c["name"],
+                            "old": _evr_pair(c["old"], c["new"])[0],
+                            "new": _evr_pair(c["old"], c["new"])[1],
                             "src": c["src"], "dir": c["dir"],
                             "security": bool((c.get("cls") or {}).get("security")),
                             "cves": (c.get("cls") or {}).get("cves", [])}
