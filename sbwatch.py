@@ -837,8 +837,9 @@ class Registry:
         self._tok = tok or ""
         return tok or None
 
-    def _open(self, path: str, accept: str):
+    def _open(self, path: str, accept: str, *, _refreshed: bool = False):
         url = f"https://{self.host}/v2/{self.repo}/{path.lstrip('/')}"
+        had_cached = bool(self._tok)
         req = urllib.request.Request(url, headers={"Accept": accept})
         tok = self._token()
         if tok:
@@ -846,6 +847,11 @@ class Registry:
         try:
             return _OPENER.open(req, timeout=self.timeout)
         except urllib.error.HTTPError as e:
+            if e.code == 401 and had_cached and not _refreshed:
+                # Anonymous pull tokens expire after a few minutes; mint a fresh
+                # one once before declaring the repository missing or private.
+                self._tok = None
+                return self._open(path, accept, _refreshed=True)
             if e.code == 404:
                 raise RegistryError(T(
                     f"no such tag or digest: {self.repo}/{path} - "
@@ -3798,6 +3804,8 @@ def list_tags(reg: Registry, max_pages: int = TAG_LIST_MAX_PAGES) -> list:
                 page = candidate
                 break
             except (Exception, RegistryError) as e:
+                if isinstance(e, urllib.error.HTTPError) and e.code == 401 and reg._tok:
+                    reg._tok = None
                 if attempt == TAG_LIST_RETRIES - 1:
                     # silent truncation here would quietly shorten the build history
                     # and can make `check` pick a wrong baseline, so say so loudly
