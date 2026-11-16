@@ -1134,6 +1134,9 @@ def pick_tar_member(tf, match: str, label: str = ""):
                 best = m
         elif m.issym():
             target = _resolve_tar_link(nm, m.linkname)
+        elif m.islnk():
+            # tar hardlink targets are always relative to the archive root
+            target = _resolve_tar_link("", "/" + (m.linkname or ""))
     return best, target
 
 

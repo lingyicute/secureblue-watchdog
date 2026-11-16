@@ -50,6 +50,14 @@ class TestTarLinks(unittest.TestCase):
         raw = _make_tar([(placeholder, b""), (sym, None), (real, b"SQLite format 3\0real")])
         self.assertEqual(_extract(raw), b"SQLite format 3\0real")
 
+    def test_hardlink_entry_resolves_its_archive_root_target(self):
+        real = tarfile.TarInfo("usr/lib/sysimage/rpm/packages.db")
+        lnk = tarfile.TarInfo("usr/share/rpm/rpmdb.sqlite")
+        lnk.type = tarfile.LNKTYPE
+        lnk.linkname = "usr/lib/sysimage/rpm/packages.db"
+        raw = _make_tar([(real, b"hardlinked-rpmdb"), (lnk, None)])
+        self.assertEqual(_extract(raw), b"hardlinked-rpmdb")
+
 
 if __name__ == "__main__":
     unittest.main()
