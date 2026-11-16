@@ -1039,9 +1039,11 @@ class Registry:
                 # an inner gzip/bzip2/xz stream once more - under no cap at all.
                 with tarfile.open(blob_path, "r:") as tf:
                     chosen, target = pick_tar_member(tf, match, d)
-                if chosen is None and target:      # the entry is a symlink into the layer
+                if target:                         # a symlink may beat a 0-byte placeholder
                     with tarfile.open(blob_path, "r:") as tf:
-                        chosen = scan_target(tf, target)
+                        linked = scan_target(tf, target)
+                    if linked is not None and (chosen is None or linked.size > chosen.size):
+                        chosen = linked
             except tarfile.TarError as e:
                 raise SystemExit(T(f"not a readable tar (layer {d}): {e}",
                                    f"无法解析 tar（层 {d}）：{e}")) from None
