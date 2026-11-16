@@ -55,7 +55,8 @@ class TestDroppedCvesWording(unittest.TestCase):
         self.assertIn("## CVE ids the new changelogs no longer mention (1 source package(s))", md)
         self.assertIn("## 新版更新日志不再提及的 CVE 编号（1 个源码包）", md)
         self.assertIn("- `curl`: no longer mentions CVE-2026-12345", md)
-        self.assertIn("no longer mentioned/不再提及: CVE-2026-12345", md)
+        self.assertIn("no longer mentioned: CVE-2026-12345", md)
+        self.assertIn("不再提及: CVE-2026-12345", md)
 
 
 if __name__ == "__main__":

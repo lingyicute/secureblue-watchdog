@@ -2317,23 +2317,24 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     # does not move when secureblue rebuilds the kernel with a .secureblue.N
     # release, which is the common case (44.20260922.0 -> 44.20260923.0 carries an
     # identical ostree.linux while kernel went 7.2.6 -> 7.2.7).
-    def _evidence(g: dict) -> str:
-        """What the security classification for this source package rests on."""
+    def _evidence_pair(g: dict) -> tuple[str, str]:
+        """(en, zh) label for what a group's security classification rests on."""
         if g.get("has_security_erratum"):
-            return "security erratum 安全勘误"
+            return "security erratum", "安全勘误"
         if g.get("advisory_corresponding"):
-            return "corresponding Fedora erratum 对应 Fedora 勘误（归一化匹配）"
+            return "corresponding Fedora erratum", "对应 Fedora 勘误（归一化匹配）"
         if g.get("passed_over"):
-            return "security erratum of a passed-over build 被越过构建的安全勘误"
+            return "security erratum of a passed-over build", "被越过构建的安全勘误"
         # Anything else that set `security` is a released erratum of another
-        # type (bugfix, enhancement) listing CVE ids or ranking high/urgent,
-        # and calling that a changelog CVE named evidence the rpmdb never
-        # showed. `aliases` holds only such released errata, so a group
-        # without one can only have got its flag from the changelog.
+        # type (bugfix, enhancement) listing CVE ids or ranking high/urgent.
         if g.get("changelog_cves") or not g.get("aliases"):
-            return "changelog CVE 更新日志 CVE"
-        return ("non-security erratum (CVE ids or high severity) "
+            return "changelog CVE", "更新日志 CVE"
+        return ("non-security erratum (CVE ids or high severity)",
                 "非安全类勘误（含 CVE 或高严重度）")
+
+    def _evidence(g: dict) -> str:
+        en, zh = _evidence_pair(g)
+        return f"{en} {zh}"
 
     moved_names = {c["name"] for c in diff["changed"] if c.get("dir") != "downgrade"}
     kernel_downgraded = any(c["name"] == "kernel" and c.get("dir") == "downgrade"
@@ -2447,11 +2448,11 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         top_en = clip_list(
             sec, HEADLINE_GROUP_CAP,
             render=lambda g: f"{g['src']} "
-                             f"({clip_list(g['cves'], HEADLINE_CVE_CAP) or _evidence(g)})")
+                             f"({clip_list(g['cves'], HEADLINE_CVE_CAP) or _evidence_pair(g)[0]})")
         top_zh = clip_list(
             sec, HEADLINE_GROUP_CAP, joiner="，", lang="zh",
             render=lambda g: f"{g['src']} "
-                             f"（{clip_list(g['cves'], HEADLINE_CVE_CAP, lang='zh') or _evidence(g)}）")
+                             f"（{clip_list(g['cves'], HEADLINE_CVE_CAP, lang='zh') or _evidence_pair(g)[1]}）")
         v["headline"] = (f"{plural(len(sec), 'source package')} "
                          f"{'gains' if len(sec) == 1 else 'gain'} security fixes: {top_en}"
                          + (f" — {len(cves)} CVE(s) total" if cves else "")
@@ -2840,6 +2841,31 @@ def split_bilingual(s: str) -> tuple[str, str]:
     return left, right
 
 
+def _why_for_lang(w: str, lang: str) -> str:
+    """Render one classify_change() `why` entry in a single language."""
+    s = str(w)
+    if lang == "zh":
+        s = (s.replace("changelog CVEs/更新日志中的 CVE:", "更新日志中的 CVE:")
+              .replace("changelog/更新日志:", "更新日志:")
+              .replace("no longer mentioned/不再提及:", "不再提及:")
+              .replace("erratum/勘误 ", "勘误 ")
+              .replace(", a build this update passes over / 本次更新越过的构建)", "，本次更新越过的构建)")
+              .replace("(not in a Fedora repo yet / 尚未进入 Fedora 仓库 - not counted)",
+                       "（尚未进入 Fedora 仓库——不计入）"))
+        s = re.sub(r" \(\+(\d+) more not shown / 另有 \1 个未显示\)", r"（另有 \1 个未显示）", s)
+        s = re.sub(r"… \(\+(\d+) chars not shown / 另有 \1 个字符未显示\)", r"…（另有 \1 个字符未显示）", s)
+        return s
+    s = (s.replace("changelog CVEs/更新日志中的 CVE:", "changelog CVEs:")
+          .replace("changelog/更新日志:", "changelog:")
+          .replace("no longer mentioned/不再提及:", "no longer mentioned:")
+          .replace("erratum/勘误 ", "erratum ")
+          .replace(" / 本次更新越过的构建)", ")")
+          .replace(" / 尚未进入 Fedora 仓库 - not counted)", " - not counted)"))
+    s = re.sub(r" \(\+(\d+) more not shown / 另有 \1 个未显示\)", r" (+\1 more not shown)", s)
+    s = re.sub(r"… \(\+(\d+) chars not shown / 另有 \1 个字符未显示\)", r"… (+\1 chars not shown)", s)
+    return s
+
+
 def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                            xc=None, backlog=None, groups=None) -> str:
     xc = xc or {}
@@ -2865,8 +2891,14 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W("")
     _basis = verdict.get("security_basis") or {}
     if _basis:
-        items = "，".join(f"`{k}`: {v}" for k, v in sorted(_basis.items())) if is_zh \
-            else ", ".join(f"`{k}`: {v}" for k, v in sorted(_basis.items()))
+        def _basis_lang(val: str) -> str:
+            m = re.search(r"\s+(?=[\u4e00-\u9fff])", str(val))
+            if not m:
+                return str(val)
+            return str(val)[m.end():] if is_zh else str(val)[:m.start()]
+
+        sep = "，" if is_zh else ", "
+        items = sep.join(f"`{k}`: {_basis_lang(v)}" for k, v in sorted(_basis.items()))
         W(("- 安全判定依据（逐包）: " + items) if is_zh else ("- security evidence per package: " + items))
         W("")
 
@@ -3108,7 +3140,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("| source package | old → new | CVEs | errata / evidence |")
             W("|---|---|---|---|")
         for g in g_sec:
-            ev = (clip_text("; ".join(g["why"]), EV_CELL_CAP, lang=lang)
+            ev = (clip_text("; ".join(_why_for_lang(w, lang) for w in g["why"]),
+                            EV_CELL_CAP, lang=lang)
                   or ", ".join(g["aliases"]) or "—")
             # the first line of a changelog entry lands here verbatim, and a bare
             # `|` in it ends the cell early and shifts every column after it
@@ -3145,7 +3178,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             for g in g_imp:
                 extra = (f"（勘误: {clip_list(g['aliases'], 2, lang='zh', joiner='，')}）"
                          if g["aliases"] else "")
-                why_desc = clip_text("; ".join(g["why"]), WHY_CAP, lang="zh") \
+                why_desc = clip_text("; ".join(_why_for_lang(w, "zh") for w in g["why"]), WHY_CAP, lang="zh") \
                     or "无安全相关更新日志"
                 W(f"- `{g['src']}` {g['old_evr']} → {g['new_evr']} — {fmt_pkgs(g, 'zh')}{extra}; {why_desc}")
         else:
@@ -3153,7 +3186,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("")
             for g in g_imp:
                 extra = f" (errata: {clip_list(g['aliases'], 2)})" if g["aliases"] else ""
-                why_desc = clip_text("; ".join(g["why"]), WHY_CAP) \
+                why_desc = clip_text("; ".join(_why_for_lang(w, "en") for w in g["why"]), WHY_CAP) \
                     or "no security changelog entry"
                 # the binaries by name, not a bare count: "`kernel` ... 3 pkg(s)"
                 # read as a kernel update when only kernel-tools had moved
