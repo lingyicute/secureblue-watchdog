@@ -1488,14 +1488,14 @@ class Bodhi:
             # Not attempted, but counted as failed (once per source package): the
             # verdict must still say that the errata coverage is incomplete.
             self.failed += 1
-            self._mem[key] = {"total": None, "truncated": False, "updates": []}
+            self._mem[key] = {"total": None, "truncated": False, "updates": [], "unqueried": "failed"}
             return []
         if self.calls >= self.max_calls:
             self.skipped += 1
             # Classification asks once per binary and the backlog asks again.
             # Count this unqueried source/release once, without re-reading a stale
             # disk cache each time. Never persist a budget miss as a clean answer.
-            self._mem[key] = {"total": None, "truncated": False, "updates": []}
+            self._mem[key] = {"total": None, "truncated": False, "updates": [], "unqueried": "skipped"}
             return []
 
         res: list = []
@@ -1583,7 +1583,8 @@ class Bodhi:
             _cache_write(cf, {"cache_version": BODHI_CACHE_VERSION,
                               "total": total, "truncated": truncated,
                               "updates": res}, "Bodhi")
-        self._mem[key] = {"total": total, "truncated": truncated, "updates": res}
+        self._mem[key] = {"total": total, "truncated": truncated, "updates": res,
+                          "unqueried": None if ok else "failed"}
         return res
 
 
@@ -3485,8 +3486,18 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
     order = {"critical": 4, "urgent": 4, "important": 3, "high": 3,
              "moderate": 2, "medium": 2, "low": 1}
     rows = []
+    queried = audit_failed = audit_skipped = 0
+    mem = getattr(bodhi, "_mem", None)
     for src in chosen:
         ups = bodhi.updates_for_src(src, rel)
+        ent = mem.get(f"{src}-{rel}") if isinstance(mem, dict) else None
+        unq = ent.get("unqueried") if isinstance(ent, dict) else None
+        if unq == "failed":
+            audit_failed += 1
+        elif unq == "skipped":
+            audit_skipped += 1
+        else:
+            queried += 1
         pkgs_for_src = sorted(want[src], key=lambda np: (np[0] != src, np[0]))
         row = None
         for u in ups:
@@ -3543,8 +3554,9 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
             row["cves"] = sorted(row["cves"])
             rows.append(row)
     rows.sort(key=lambda r: -order.get((r["severity"] or "").lower(), 0))
-    cov["failed"] = bodhi.failed
-    cov["skipped_queries"] = bodhi.skipped
+    cov["checked"] = queried
+    cov["failed"] = audit_failed if isinstance(mem, dict) else bodhi.failed
+    cov["skipped_queries"] = audit_skipped if isinstance(mem, dict) else bodhi.skipped
     return rows, cov
 
 
@@ -3555,12 +3567,18 @@ def coverage_line(cov: dict) -> str:
           + (f", {cov['skipped']} were cut off by --backlog-candidates "
              f"({clip_list(cov.get('skipped_names', []), 6)})"
              if cov.get("skipped") else "")
+          + (f", {cov['skipped_queries']} not queried (--max-bodhi)"
+             if cov.get("skipped_queries") else "")
+          + (f", {cov['failed']} failed" if cov.get("failed") else "")
           + (f"; {len(cov['pool_missing'])} BACKLOG_POOL entries are not "
              f"in this image" if cov.get("pool_missing") else ""))
     zh = (f"backlog 审计覆盖率：镜像内 {cov['candidates']} 个候选源码包中查询了 {cov['checked']} 个"
           + (f"，{cov['skipped']} 个因 --backlog-candidates 上限被截断"
              f"（{clip_list(cov.get('skipped_names', []), 6, lang='zh', joiner='，')}）"
              if cov.get("skipped") else "")
+          + (f"，{cov['skipped_queries']} 个因 --max-bodhi 未查询"
+             if cov.get("skipped_queries") else "")
+          + (f"，{cov['failed']} 个查询失败" if cov.get("failed") else "")
           + (f"；BACKLOG_POOL 中有 {len(cov['pool_missing'])} 个条目不在此镜像内"
              if cov.get("pool_missing") else ""))
     return T(en, zh)
