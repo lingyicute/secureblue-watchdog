@@ -28,6 +28,17 @@ class TestNoChangeWording(unittest.TestCase):
         self.assertNotIn("REBUILD", S.ICON_EN["no-change"])
         self.assertNotIn("重建", S.ICON_ZH["no-change"])
 
+    def test_the_report_body_does_not_claim_all_rebuild_when_unclaimed_moved(self):
+        chunks = [{"components": ["chunkah/unclaimed"], "size": 4096, "stability": 0.0}]
+        ld = {"chunks_a": 1, "chunks_b": 1, "chunks_changed": 1, "chunks_reused": 0,
+              "total_size_b": 4096, "download_bytes": 4096, "download_pct": 100,
+              "changed_packages_from_chunks": [], "changed_chunks": chunks}
+        img = {"ref": "a", "digest": "sha256:" + "a" * 64, "annotations": {}, "layers": []}
+        md = S.render_markdown("s", img, img, DIFF, ld, S.verdict_of(DIFF, ld, {}), [])
+        self.assertNotIn("entirely rebuilt content", md)
+        self.assertNotIn("全部来自重建内容", md)
+        self.assertIn("chunkah/unclaimed", md)
+
 
 if __name__ == "__main__":
     unittest.main()

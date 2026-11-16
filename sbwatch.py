@@ -3232,15 +3232,27 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
     # entirely rebuilt content.
     if (not changed and not diff["added"] and not diff["removed"]
             and (isinstance(diff.get("count_a"), int) or diff.get("same_rpmdb"))):
+        unowned = sum(ch["size"] for ch in ldiff.get("changed_chunks") or []
+                      if "chunkah/unclaimed" in (ch.get("components") or []))
         if is_zh:
             W("## 没有任何软件包版本发生变化")
             W("")
-            W("两个镜像中所有软件包的 NEVRA 完全一致——差异全部来自重建内容 / 元数据变动。")
+            if unowned:
+                W(f"两个镜像中所有软件包的 NEVRA 完全一致；但另有 {human(unowned)} "
+                  "不属于任何软件包的文件（`chunkah/unclaimed`，含 secureblue 自身配置）"
+                  "发生了变化，且未在此检查。")
+            else:
+                W("两个镜像中所有软件包的 NEVRA 完全一致——软件包层面没有新内容。")
         else:
             W("## No package version changed at all")
             W("")
-            W("Every package in both images has the same NEVRA — the delta is entirely "
-              "rebuilt content / metadata churn.")
+            if unowned:
+                W(f"Every package in both images has the same NEVRA; {human(unowned)} of "
+                  "files no package owns (`chunkah/unclaimed`, including secureblue's own "
+                  "configuration) also changed and were not inspected here.")
+            else:
+                W("Every package in both images has the same NEVRA — no package content "
+                  "changed.")
         W("")
 
     if diff["added"] or diff["removed"]:
