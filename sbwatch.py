@@ -1711,6 +1711,7 @@ def _passed_build(old: dict, new: dict, nvrs) -> str | None:
     other branch, whose fix it already has.
     """
     old_dist = _dist_tag(old.get("release"))
+    new_dist = _dist_tag(new.get("release"))
     for b in nvrs or []:
         parts = (b or "").rsplit("-", 2)
         if len(parts) != 3:
@@ -1719,7 +1720,8 @@ def _passed_build(old: dict, new: dict, nvrs) -> str | None:
         # Bodhi names the source build; accept it for this binary or its source
         if bn != new["name"] and bn != new.get("src"):
             continue
-        if not old_dist or _dist_tag(br) != old_dist:
+        # Packages like shim and fedora-release carry no .fcNN tag on any side.
+        if _dist_tag(br) != old_dist or (not old_dist and new_dist):
             continue
         by_src = bn != new["name"]
         if (_is_behind(old, bv, br, use_build_evr=by_src)
