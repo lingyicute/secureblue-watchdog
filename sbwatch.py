@@ -3322,8 +3322,10 @@ def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog
 # repo names that are not package names at all (`trivalent-native`,
 # `trivalent-binary-packaging`), one outright typo (`wireless-regdog` for
 # `wireless-regdb`, which silently excluded a package that IS in the image),
-# one non-existent name (`giolang-github`), and one stale name (`polkit-qt`;
-# the Qt6 binding's source is `polkit-qt6-1`). `xorg-x11-server` was replaced by
+# one non-existent name (`giolang-github`), and one stale name (`polkit-qt`).
+# Two binary names stood in for sources as well: `polkit-qt6-1` is built by
+# `polkit-qt-1`, and the Plasma shell's source is `plasma-desktop` (there is no
+# `kde-plasma-desktop` in Fedora dist-git) - neither ever matched an image. `xorg-x11-server` was replaced by
 # `xorg-x11-server-Xwayland`: Xwayland has been its own source package since 2021
 # and is the only X server in the image. `python3` is matched version-tolerantly
 # via _src_matches_pool (the real source on F44 is `python3.14`).
@@ -3336,7 +3338,7 @@ BACKLOG_POOL = {
     "xorg-x11-server-Xwayland",
     "usbguard", "bubblewrap", "fwupd", "bluez", "cups", "avahi", "libarchive", "gnutls",
     "expat", "libcap", "audit", "krb5", "bind", "dnsmasq", "unbound", "nginx",
-    "polkit-qt6-1", "kde-plasma-desktop", "qt6-qtbase", "golang",
+    "polkit-qt-1", "plasma-desktop", "qt6-qtbase", "golang",
     "python3", "python-pip", "git", "git-lfs", "wireguard-tools", "openvpn",
     "wireless-regdb", "linux-firmware", "runc", "crun", "cri-o",
     "podman", "skopeo", "composefs", "cryptsetup", "keyutils",

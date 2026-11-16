@@ -758,11 +758,12 @@ class TestBacklogCoverage(unittest.TestCase):
         # fixed pool entries must now BE in the pool (typos silently shrank the
         # audit before: wireless-regdog, giolang-github, veritysetup, ...)
         for good in ("wireless-regdb", "cryptsetup", "linux-firmware", "python3",
-                     "xorg-x11-server-Xwayland", "polkit-qt6-1"):
+                     "xorg-x11-server-Xwayland", "polkit-qt-1", "plasma-desktop"):
             self.assertIn(good, S.BACKLOG_POOL)
         for bad in ("wireless-regdog", "giolang-github", "veritysetup",
                     "amd-gpu-firmware", "trivalent-native",
-                    "trivalent-binary-packaging", "polkit-qt"):
+                    "trivalent-binary-packaging", "polkit-qt",
+                    "polkit-qt6-1", "kde-plasma-desktop"):
             self.assertNotIn(bad, S.BACKLOG_POOL)
             self.assertNotIn(bad, S.IMPORTANT_SRC)
 
