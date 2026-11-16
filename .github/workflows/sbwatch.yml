@@ -186,7 +186,7 @@ jobs:
           key: sbwatch-${{ steps.ns.outputs.ns }}-${{ env.SB_ARCH }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Prune old sbwatch caches
-        if: always()
+        if: always() && steps.ns.outputs.ns != '' && steps.check.outputs.verdict != 'no-update'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           NS: ${{ steps.ns.outputs.ns }}
