@@ -49,6 +49,34 @@ class TestTokenRealm(unittest.TestCase):
         self.assertEqual(len(opened), 2)
         self.assertTrue(opened[1].startswith("https://auth.example/token?"), opened[1])
 
+    def test_realm_with_existing_query_uses_ampersand_and_rejects_bad_token_types(self):
+        import contextlib, io, urllib.error
+        from unittest.mock import patch
+        seen = []
+
+        def fake_urlopen(req, timeout=90):
+            url = req.full_url if hasattr(req, "full_url") else req
+            seen.append(url)
+            if url.endswith("/v2/"):
+                raise urllib.error.HTTPError(
+                    url, 401, "Unauthorized",
+                    {"Www-Authenticate": 'Bearer realm="https://auth.example/tok?v=1",service="reg"'},
+                    io.BytesIO(b""))
+            class _R:
+                def read(self, n=-1):
+                    return b'{"token": 12345}'
+                def __enter__(self):
+                    return self
+                def __exit__(self, *a):
+                    return False
+            return _R()
+
+        reg = S.Registry("reg.example/ns/img")
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen),                 contextlib.redirect_stderr(io.StringIO()):
+            self.assertIsNone(reg._token())
+        self.assertEqual(seen[1].count("?"), 1)
+        self.assertIn("?v=1&service=reg", seen[1])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -808,7 +808,8 @@ class Registry:
                 return None
             q = {"service": parts.get("service", ""),
                  "scope": f"repository:{self.repo}:pull"}
-            url = realm + "?" + urllib.parse.urlencode({k: v for k, v in q.items() if v})
+            sep = "&" if "?" in realm else "?"
+            url = realm + sep + urllib.parse.urlencode({k: v for k, v in q.items() if v})
             try:
                 with urllib.request.urlopen(url, timeout=self.timeout) as r:
                     # The token spec allows either key ("for compatibility
@@ -820,7 +821,12 @@ class Registry:
                     if len(raw) > MAX_JSON_BYTES:
                         raise ValueError(f"token reply exceeds {human(MAX_JSON_BYTES)}")
                     doc = json.loads(raw)
-                    tok = doc.get("token") or doc.get("access_token") or ""
+                    if not isinstance(doc, dict):
+                        raise ValueError("token reply is not a JSON object")
+                    cand_tok = doc.get("token") or doc.get("access_token") or ""
+                    if not isinstance(cand_tok, str) or "\r" in cand_tok or "\n" in cand_tok:
+                        raise ValueError("invalid bearer token string")
+                    tok = cand_tok
             except Exception as e2:
                 log(T(f"  ! token fetch failed: {e2}",
                       f"  ！获取 token 失败：{e2}"))
