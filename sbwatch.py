@@ -163,7 +163,7 @@ SEC_WORDS_RE = re.compile(
 IMPORTANT_SRC = {
     "kernel", "glibc", "openssl", "nss", "systemd", "sudo", "polkit", "rpm-ostree",
     "ostree", "container-selinux", "selinux-policy", "libcap", "pam", "shadow-utils",
-    "openssh", "curl", "dnf", "rpm", "grub2", "shim", "mutter", "gnome-shell",
+    "openssh", "curl", "dnf", "dnf5", "rpm", "grub2", "shim", "mutter", "gnome-shell",
     "gupnp", "webkitgtk", "firefox", "thunderbird", "trivalent",
     "flatpak", "xdg-desktop-portal",
     "pipewire", "xorg-x11-server", "xorg-x11-server-Xwayland", "linux-firmware",
@@ -3353,7 +3353,7 @@ def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog
 BACKLOG_POOL = {
     "kernel", "glibc", "openssl", "nss", "systemd", "sudo", "polkit", "rpm-ostree",
     "ostree", "selinux-policy", "container-selinux", "pam", "shadow-utils", "openssh",
-    "curl", "rpm", "grub2", "shim", "mutter", "gnome-shell", "webkitgtk", "firefox",
+    "curl", "dnf5", "rpm", "grub2", "shim", "mutter", "gnome-shell", "webkitgtk", "firefox",
     "thunderbird",
     "flatpak", "xdg-desktop-portal", "pipewire",
     "xorg-x11-server-Xwayland",
