@@ -3176,7 +3176,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W(f"| {g['src']} | {fmt_pkgs(g, 'zh' if is_zh else 'en')} | {g['old_evr']} → {g['new_evr']} |")
         W("")
 
-    g_had = [g for g in groups if g.get("already_had")]
+    g_had = [g for g in groups if not g["downgrade"] and any(
+        x.get("alias") for x in g.get("already_had") or ())]
     if g_had:
         if is_zh:
             W(f"## 本次更新之前你就已经拥有的勘误（{len(g_had)}）")

@@ -35,6 +35,21 @@ class TestAlreadyHadSection(unittest.TestCase):
         line = next(ln for ln in en.splitlines() if "the build you already had" in ln)
         self.assertEqual(line.count("FEDORA-2026-old"), 1)
 
+    def test_reverted_downgrade_erratum_is_not_repeated_under_already_had(self):
+        ups = [{"alias": "FEDORA-2026-left", "type": "security", "severity": "high",
+                "status": "stable", "title": "", "notes": "", "cves": [], "bugs": [],
+                "date_approved": None, "nvrs": ["curl-8.9.1-1.fc45"]}]
+        d = S.pkg_diff({"curl": pkg("curl", "8.9.1-1.fc45")},
+                       {"curl": pkg("curl", "8.9.0-1.fc45")})
+        d["changed"][0]["cls"] = S.classify_change(
+            d["changed"][0]["old"], d["changed"][0]["new"], "F45", _Bodhi(ups))
+        g = S.group_by_src(d["changed"])
+        md = S.render_markdown("s", IMG, IMG, d, LD, S.verdict_of(d, LD, {}, {}, groups=g),
+                               [], groups=g)
+        self.assertIn("reverts* a published erratum: FEDORA-2026-left", md)
+        self.assertNotIn("Errata you already had before this update", md)
+        self.assertNotIn("本次更新之前你就已经拥有的勘误", md)
+
 
 if __name__ == "__main__":
     unittest.main()
