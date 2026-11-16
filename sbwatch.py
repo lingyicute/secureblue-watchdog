@@ -1891,15 +1891,22 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
             add_cves(u.get("title") or "")
             for bg in u.get("bugs") or []:
                 add_cves(bg.get("title"))
-            info["severities"].append((u.get("severity") or "").lower())
-            info["bodhi_type"] = u["type"]
-            info["erratum"] = {"alias": u["alias"], "type": u["type"],
-                               "severity": u.get("severity"), "status": status,
-                               "approved": u.get("date_approved"),
-                               "attached": attached,
-                               "matched_nvr": sorted(hit_attached or hit_corresponding)[0],
-                               # kept whole: this is parsed for CVE ids elsewhere
-                               "notes": u.get("notes") or ""}
+            sev_word = (u.get("severity") or "").lower()
+            info["severities"].append(sev_word)
+            cand_err = {"alias": u["alias"], "type": u["type"],
+                        "severity": u.get("severity"), "status": status,
+                        "approved": u.get("date_approved"),
+                        "attached": attached,
+                        "matched_nvr": sorted(hit_attached or hit_corresponding)[0],
+                        # kept whole: this is parsed for CVE ids elsewhere
+                        "notes": u.get("notes") or ""}
+            prev_err = info["erratum"]
+            def _err_key(e):
+                return (e["type"] == "security", bool(e["attached"]),
+                        SEV_RANK.get((e.get("severity") or "").lower(), 0))
+            if prev_err is None or _err_key(cand_err) > _err_key(prev_err):
+                info["bodhi_type"] = u["type"]
+                info["erratum"] = cand_err
             if u["type"] == "security":
                 info["security"] = True
                 # Recorded separately from `security`: secureblue's rule keys off
