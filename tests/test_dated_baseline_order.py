@@ -60,6 +60,33 @@ class TestDatedBaselineOrder(unittest.TestCase):
         self.assertEqual(state["prev_digest"], OLDER["digest"])
         self.assertEqual(state["digest"], CUR["digest"])
 
+    def test_dated_tag_without_requested_arch_is_skipped_for_older_valid_one(self):
+        cur = _image("a", 10)
+        good = _image("8", 8)
+        probed = {"20260109": {"index_digest": "sha256:" + "9" * 64}, "20260108": good}
+
+        def tag_exists(reg, tag, warn=None):
+            return probed[tag]["index_digest"] if tag in probed else None
+
+        def resolve(reg, ref, light=False):
+            if ref == "20260109":
+                raise S.NoArchManifest("no arm64 manifest")
+            if ref == "20260108":
+                return dict(good, ref=ref)
+            return dict(cur, ref=ref)
+
+        with tempfile.TemporaryDirectory() as directory:
+            state, report = Path(directory) / "state.json", Path(directory) / "report.md"
+            with patch.object(S.Registry, "_token", return_value=None),                     patch.object(S, "resolve", side_effect=resolve),                     patch.object(S, "tag_exists", side_effect=tag_exists),                     patch.object(S, "load_pkglist",
+                                 side_effect=lambda reg, img, ref, d, n: S.PackageTable(
+                                     {"bash": pkg("bash", f"5.3-{img['created'][8:10]}.fc45")})),                     patch("time.time", return_value=1768003200),                     contextlib.redirect_stdout(io.StringIO()),                     contextlib.redirect_stderr(io.StringIO()):
+                rc = S.main(["check", "--image", "x/y", "--state", str(state),
+                             "--report", str(report), "--cache-dir", directory,
+                             "--scan", "0", "--no-fast", "--no-audit", "--no-bodhi",
+                             "--prune-days", "0"])
+            self.assertEqual(rc, 0)
+            self.assertIn("20260108 -> latest", report.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

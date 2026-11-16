@@ -4840,7 +4840,21 @@ def cmd_check(args):
             # is on 45) has dated tags *after* it, and the first of them became the
             # baseline: the report read `44 -> 20261114`, the watched image as the
             # old side of an update it never received.
-            cand = resolve(reg, d)
+            try:
+                cand = resolve(reg, d)
+            except (NoArchManifest, MalformedManifest):
+                continue
+            except RegistryError as e:
+                if e.http_code != 404:
+                    hist_warnings.append(T(
+                        f"could not read candidate baseline tag {d} "
+                        f"({e.http_code or 'network error'})",
+                        f"无法读取候选基线标签 {d}（{e.http_code or 'network error'}）"))
+                continue
+            if cand.get("digest") == cur["digest"]:
+                continue
+            if rpmdb_chunk(cur) is not None and rpmdb_chunk(cand) is None:
+                continue
             if _ts_order(cand.get("created")) > (_ts_order(cur.get("created")) or "9"):
                 continue
             ref_a, label_a, prev = d, d, cand
