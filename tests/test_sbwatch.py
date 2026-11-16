@@ -1285,6 +1285,28 @@ class TestManifestOnlyModeDoesNotOverclaim(unittest.TestCase):
         self.assertIsNone(v["secureblue_notification"]["message"])
         self.assertNotIn("secureblue will show", v["headline"])
 
+    def test_prediction_inputs_are_unknown_too(self):
+        """kernel/trivalent `False` and severity `none` would be claims as well."""
+        d = {"added": [], "removed": [], "downgrades": [], "changed": [],
+             "count_a": "?", "count_b": "?"}
+        v = S.verdict_of(d, LD_FIX, META_IDENTICAL,
+                         S.crosscheck_chunks(LD_FIX, d, versions_known=False), [], BSTATE)
+        sbn = v["secureblue_notification"]
+        self.assertIsNone(sbn["kernel_updated"])
+        self.assertIsNone(sbn["trivalent_updated"])
+        self.assertIsNone(sbn["max_advisory_severity"])
+        self.assertEqual(sbn["level_without_advisories"], "unknown")
+        self.assertFalse(sbn["advisory_driven"])
+        ia = {"ref": "a", "digest": "sha256:" + "1" * 64, "annotations": {}}
+        ib = {"ref": "b", "digest": "sha256:" + "2" * 64, "annotations": {}}
+        ld = dict({"chunks_a": 128, "chunks_b": 128, "chunks_changed": 1,
+                   "chunks_reused": 127, "download_pct": 6}, **LD_FIX)
+        md = S.render_markdown("t", ia, ib, d, ld, v, [],
+                               S.crosscheck_chunks(LD_FIX, d, versions_known=False))
+        self.assertIn("kernel upgraded: unknown", md)
+        self.assertIn("内核已升级: 未知", md)
+        self.assertNotIn("kernel upgraded: False", md)
+
 
 # --------------------------------------------------------------------------- #
 # G - the fast path must key off something that actually implies "no package

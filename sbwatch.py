@@ -2283,7 +2283,12 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     if diff.get("count_a") == "?" and not diff.get("same_rpmdb"):
         # manifest-only mode (--exact 0): no rpmdb was read, so the package set
         # is unknown and "no notification" would be an unfounded claim.
+        # Every input of the prediction is unknown as well: `False` / `none` for
+        # them read as "the kernel did not move, no advisory" - a claim.
         sbn = dict(sbn, level="unknown", message=None, why=[], why_zh=[],
+                   kernel_updated=None, trivalent_updated=None,
+                   max_advisory_severity=None, security_advisory_count=None,
+                   level_without_advisories="unknown", advisory_driven=False,
                    note="package versions were not read (--exact 0), so the "
                         "notification cannot be predicted")
     silent = xc.get("silent_rebuilds") or []
@@ -2800,10 +2805,13 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                      if _sbn.get("level_without_advisories") == "normal" else "无 (none)"))
             reasons = _sbn.get("why_zh") or _sbn.get("why") or []
             W(f"- 触发条件: {'，'.join(reasons) or '—'}")
-            k_up = "是" if _sbn.get("kernel_updated") else "否"
-            t_up = "是" if _sbn.get("trivalent_updated") else "否"
+            def _yn_zh(x):
+                return "未知" if x is None else ("是" if x else "否")
+            k_up = _yn_zh(_sbn.get("kernel_updated"))
+            t_up = _yn_zh(_sbn.get("trivalent_updated"))
+            max_sev = _sbn.get("max_advisory_severity") or "未读取"
             W(f"- 内核已升级: {k_up} · trivalent 已升级: {t_up} · "
-              f"最高勘误等级 (rpm-ostree 体系): `{_sbn.get('max_advisory_severity')}`")
+              f"最高勘误等级 (rpm-ostree 体系): `{max_sev}`")
             W("")
             W("> 这里的 severity 只取 *精确* EVR 命中：rpm-ostree 用 "
               "`dnf_package_get_advisories(pkg, HY_EQ)` 填充 `.advisories`，"
@@ -2837,9 +2845,12 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                      if _sbn.get("level_without_advisories") == "normal" else "none"))
             reasons = _sbn.get("why") or []
             W(f"- trigger: {', '.join(reasons) or '—'}")
-            W(f"- kernel upgraded: {bool(_sbn.get('kernel_updated'))} · "
-              f"trivalent upgraded: {bool(_sbn.get('trivalent_updated'))} · "
-              f"max advisory severity (rpm-ostree scale): `{_sbn.get('max_advisory_severity')}`")
+            def _yn_en(x):
+                return "unknown" if x is None else str(bool(x))
+            max_sev = _sbn.get("max_advisory_severity") or "not read"
+            W(f"- kernel upgraded: {_yn_en(_sbn.get('kernel_updated'))} · "
+              f"trivalent upgraded: {_yn_en(_sbn.get('trivalent_updated'))} · "
+              f"max advisory severity (rpm-ostree scale): `{max_sev}`")
             W("")
             W("> The severity used here only counts *exact* EVR hits: rpm-ostree fills "
               "`.advisories` via `dnf_package_get_advisories(pkg, HY_EQ)`, and libdnf "
