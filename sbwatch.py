@@ -124,6 +124,7 @@ BASELINE_LABEL_CAP = 80  # characters of a baseline label read back from the sta
 #                          whole digest (71), which shortref() then abbreviates. The
 #                          former 26 cut check's own label and appended a 40-character
 #                          marker to it - once more on every --force run.
+PKGLIST_CACHE_VERSION = 2  # v1 omitted `vendor`, needed to ignore third-party repos
 BODHI_CACHE_VERSION = 2  # v1 clipped bug titles (200) and notes (1500) BEFORE
 #                          extracting CVE ids from them, so a v1 cache can be
 #                          missing CVEs. A cache without this marker is refetched.
@@ -4105,17 +4106,15 @@ def load_pkglist(reg, img, ref, cache_dir, notes):
         try:
             with open(cf) as fh:
                 data = json.load(fh)
-            if isinstance(data, dict) and "packages" in data:
+            if (isinstance(data, dict) and isinstance(data.get("packages"), dict)
+                    and data.get("cache_version") == PKGLIST_CACHE_VERSION):
                 pk = PackageTable(data["packages"])
                 pk.collisions = list(data.get("collisions") or [])
                 pk.headers_rejected = int(data.get("headers_rejected") or 0)
                 pk.fields_skipped = int(data.get("fields_skipped") or 0)
-            else:
-                # pre-2026-09 cache: a flat {name: entry} map, no bookkeeping
-                pk = PackageTable(data)
-            notes.append(T(f"package list of `{ref}` served from `{cf}` (no download)",
-                           f"`{ref}` 的软件包列表来自缓存 `{cf}`（未下载）"))
-            return pk
+                notes.append(T(f"package list of `{ref}` served from `{cf}` (no download)",
+                               f"`{ref}` 的软件包列表来自缓存 `{cf}`（未下载）"))
+                return pk
         except Exception:
             log(T(f"  ! cache {cf} corrupted, refetching",
                   f"  ！缓存 {cf} 已损坏，重新获取"))
@@ -4125,7 +4124,8 @@ def load_pkglist(reg, img, ref, cache_dir, notes):
     # The table's own bookkeeping rides along in the cache: writing the flat map
     # (and reading it back as one) would make "parse problems" and "shadowed
     # multilib packages" vanish on every cache hit.
-    _cache_write(cf, {"packages": pk, "collisions": pk.collisions,
+    _cache_write(cf, {"cache_version": PKGLIST_CACHE_VERSION,
+                      "packages": pk, "collisions": pk.collisions,
                       "headers_rejected": pk.headers_rejected,
                       "fields_skipped": pk.fields_skipped}, "package list")
     # This image's own numbers: the fixed "~33 MB fetched, ~3.7 GiB avoided" was
