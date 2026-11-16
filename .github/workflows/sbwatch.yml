@@ -326,8 +326,15 @@ jobs:
           # summary alone can approach 800 on a busy update (the 113-CVE webkitgtk
           # case measures ~790) - so a fixed 3500-char slice of the report plus the
           # summary could cross the limit.
-          if len(text) > 4096:
-              text = text[:4000] + f"\n… (+{len(text) - 4000} chars - full report in the run summary)"
+          def u16_len(x: str) -> int:
+              return len(x.encode("utf-16-le")) // 2
+          if u16_len(text) > 4096:
+              cut = min(len(text), 4000)
+              while cut > 0 and u16_len(
+                  text[:cut] + f"\n… (+{len(text) - cut} chars - full report in the run summary)"
+              ) > 4096:
+                  cut -= 32
+              text = text[:cut] + f"\n… (+{len(text) - cut} chars - full report in the run summary)"
           try:
               req = urllib.request.Request(
                   "https://api.telegram.org/bot{}/sendMessage".format(os.environ["TELEGRAM_BOT_TOKEN"]),
