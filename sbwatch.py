@@ -4969,8 +4969,9 @@ def cmd_check(args):
     swapped = res["a"]["digest"] != prev["digest"]
     from_lbl = args.to if swapped else label_a
     to_lbl = label_a if swapped else args.to
+    to_ver = res["b"]["annotations"].get("org.opencontainers.image.version", "?") if swapped else ver
     md = render_markdown(
-        f"secureblue update watch / secureblue 更新监控 - {args.image}  {shortref(from_lbl)} -> {shortref(to_lbl)} ({ver})",
+        f"secureblue update watch / secureblue 更新监控 - {args.image}  {shortref(from_lbl)} -> {shortref(to_lbl)} ({to_ver})",
                          res["a"], res["b"], res["diff"], res["layers"], v, res["notes"],
                          res.get("xc"), res.get("backlog"), res.get("groups"))
     report = args.report or "report.md"
