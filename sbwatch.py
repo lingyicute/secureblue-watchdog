@@ -332,6 +332,12 @@ def _safe_read_limited(resp, limit: int) -> bytes:
     return b"".join(chunks)
 
 
+def _clean_sha256_header(value) -> str | None:
+    """Lower-cased `sha256:<64 hex>` when `value` is one, else None."""
+    norm = str(value or "").strip().lower()
+    return norm if re.fullmatch(r"sha256:[0-9a-f]{64}", norm) else None
+
+
 def check_digest(actual_hex: str, digest: str, what: str, *,
                  required: bool = False) -> None:
     """Abort unless content that was fetched by digest hashes to that digest.
@@ -890,7 +896,7 @@ class Registry:
         manifest, i.e. a second round trip per tag.
         """
         with self._open(f"manifests/{ref}", MANIFEST_ACCEPT) as r:
-            dig = r.headers.get("Docker-Content-Digest")
+            dig = _clean_sha256_header(r.headers.get("Docker-Content-Digest"))
             if dig:
                 return dig
             return "sha256:" + hashlib.sha256(self._read_all(r, f"manifest {ref}")).hexdigest()
@@ -4048,7 +4054,7 @@ def tag_exists(reg: Registry, tag: str, warn: list | None = None) -> str | None:
     """
     try:
         with reg._open(f"manifests/{tag}", MANIFEST_ACCEPT) as r:
-            dig = r.headers.get("Docker-Content-Digest")
+            dig = _clean_sha256_header(r.headers.get("Docker-Content-Digest"))
             if dig:
                 return dig
             # Same fallback as index_digest()/resolve(): a registry that omits
