@@ -3354,7 +3354,7 @@ BACKLOG_POOL = {
     "kernel", "glibc", "openssl", "nss", "systemd", "sudo", "polkit", "rpm-ostree",
     "ostree", "selinux-policy", "container-selinux", "pam", "shadow-utils", "openssh",
     "curl", "rpm", "grub2", "shim", "mutter", "gnome-shell", "webkitgtk", "firefox",
-    "thunderbird", "trivalent",
+    "thunderbird",
     "flatpak", "xdg-desktop-portal", "pipewire",
     "xorg-x11-server-Xwayland",
     "usbguard", "bubblewrap", "fwupd", "bluez", "cups", "avahi", "libarchive", "gnutls",
