@@ -749,6 +749,9 @@ class Registry:
             host, rest = first, rest_all
         if "@" in rest:
             repo, _, dig = rest.partition("@")
+            if not dig:
+                raise SystemExit(T(f"missing digest after '@' in reference: {ref}",
+                                   f"引用中 '@' 后缺少 digest：{ref}"))
             if ":" in repo.rsplit("/", 1)[-1]:
                 repo, _, _ = repo.rpartition(":")
         elif ":" in rest.rsplit("/", 1)[-1]:
