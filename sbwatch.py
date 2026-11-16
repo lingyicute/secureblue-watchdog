@@ -3185,7 +3185,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               "其严重度也**没有**被计入上面的结论。")
             W("")
             for g in g_had:
-                al = clip_list((x["alias"] for x in g["already_had"]), 4,
+                al = clip_list(dict.fromkeys(x["alias"] for x in g["already_had"]
+                                             if x.get("alias")), 4,
                                lang="zh", joiner="，")
                 W(f"- `{g['src']}`（针对你原有的 {g['old_evr']}）: {al}")
         else:
@@ -3196,7 +3197,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               "above.")
             W("")
             for g in g_had:
-                al = clip_list((x["alias"] for x in g["already_had"]), 4)
+                al = clip_list(dict.fromkeys(x["alias"] for x in g["already_had"]
+                                             if x.get("alias")), 4)
                 # "staying at": the package is in this list because it moves
                 # away from that build, so the old label said the opposite
                 W(f"- `{g['src']}` (for {g['old_evr']}, the build you already had): {al}")
