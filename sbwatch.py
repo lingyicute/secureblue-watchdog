@@ -1752,6 +1752,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
             # condition that puts an advisory into rpm-ostree's .advisories, which
             # is what secureblue keys off.
             "has_security_erratum": False, "erratum_severity": "",
+            "security_advisories": {},
             # set when a security erratum was found only after stripping the local
             # release marker: real fix content, but not an advisory of this build
             # (so it never drives the notification prediction).
@@ -1921,6 +1922,10 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                 if attached:
                     info["has_security_erratum"] = True
                     cand = bodhi_severity_as_updateinfo(u.get("severity"))
+                    adv_id = u.get("alias") or sorted(hit_attached)[0]
+                    prev_s = info["security_advisories"].get(adv_id, "")
+                    if _sev_rank_for_upstream(cand) > _sev_rank_for_upstream(prev_s):
+                        info["security_advisories"][adv_id] = cand
                     if _sev_rank_for_upstream(cand) > _sev_rank_for_upstream(info["erratum_severity"]):
                         info["erratum_severity"] = cand
                     info["why"].append(
@@ -2209,8 +2214,21 @@ def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
     # only those count.  `cls` enforces all three (PUSHED_STATUSES + hit_attached);
     # `erratum_severity` is only ever set on such a match, so a Fedora erratum
     # matched after stripping `.secureblue.N` cannot inflate the prediction.
-    sevs = [rpmostree_str2severity((g.get("erratum_severity") or "")) for g in groups
-            if g.get("has_security_erratum")]
+    # rpmostree_advisories_variant() deduplicates by advisory id: one multi-build
+    # Fedora advisory covering three source packages is one entry in .advisories,
+    # while two advisories attached to one build are two entries.
+    seen_adv: dict = {}
+    for idx, g in enumerate(groups):
+        if not g.get("has_security_erratum"):
+            continue
+        advs = g.get("security_advisories")
+        if advs:
+            for adv_id, adv_sev in advs.items():
+                r = rpmostree_str2severity(adv_sev or "")
+                seen_adv[adv_id] = max(seen_adv.get(adv_id, 0), r)
+        else:
+            seen_adv[f"_group_{idx}"] = rpmostree_str2severity(g.get("erratum_severity") or "")
+    sevs = list(seen_adv.values())
     # Only packages whose version moved are looked up: rpm_diff_add_db_diff() in
     # rpmostreed-deployment-utils.cxx hands rpmostree_advisories_variant() the new
     # side of the *modified* packages (upgraded and downgraded). One the update
@@ -2700,6 +2718,7 @@ def group_by_src(changed: list) -> list:
                                "advisory_corresponding": False,
                                "changelog_cves": set(),
                                "erratum_severity": "",
+                               "security_advisories": {},
                                "already_had": [], "unreleased": [], "passed_over": []}
         g["pkgs"].append(c)
         cls = c.get("cls") or {}
@@ -2722,6 +2741,10 @@ def group_by_src(changed: list) -> list:
             cur = g.get("erratum_severity")
             if cur is None or _sev_rank_for_upstream(cand) > _sev_rank_for_upstream(cur):
                 g["erratum_severity"] = cand
+            for adv_id, adv_sev in (cls.get("security_advisories") or {}).items():
+                prev_s = g["security_advisories"].get(adv_id, "")
+                if _sev_rank_for_upstream(adv_sev) > _sev_rank_for_upstream(prev_s):
+                    g["security_advisories"][adv_id] = adv_sev
         for a in cls.get("aliases") or []:
             if a not in g["aliases"]:
                 g["aliases"].append(a)
