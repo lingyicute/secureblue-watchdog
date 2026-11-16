@@ -2336,17 +2336,17 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                 "非安全类勘误（含 CVE 或高严重度）")
 
     moved_names = {c["name"] for c in diff["changed"] if c.get("dir") != "downgrade"}
+    kernel_downgraded = any(c["name"] == "kernel" and c.get("dir") == "downgrade"
+                            for c in diff["changed"])
     kernel_in_diff = "kernel" in moved_names
     kernel_annot_moved = bool(meta.get("kernel_a")) and \
         meta.get("kernel_a") != meta.get("kernel_b")
     # ostree.linux describes the Fedora base compose. When the rpmdb shows the
-    # `kernel` package itself at one EVR on both sides, a moved annotation is the
-    # base's kernel changing underneath an untouched secureblue kernel
-    # (45.20261110.0 -> 45.20261111.0: ostree.linux 7.2.15 -> 7.3.3 and
-    # kernel-tools with it, kernel 7.3.3-300.secureblue.2 in both) - and "the
-    # kernel moved" was reported for an update that did not touch it.
+    # `kernel` package itself at one EVR on both sides - or moving backwards -
+    # the annotation must not turn that into a forward kernel bump.
     kernel_moved = kernel_in_diff or (kernel_annot_moved
-                                      and not meta.get("kernel_pkg_unchanged"))
+                                      and not meta.get("kernel_pkg_unchanged")
+                                      and not kernel_downgraded)
     sbn = secureblue_notification(diff, groups)
     if diff.get("count_a") == "?" and not diff.get("same_rpmdb"):
         # manifest-only mode (--exact 0): no rpmdb was read, so the package set
