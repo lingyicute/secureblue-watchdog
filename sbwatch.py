@@ -4384,8 +4384,14 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
             f"rpmdb 解析：{hdr_rej} 个包头部被拒（尺寸字段不自洽）、"
             f"{fld_skip} 个字段无法解码——字段缺失会静默削弱 diff 的"
             f"准确性（epoch、更新日志/CVE 扫描）"))
-    if getattr(pb, "collisions", None):
-        _c = pb.collisions
+    _seen_col, _c = set(), []
+    for _t in (pb, pa) if pa is not pb else (pb,):
+        for _item in getattr(_t, "collisions", None) or ():
+            _ck = (_item.get("name"), _item.get("shadowed_arch"), _item.get("shadowed_evr"))
+            if _ck not in _seen_col:
+                _seen_col.add(_ck)
+                _c.append(_item)
+    if _c:
 
         def _shadowed(x):
             return f"{x['name']}.{x['shadowed_arch']} ({x['shadowed_evr']})"
