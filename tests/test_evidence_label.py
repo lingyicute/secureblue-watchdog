@@ -56,6 +56,11 @@ class TestEvidenceLabel(unittest.TestCase):
         v = verdict([], new_log=[{"time": 5, "text": "- Fix CVE-2026-2222"}])
         self.assertEqual(v["security_basis"]["glib2"], CHANGELOG)
 
+    def test_level_basis_does_not_call_a_high_bugfix_a_security_erratum(self):
+        v = verdict([erratum("FEDORA-2026-bug", "glib2-2.84.2-1.fc45", severity="high")])
+        self.assertIn("a released non-security erratum ranks 3/4", v["level_basis"])
+        self.assertNotIn("a released security erratum", v["level_basis"])
+
 
 if __name__ == "__main__":
     unittest.main()

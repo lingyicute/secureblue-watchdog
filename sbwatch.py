@@ -1746,7 +1746,7 @@ def classify_order(changed: list) -> list:
 
 def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) -> dict:
     info = {"security": False, "cves": set(), "cves_dropped": set(), "aliases": [],
-            "severities": [], "bodhi_type": None, "why": [], "erratum": None,
+            "severities": [], "sec_severities": [], "bodhi_type": None, "why": [], "erratum": None,
             # set only by a *pushed* type=security erratum that shipped a build in
             # the NEW image *and* matched its release string exactly - the exact
             # condition that puts an advisory into rpm-ostree's .advisories, which
@@ -1858,6 +1858,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                     info["security"] = True
                     info["cves"].update(u.get("cves") or ())
                     info["severities"].append((u.get("severity") or "").lower())
+                    info["sec_severities"].append((u.get("severity") or "").lower())
                     info["why"].append(
                         f"erratum/勘误 {u['alias']}: type=security "
                         f"severity={u.get('severity')} status={status} (for {passed}, "
@@ -1909,6 +1910,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                 info["erratum"] = cand_err
             if u["type"] == "security":
                 info["security"] = True
+                info["sec_severities"].append(sev_word)
                 # Recorded separately from `security`: secureblue's rule keys off
                 # the *advisory kind* (DnfAdvisoryKind SECURITY == 1), not off
                 # changelog CVE mentions, and its urgency comes from the advisory
@@ -1950,6 +1952,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
     info["important_src"] = _src_matches_pool(new["src"], IMPORTANT_SRC)
     # only severities belonging to a *pushed* erratum for the *new* build count
     info["sev_rank"] = max([SEV_RANK.get(s, 0) for s in info["severities"]] or [0])
+    info["sec_sev_rank"] = max([SEV_RANK.get(s, 0) for s in info["sec_severities"]] or [0])
     if info["sev_rank"] >= 3:
         info["security"] = True
     return info
@@ -2606,7 +2609,14 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             if sec:
                 bits.append(f"{len(sec)} source package(s) carry security evidence")
             if v["severity_rank"] >= 3:
-                bits.append(f"a released security erratum ranks {v['severity_rank']}/4 "
+                has_hi_sec = any(
+                    (g["sec_sev_rank"] if "sec_sev_rank" in g else (
+                        g["sev_rank"] if (g.get("has_security_erratum")
+                                          or g.get("advisory_corresponding")
+                                          or g.get("passed_over")) else 0)) >= 3
+                    for g in sec)
+                kind = "security erratum" if has_hi_sec else "non-security erratum"
+                bits.append(f"a released {kind} ranks {v['severity_rank']}/4 "
                             f"under Fedora's scale")
             if sbn.get("level") == "major":
                 bits.append("secureblue's own notification rule classifies this as major")
@@ -2685,7 +2695,7 @@ def group_by_src(changed: list) -> list:
             # subpackage, only to be thrown away.
             g = groups[key] = {"src": key, "pkgs": [], "security": False,
                                "cves": set(), "dropped": set(), "aliases": [],
-                               "why": [], "sev_rank": 0, "important": False,
+                               "why": [], "sev_rank": 0, "sec_sev_rank": 0, "important": False,
                                "downgrade": False, "has_security_erratum": False,
                                "advisory_corresponding": False,
                                "changelog_cves": set(),
@@ -2719,6 +2729,7 @@ def group_by_src(changed: list) -> list:
             if w not in g["why"]:
                 g["why"].append(w)
         g["sev_rank"] = max(g["sev_rank"], cls.get("sev_rank") or 0)
+        g["sec_sev_rank"] = max(g["sec_sev_rank"], cls.get("sec_sev_rank") or 0)
         for a in cls.get("already_had") or []:
             if a not in g["already_had"]:
                 g["already_had"].append(a)
