@@ -40,6 +40,22 @@ class TestHistoryForeignBuilds(unittest.TestCase):
         cur, older = _image(3, chunked=False), _image(2, chunked=False)
         self.assertEqual(_history(cur, older), [cur["digest"], older["digest"]])
 
+    def test_branch_preview_tag_is_excluded_when_watching_latest(self):
+        cur, live_prev, br_next = _image(3), _image(1), _image(2)
+        images = {i["digest"]: i for i in (cur, live_prev, br_next)}
+        tags = ["br-next-45",
+                "sha256-" + live_prev["digest"][7:] + ".sig",
+                "sha256-" + br_next["digest"][7:] + ".sig"]
+
+        class _Reg:
+            def index_digest(self, ref):
+                return br_next["digest"]
+
+        with patch.object(S, "list_tags", return_value=tags),                 patch.object(S, "resolve",
+                             side_effect=lambda reg, ref, light=False: dict(images[ref], ref=ref)):
+            rows = S.build_history(_Reg(), scan=5, days=0, to="latest", cur=cur)
+        self.assertEqual([r["digest"] for r in rows], [cur["digest"], live_prev["digest"]])
+
 
 if __name__ == "__main__":
     unittest.main()

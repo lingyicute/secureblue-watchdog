@@ -3850,6 +3850,17 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
     # must not be silent: every one of them is a row that could have been in the
     # list, and `check` picks its baseline out of this list.
     probe_failures: list = []
+    # secureblue pushes branch previews (`br-next-45`, `br-staging-44`,
+    # `br-testing-44`) as signed, chunked multi-arch indexes into this same repo.
+    # Leave them out unless the caller is watching that branch tag itself.
+    branch_digests: set = set()
+    if not str(to or "").startswith("br-"):
+        for bt in tags:
+            if bt.startswith("br-") and not bt.endswith("-uki"):
+                try:
+                    branch_digests.add(reg.index_digest(bt))
+                except (Exception, RegistryError):
+                    continue
     sigs = [m.group(1) for m in (SIGTAG_RE.match(t) for t in tags) if m]
     recs: dict = {cur["index_digest"]: {
         "digest": cur["index_digest"], "platform_digest": cur.get("digest"),
@@ -3861,7 +3872,7 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
         if len(recs) >= scan:
             break
         d = "sha256:" + hexdig
-        if d in recs:
+        if d in recs or d in branch_digests:
             continue
         try:
             img = resolve(reg, d, light=True)
