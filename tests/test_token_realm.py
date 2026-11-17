@@ -101,5 +101,13 @@ class TestTokenRealm(unittest.TestCase):
                 self.assertIn("service=reg.example", seen[1])
 
 
+    def test_realm_fragment_does_not_swallow_query_parameters(self):
+        tok, opened, _ = self._token("https://auth.example/token#frag",
+                                     [io.BytesIO(b'{"token": "xyz"}')])
+        self.assertEqual(tok, "xyz")
+        self.assertNotIn("#", opened[1])
+        self.assertIn("?service=registry.example&scope=", opened[1])
+
+
 if __name__ == "__main__":
     unittest.main()

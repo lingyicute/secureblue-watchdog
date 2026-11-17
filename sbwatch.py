@@ -817,8 +817,10 @@ class Registry:
                 return None
             q = {"service": parts.get("service", ""),
                  "scope": f"repository:{self.repo}:pull"}
-            sep = "&" if "?" in realm else "?"
-            url = realm + sep + urllib.parse.urlencode({k: v for k, v in q.items() if v})
+            extra_q = urllib.parse.urlencode({k: v for k, v in q.items() if v})
+            sp = urllib.parse.urlsplit(realm)
+            merged_q = f"{sp.query}&{extra_q}" if sp.query else extra_q
+            url = urllib.parse.urlunsplit((sp.scheme, sp.netloc, sp.path, merged_q, ""))
             try:
                 with urllib.request.urlopen(url, timeout=self.timeout) as r:
                     # The token spec allows either key ("for compatibility
