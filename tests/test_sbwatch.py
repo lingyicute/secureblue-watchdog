@@ -2258,7 +2258,7 @@ class TestWorkflowHygiene(unittest.TestCase):
         wf = self._workflow()
         step = wf.split("- name: Save sbwatch cache")[1].split("- name:")[0]
         cond = re.search(r"^\s*if: (.*)$", step, re.M).group(1)
-        self.assertEqual(cond, "always() && steps.check.outputs.verdict != 'no-update'")
+        self.assertEqual(cond, "always() && steps.ns.outputs.ns != '' && steps.check.outputs.verdict != '' && steps.check.outputs.verdict != 'no-update'")
 
     def test_an_inconclusive_run_is_not_green(self):
         wf = self._workflow()
