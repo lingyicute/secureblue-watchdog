@@ -1543,7 +1543,7 @@ class Bodhi:
         Unreadable or obsolete entries are refetched, never treated as clean.
         """
         try:
-            with open(cf) as f:
+            with open(cf, encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict) and isinstance(data.get("updates"), list):
                 # A cache written before BODHI_CACHE_VERSION carried clipped bug
@@ -4398,19 +4398,20 @@ def _atomic_write_text(path: str, text: str) -> None:
 def _atomic_write_json(path: str, data, indent=None) -> None:
     """ atomic write to avoid cache corruption on concurrent runs."""
     target = _swap_target(path)
+    payload = json.dumps(data, indent=indent, allow_nan=False)
     if target is None:
-        with open(path, "w") as f:
-            f.write(json.dumps(data, indent=indent))
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(payload)
         return
     path = target
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + f".tmp.{os.getpid()}"
     try:
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             # dumps(), not dump(): dump() always walks the document with the
             # pure-Python encoder - three times as long for an 11 MB package
             # list (0.21 s against 0.07 s for the live image's)
-            f.write(json.dumps(data, indent=indent))
+            f.write(payload)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)
@@ -4445,7 +4446,7 @@ def load_pkglist(reg, img, ref, cache_dir, notes):
     cf = os.path.join(cache_dir, f"pkglist-{img['digest'].replace(':', '')}.json")
     if os.path.exists(cf) and os.path.getsize(cf) > 10_000:
         try:
-            with open(cf) as fh:
+            with open(cf, encoding="utf-8") as fh:
                 data = json.load(fh)
             if (isinstance(data, dict) and isinstance(data.get("packages"), dict)
                     and data.get("cache_version") == PKGLIST_CACHE_VERSION):
@@ -4854,7 +4855,7 @@ def cmd_check(args):
     state = {}
     if os.path.exists(state_path):
         try:
-            with open(state_path) as fh:
+            with open(state_path, encoding="utf-8") as fh:
                 state = json.load(fh)
         except Exception:
             state = {}

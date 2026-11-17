@@ -78,5 +78,13 @@ class TestCommandOutputs(unittest.TestCase):
             self.assertEqual(os.listdir(js.parent), ["diff.json"])
 
 
+    def test_atomic_write_json_rejects_non_finite_floats_without_leaving_tmp(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = os.path.join(td, "out.json")
+            with self.assertRaises(ValueError):
+                S._atomic_write_json(dest, {"bad": float("nan")})
+            self.assertEqual(os.listdir(td), [])
+
+
 if __name__ == "__main__":
     unittest.main()
