@@ -3806,6 +3806,8 @@ def coverage_line(cov: dict) -> str:
           + (f", {cov['skipped_queries']} not queried (--max-bodhi)"
              if cov.get("skipped_queries") else "")
           + (f", {cov['failed']} failed" if cov.get("failed") else "")
+          + (f", {len(cov['truncated'])} with truncated errata"
+             if cov.get("truncated") else "")
           + (f"; {len(cov['pool_missing'])} BACKLOG_POOL entries are not "
              f"in this image" if cov.get("pool_missing") else ""))
     zh = (f"backlog 审计覆盖率：镜像内 {cov['candidates']} 个候选源码包中查询了 {cov['checked']} 个"
@@ -3815,6 +3817,8 @@ def coverage_line(cov: dict) -> str:
           + (f"，{cov['skipped_queries']} 个因 --max-bodhi 未查询"
              if cov.get("skipped_queries") else "")
           + (f"，{cov['failed']} 个查询失败" if cov.get("failed") else "")
+          + (f"，{len(cov['truncated'])} 个勘误列表被截断"
+             if cov.get("truncated") else "")
           + (f"；BACKLOG_POOL 中有 {len(cov['pool_missing'])} 个条目不在此镜像内"
              if cov.get("pool_missing") else ""))
     return T(en, zh)

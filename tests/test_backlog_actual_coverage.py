@@ -102,5 +102,13 @@ class TestBacklogActualCoverage(unittest.TestCase):
         self.assertIn("kernel", bodhi.truncated_src)
 
 
+    def test_coverage_line_discloses_truncated_sources(self):
+        cov = {"candidates": 4, "checked": 4, "skipped": 0, "failed": 0,
+               "skipped_queries": 0, "truncated": ["kernel"], "pool_missing": []}
+        line = S.coverage_line(cov)
+        self.assertIn("1 with truncated errata", line.en)
+        self.assertIn("1 个勘误列表被截断", line.zh)
+
+
 if __name__ == "__main__":
     unittest.main()
