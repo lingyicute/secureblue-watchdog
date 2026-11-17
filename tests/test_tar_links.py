@@ -59,5 +59,29 @@ class TestTarLinks(unittest.TestCase):
         self.assertEqual(_extract(raw), b"hardlinked-rpmdb")
 
 
+    def test_later_symlink_to_empty_stub_does_not_hide_earlier_real_target(self):
+        real = tarfile.TarInfo("usr/lib/sysimage/rpm/real.db")
+        stub = tarfile.TarInfo("usr/share/rpm/empty.db")
+        s1 = tarfile.TarInfo("var/lib/rpm/rpmdb.sqlite")
+        s1.type = tarfile.SYMTYPE
+        s1.linkname = "../../../usr/lib/sysimage/rpm/real.db"
+        s2 = tarfile.TarInfo("usr/share/rpm/rpmdb.sqlite")
+        s2.type = tarfile.SYMTYPE
+        s2.linkname = "empty.db"
+        raw = _make_tar([(real, b"real-sqlite-bytes"), (stub, b""), (s1, None), (s2, None)])
+        self.assertEqual(_extract(raw), b"real-sqlite-bytes")
+
+    def test_chained_symlinks_and_dot_prefixed_directories_resolve(self):
+        real = tarfile.TarInfo("./.rpm/real.db")
+        mid = tarfile.TarInfo("usr/lib/sysimage/rpm/current")
+        mid.type = tarfile.SYMTYPE
+        mid.linkname = "../../../../.rpm/real.db"
+        top = tarfile.TarInfo("usr/share/rpm/rpmdb.sqlite")
+        top.type = tarfile.SYMTYPE
+        top.linkname = "../../lib/sysimage/rpm/current"
+        raw = _make_tar([(real, b"dot-chained-db"), (mid, None), (top, None)])
+        self.assertEqual(_extract(raw), b"dot-chained-db")
+
+
 if __name__ == "__main__":
     unittest.main()

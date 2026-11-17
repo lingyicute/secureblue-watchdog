@@ -1098,16 +1098,38 @@ class Registry:
         self.fetch_blob(layer["digest"], blob_path)
         dest = os.path.join(tmp, re.sub(r"\W+", "_", match) + ".extracted")
 
-        def scan_target(tf, want):
-            """Second pass: fetch the file a symlink entry pointed at."""
+        def resolve_links(tf, wants):
+            """Second pass: resolve every link target (including link chains) to regular files."""
+            files: dict = {}
+            links: dict = {}
             for n, m in enumerate(tf):
                 if n >= MAX_TAR_MEMBERS:
                     raise SystemExit(T(
                         f"tar has more than {MAX_TAR_MEMBERS} members (layer {d})",
                         f"tar 成员数超过 {MAX_TAR_MEMBERS}（层 {d}）"))
-                if m.name.lstrip("./") == want and m.isfile():
-                    return m
-            return None
+                nm = _norm_tar_path(m.name)
+                if m.isfile():
+                    prev = files.get(nm)
+                    if prev is None or m.size > prev.size:
+                        files[nm] = m
+                elif m.issym():
+                    links[nm] = _resolve_tar_link(nm, m.linkname)
+                elif m.islnk():
+                    links[nm] = _resolve_tar_link("", "/" + (m.linkname or ""))
+            best_linked = None
+            for cur in wants:
+                seen: set = set()
+                for _ in range(16):
+                    if cur in files:
+                        cand = files[cur]
+                        if best_linked is None or cand.size > best_linked.size:
+                            best_linked = cand
+                        break
+                    if cur in seen or cur not in links:
+                        break
+                    seen.add(cur)
+                    cur = links[cur]
+            return best_linked
 
         try:
             try:
@@ -1115,10 +1137,10 @@ class Registry:
                 # its caps, and tarfile's default mode would transparently decompress
                 # an inner gzip/bzip2/xz stream once more - under no cap at all.
                 with tarfile.open(blob_path, "r:") as tf:
-                    chosen, target = pick_tar_member(tf, match, d)
-                if target:                         # a symlink may beat a 0-byte placeholder
+                    chosen, targets = _scan_tar_members(tf, match, d)
+                if targets:                        # a symlink may beat a 0-byte placeholder
                     with tarfile.open(blob_path, "r:") as tf:
-                        linked = scan_target(tf, target)
+                        linked = resolve_links(tf, targets)
                     if linked is not None and (chosen is None or linked.size > chosen.size):
                         chosen = linked
             except tarfile.TarError as e:
@@ -1163,6 +1185,12 @@ class Registry:
         return dest
 
 
+def _norm_tar_path(name: str) -> str:
+    """Normalise a tar member path without stripping leading dots off hidden dirs."""
+    parts = [seg for seg in (name or "").split("/") if seg and seg != "."]
+    return "/".join(parts)
+
+
 def _resolve_tar_link(member_name: str, linkname: str) -> str:
     """Normalise a tar symlink target inside the archive's root namespace.
 
@@ -1196,25 +1224,30 @@ def pick_tar_member(tf, match: str, label: str = ""):
     order-independent instead of silently extracting an empty database the day
     the order flips.
     """
+    best, targets = _scan_tar_members(tf, match, label)
+    return best, (targets[-1] if targets else None)
+
+
+def _scan_tar_members(tf, match: str, label: str = ""):
     best = None
-    target = None
+    targets: list = []
     for n, m in enumerate(tf):
         if n >= MAX_TAR_MEMBERS:
             raise SystemExit(T(
                 f"tar has more than {MAX_TAR_MEMBERS} members (layer {label})",
                 f"tar 成员数超过 {MAX_TAR_MEMBERS}（层 {label}）"))
-        nm = m.name.lstrip("./")
+        nm = _norm_tar_path(m.name)
         if nm != match and not nm.endswith("/" + match):
             continue
         if m.isfile():
             if best is None or m.size > best.size:
                 best = m
         elif m.issym():
-            target = _resolve_tar_link(nm, m.linkname)
+            targets.append(_resolve_tar_link(nm, m.linkname))
         elif m.islnk():
             # tar hardlink targets are always relative to the archive root
-            target = _resolve_tar_link("", "/" + (m.linkname or ""))
-    return best, target
+            targets.append(_resolve_tar_link("", "/" + (m.linkname or "")))
+    return best, targets
 
 
 # --------------------------------------------------------------------------- #
