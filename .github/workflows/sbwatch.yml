@@ -42,11 +42,6 @@ env:
   # and the red-run step unreachable no matter what the README promised.
   POST_SKIP_VERDICT: ${{ vars.POST_SKIP_VERDICT || 'false' }}
   FAIL_ON_SECURITY: ${{ vars.FAIL_ON_SECURITY || 'false' }}
-  # Job-level, so that a step-level `if: env.X != ''` can see it. A step-level env
-  # entry is not in scope for that step's own `if:` - that is why the Telegram
-  # push never fired before.
-  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
   # sha256 of the committed cosign.pub. The key is the only trust anchor this
   # workflow has, so it is vendored in the repo and its hash is checked before it
   # is handed to `cosign verify --key`. A rotated upstream key fails the run here
@@ -99,6 +94,11 @@ jobs:
       contents: read
       issues: write   # sticky issue comment
       actions: write  # pruning old caches via the API
+    # Job-level, so the Telegram step's `if: env.X != ''` sees them without
+    # exposing secrets to the `test` job's `pip install`.
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
