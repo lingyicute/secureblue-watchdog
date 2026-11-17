@@ -2597,7 +2597,8 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     # secureblue-notification annotation, the downgrade warning, the Bodhi coverage
     # CAUTION, the backlog note) applies to every level, and returning here used to
     # skip all of it.
-    no_change = versions_known and not pkg_set_moved and not sec and not down and not lost
+    no_change = (versions_known and not pkg_set_moved and not sec and not down
+                 and not lost and not silent_key)
     if no_change:
         v["level"] = "no-change"
         # every chunk that moved, not just the single-package ones that
@@ -2607,13 +2608,13 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         cnt_info_zh = f"共比对 {diff.get('count_b')} 个包" if diff.get("count_b") != "?" else "rpmdb chunk 摘要完全一致"
         ev = (f"no package changed in the rpmdb "
               f"({cnt_info}); the {nchunks} moved "
-              f"chunk(s) carry no new package content")
+              f"chunk(s) were not inspected for file-content changes")
         ev_zh = (f"rpmdb 中没有任何软件包发生变化（{cnt_info_zh}）；"
-                 f"{nchunks} 个变化的 chunk 不含新的软件包内容")
+                 f"{nchunks} 个变化的 chunk 未检查文件内容差异")
         v["headline"] = (f"{ev}. Updating would re-download {v['download_human']} "
-                         f"for no new package content")
+                         f"without a package version change; identical NEVRAs do not prove identical files")
         v["headline_zh"] = (f"{ev_zh}。更新需重新下载 {v['download_human']}，"
-                            f"不会带来新的软件包内容")
+                            f"软件包版本未变，但相同 NEVRA 不能证明文件内容相同")
         # "Rebuild only" was a guess. Files no package owns travel in
         # `chunkah/unclaimed`, secureblue's own configuration among them, and nothing
         # here looks inside that chunk: 45.20261114.0 was rebuilt for an edit to
@@ -3474,7 +3475,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                   "不属于任何软件包的文件（`chunkah/unclaimed`，含 secureblue 自身配置）"
                   "发生了变化，且未在此检查。")
             else:
-                W("两个镜像中所有软件包的 NEVRA 完全一致——软件包层面没有新内容。")
+                W("两个镜像中所有软件包的 NEVRA 完全一致；文件内容未检查，版本相同不能证明内容相同。")
         else:
             W("## No package version changed at all")
             W("")
@@ -3483,8 +3484,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                   "files no package owns (`chunkah/unclaimed`, including secureblue's own "
                   "configuration) also changed and were not inspected here.")
             else:
-                W("Every package in both images has the same NEVRA — no package content "
-                  "changed.")
+                W("Every package in both images has the same NEVRA; file contents were not inspected. "
+                  "Identical versions do not prove identical contents.")
         W("")
 
     if diff["added"] or diff["removed"]:
