@@ -172,7 +172,18 @@ jobs:
           # `if`, not `[ -f ] &&`: as the last command of the script the failed
           # test became the step's exit status, so a missing report.md turned a
           # successful analysis red.
-          if [ -f report.md ]; then cat report.md >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -f report.md ]; then
+            python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          with open("report.md", encoding="utf-8") as fh:
+              s = fh.read()
+          raw = s.encode("utf-8")
+          if len(raw) > 950_000:
+              s = raw[:940_000].decode("utf-8", "ignore") + (
+                  "\n\n… (step summary truncated below GitHub's 1 MiB limit; "
+                  "see the uploaded artifact for the full report)\n")
+          print(s, end="")
+          PY
+          fi
 
       - name: Save sbwatch cache
         # Not after a `no-update` run: that path writes nothing into the cache
