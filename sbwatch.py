@@ -4317,7 +4317,10 @@ def cmd_pkgs(args):
               f"已写入 {args.json}：{len(pkgs)} 个软件包"))
         return 0
     for n in sorted(pkgs):
-        print(f"{n}\t{pkgs[n]['evr']}\t{pkgs[n]['arch']}\t{pkgs[n]['src']}")
+        p = pkgs[n]
+        ep = _epoch(p)
+        evr = f"{ep}:{p['evr']}" if ep != "0" else p["evr"]
+        print(f"{n}\t{evr}\t{p['arch']}\t{p['src']}")
     return 0
 
 

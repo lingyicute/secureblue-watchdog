@@ -75,5 +75,28 @@ class TestChangedEpochIsShown(unittest.TestCase):
         self.assertEqual(g["new_evr"], "7.3.3-300.secureblue.2.fc45")
 
 
+    def test_cmd_pkgs_prints_non_zero_epoch_in_text_output(self):
+        import argparse
+        import contextlib
+        import io
+        from unittest.mock import patch
+        table = S.PackageTable({
+            "bind-libs": pkg("bind-libs", "9.18.51-1.fc45", src="bind", epoch="32"),
+            "curl": pkg("curl", "8.9.0-1.fc45", epoch="0"),
+        })
+        out = io.StringIO()
+        ns = argparse.Namespace(image="x/y", arch="amd64", ref="latest", json=None,
+                                cache_dir="/tmp", cosign_pub=None, require_cosign=False)
+        img = {"digest": "sha256:" + "a" * 64, "annotations": {}, "layers": []}
+        with patch.object(S.Registry, "_token", return_value=None), \
+                patch.object(S, "resolve", return_value=img), \
+                patch.object(S, "load_pkglist", return_value=table), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(S.cmd_pkgs(ns), 0)
+        lines = out.getvalue().splitlines()
+        self.assertEqual(lines[0], "bind-libs\t32:9.18.51-1.fc45\tx86_64\tbind")
+        self.assertEqual(lines[1], "curl\t8.9.0-1.fc45\tx86_64\tcurl")
+
+
 if __name__ == "__main__":
     unittest.main()
