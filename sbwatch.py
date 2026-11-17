@@ -788,7 +788,7 @@ class Registry:
                 return None
         except urllib.error.HTTPError as e:
             h = e.headers.get("Www-Authenticate") or ""
-            m = re.match(r"Bearer\s+(.*)", h, re.S)
+            m = re.search(r"(?:^|,\s*)Bearer\s+(.+)", h, re.I | re.S)
             if not m:
                 log(T(f"  ! {self.host}/v2/ answered {e.code} without a Bearer challenge "
                       f"- continuing unauthenticated",
@@ -796,7 +796,9 @@ class Registry:
                       f"——将以未认证方式继续"))
                 self._tok = ""
                 return None
-            parts = dict(re.findall(r'(\w+)="([^"]*)"', m.group(1)))
+            params_raw = re.split(r',\s*[A-Za-z][A-Za-z0-9!#$&^_`|~-]*\s+(?=\w+=)',
+                                  m.group(1), maxsplit=1)[0]
+            parts = {k.lower(): v for k, v in re.findall(r'(\w+)="([^"]*)"', params_raw)}
             realm = parts.get("realm")
             if not realm:
                 log(T(f"  ! {self.host} Bearer challenge has no realm - continuing "

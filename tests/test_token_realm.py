@@ -78,5 +78,28 @@ class TestTokenRealm(unittest.TestCase):
         self.assertIn("?v=1&service=reg", seen[1])
 
 
+    def test_case_insensitive_and_multi_challenge_bearer_headers_parse(self):
+        for hdr in (
+            'bearer REALM="https://auth.example/token",SERVICE="reg.example"',
+            'Basic realm="other", Bearer realm="https://auth.example/token",service="reg.example"',
+            'Bearer realm="https://auth.example/token",service="reg.example", Basic realm="ignored"',
+        ):
+            with self.subTest(hdr=hdr):
+                seen = []
+                def fake_urlopen(req, timeout=None):
+                    u = req.full_url if hasattr(req, "full_url") else req
+                    seen.append(u)
+                    if len(seen) == 1:
+                        msg = email.message.Message()
+                        msg["Www-Authenticate"] = hdr
+                        raise S.urllib.error.HTTPError(u, 401, "Unauthorized", msg, None)
+                    return io.BytesIO(b'{"token": "ok"}')
+                reg = S.Registry("reg.example/ns/img")
+                with patch.object(S.urllib.request, "urlopen", side_effect=fake_urlopen):
+                    self.assertEqual(reg._token(), "ok")
+                self.assertIn("https://auth.example/token?", seen[1])
+                self.assertIn("service=reg.example", seen[1])
+
+
 if __name__ == "__main__":
     unittest.main()
