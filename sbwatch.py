@@ -4948,7 +4948,8 @@ def cmd_check(args):
 
     # An explicit --a (the workflow's `from_tag`) asks for that comparison; "no
     # new build since the last look" does not answer it, so it must not skip it.
-    if state.get("digest") == cur["digest"] and not args.force and not args.a:
+    if (state.get("digest") == cur["digest"] and not args.force and not args.a
+            and state.get("last_verdict") != "unknown"):
         msg = T(f"no new build for {args.image}:{args.to} - still {ver} "
                 f"({cur['digest'][:19]}...), nothing to download",
                 f"{args.image}:{args.to} 无新构建——仍为 {ver}"
@@ -5106,7 +5107,9 @@ def cmd_check(args):
             pass
         gh_outputs({"verdict": "unknown", "digest": cur["digest"], "summary": msg,
                     "download_bytes": 0, "report": report, "version": ver})
-        save_state()
+        # Remember the checkpoint for a future build, not a successful analysis.
+        # An unchanged digest must retry the missing baseline on the next run.
+        save_state({"last_verdict": "unknown"})
         return 0
 
     # Resolve the baseline exactly once and hand it to do_diff. Resolving the same
