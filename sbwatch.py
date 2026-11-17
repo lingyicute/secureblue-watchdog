@@ -2274,6 +2274,11 @@ def fedora_release(pkgs: dict, image_version: str = "") -> str:
 #                                                   {important, unknown}
 #   else: no notification at all.
 #
+# All of that sits behind `[[ -f /usr/bin/rpm-ostree ]]`: on a system without it
+# the script reads /run/bootc/status.json and pops "An update is ready"
+# (urgency=critical) for every staged deployment, with no rpm diff at all -
+# secureblue_notification() reports that case as an unconditional `major`.
+#
 # .rpm-diff.upgraded is GVariant "a(us(ss)(ss))", i.e. JSON
 # [[type, NAME, [evr, arch], [evr, arch]], ...] - index 1 is the package NAME
 # (rpm-ostree's own sort_pkgvariant_by_name() reads child 1 as the name), and
@@ -2377,6 +2382,31 @@ def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
                 if c.get("dir") == "upgrade" or (c.get("dir") is None and c.get("name"))}
     kernel_updated = "kernel" in upgraded
     trivalent_updated = "trivalent" in upgraded
+
+    # The script's first branch runs before any of the rpm-ostree logic: when the
+    # booted system has no /usr/bin/rpm-ostree it reads /run/bootc/status.json
+    # instead and notifies unconditionally - urgency=critical, "An update is
+    # ready" - as soon as any deployment is staged ("We don't have an equivalent
+    # to the rpm-ostree database"). It runs on the *booted* image, i.e. the old
+    # side of this comparison, so that is the package table that decides
+    # (do_diff sets the flag: `bootc` installed, `rpm-ostree` not). A
+    # manifest-only diff carries no flag and keeps the rpm-ostree model below.
+    if diff.get("bootc_only_old"):
+        return {"level": "major", "message": "An update is ready",
+                "max_advisory_severity": "none",
+                "kernel_updated": kernel_updated, "trivalent_updated": trivalent_updated,
+                "security_advisory_count": 0,
+                "level_without_advisories": "major", "advisory_driven": False,
+                # not a judgement about this update: every staged update pops it
+                "unconditional": True,
+                "severity_basis": ("not consulted: the booted image ships no rpm-ostree, "
+                                   "and the bootc branch of secureblue's script notifies "
+                                   "for every staged update without reading an rpm diff "
+                                   "or advisories"),
+                "why": ["the booted image has no rpm-ostree, so secureblue's script takes "
+                        "its bootc branch and notifies for every staged update"],
+                "why_zh": ["已启动的镜像不含 rpm-ostree，secureblue 的脚本走 bootc 分支，"
+                           "只要有已暂存的更新就一律弹窗"]}
 
     # Only errata that (a) shipped a build in THIS image, (b) are type=security and
     # (c) matched this package's release string *exactly* reach .advisories, so
@@ -2676,7 +2706,10 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     # in `consider` or below - notably, every Trivalent bump lands here even when
     # it carries no CVE and no Fedora erratum at all (Trivalent has no Fedora
     # counterpart, so no Bodhi match is possible by construction).
-    if sbn["level"] == "major" and v["level"] not in ("update-now", "no-change"):
+    # Not for the bootc branch's unconditional popup: it fires for every staged
+    # update whatever it contains, so it says nothing about THIS one.
+    if (sbn["level"] == "major" and not sbn.get("unconditional")
+            and v["level"] not in ("update-now", "no-change")):
         was = v["level"]
         v["level"] = "update-now"
         v["escalated_by_secureblue_rule"] = was
@@ -2810,7 +2843,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                 kind = "security erratum" if has_hi_sec else "non-security erratum"
                 bits.append(f"a released {kind} ranks {v['severity_rank']}/4 "
                             f"under Fedora's scale")
-            if sbn.get("level") == "major":
+            if sbn.get("level") == "major" and not sbn.get("unconditional"):
                 bits.append("secureblue's own notification rule classifies this as major")
             if kernel_moved:
                 bits.append("the kernel moved")
@@ -4622,6 +4655,11 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
         pb = load_pkglist(reg, b, ref_b, cache_dir, notes)
     diff = pkg_diff(pa, pb)
     diff["same_rpmdb"] = same_rpmdb
+    # secureblue's notification script branches on /usr/bin/rpm-ostree being
+    # present on the *booted* system - the old side here - and then reads
+    # /run/bootc/status.json, which only bootc writes (see
+    # secureblue_notification). Both are the binary packages' names.
+    diff["bootc_only_old"] = "bootc" in pa and "rpm-ostree" not in pa
     _ka, _kb = pa.get("kernel"), pb.get("kernel")
     meta["kernel_pkg_unchanged"] = same_rpmdb or bool(
         _ka and _kb and _evr_tuple(_ka) == _evr_tuple(_kb))
@@ -5198,7 +5236,8 @@ def cmd_check(args):
     # reached by a changelog CVE mention or by secureblue escalating an update it
     # considers major, and a red run that says only "security" gives the reader no
     # way to tell those apart.
-    sbn_lvl = (v.get("secureblue_notification") or {}).get("level")
+    sbn = v.get("secureblue_notification") or {}
+    sbn_lvl = sbn.get("level") if not sbn.get("unconditional") else None
     if v["level"] == "update-now":
         reasons = []
         if v["cves"]:
