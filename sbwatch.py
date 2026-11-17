@@ -2435,7 +2435,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     xc = xc or {}
     if groups is None:
         groups = group_by_src(diff["changed"])
-    sec = [g for g in groups if g["security"] and not g["downgrade"]]
+    sec = [g for g in groups if g["security"]]
     down = [g for g in groups if g["downgrade"]]
     lost = [g for g in groups if g["dropped"]]
     # Same partition as the report's "Bumps in security-sensitive packages"
@@ -2504,7 +2504,8 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     n_bin = len(diff["changed"])
     v = {"level": "skip", "headline": "", "headline_zh": "", "changed_src_count": len(groups),
          "changed_pkg_count": n_bin, "security_src": [g["src"] for g in sec],
-         "security_pkgs": sorted({p["name"] for g in sec for p in g["pkgs"]}),
+         "security_pkgs": sorted({p["name"] for g in sec for p in g["pkgs"]
+                                  if p.get("dir") != "downgrade"}),
          "important_pkgs": sorted({p["name"] for g in imp for p in g["pkgs"]}),
          "cves": cves, "cves_dropped": sorted({c for g in lost for c in g["dropped"]}),
          "downgrades": [g["src"] for g in down], "severity_rank": sev,
@@ -3209,7 +3210,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         groups = group_by_src(changed)
     g_down = [g for g in groups if g["downgrade"]]
     g_lost = [g for g in groups if g["dropped"]]
-    g_sec = [g for g in groups if g["security"] and not g["downgrade"]]
+    g_sec = [g for g in groups if g["security"]]
     g_imp = [g for g in groups if g["important"] and not g["security"] and not g["downgrade"]]
     # identity, not equality: two source groups can compare == and silently drop out.
     # g_lost is deliberately absent: its section names the dropped CVE ids only, so
