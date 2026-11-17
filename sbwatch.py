@@ -2229,13 +2229,19 @@ def fedora_release(pkgs: dict, image_version: str = "") -> str:
     ("44.20260917.0") is only a fallback, so this stops silently going stale at
     the next Fedora release instead of being pinned to one hard-coded value.
     """
-    counts: dict = {}
+    fed_counts: dict = {}
+    all_counts: dict = {}
     for p in pkgs.values():
-        m = re.search(r"\.fc(\d+)", p["release"])
-        if m:
-            counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+        m = re.search(r"\.fc(\d+)", p.get("release") or "")
+        if not m:
+            continue
+        ver = m.group(1)
+        all_counts[ver] = all_counts.get(ver, 0) + 1
+        if not _is_third_party(p):
+            fed_counts[ver] = fed_counts.get(ver, 0) + 1
+    counts = fed_counts or all_counts
     if counts:
-        return "F" + max(counts, key=counts.get)
+        return "F" + max(counts, key=lambda v: (counts[v], int(v)))
     m = re.match(r"^(\d+)\.", image_version or "")
     if m:
         return "F" + m.group(1)
