@@ -1684,7 +1684,7 @@ class Bodhi:
                          "security": bool(bg.get("security"))}
                         for bg in (u.get("bugs") or []) if isinstance(bg, dict)]
                 res.append({
-                    "alias": u.get("alias"), "type": u.get("type"),
+                    "alias": u.get("alias") or u.get("updateid"), "type": u.get("type"),
                     "severity": u.get("severity"), "status": u.get("status"),
                     "title": u.get("title"), "notes": u.get("notes") or "",
                     "cves": sorted(set(find_cves(u.get("notes")))
@@ -2027,7 +2027,8 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                     f"erratum/勘误 {u['alias']}: type={u.get('type')} status={status} "
                     f"(not in a Fedora repo yet / 尚未进入 Fedora 仓库 - not counted)")
                 continue
-            info["aliases"].append(u["alias"])
+            if u.get("alias"):
+                info["aliases"].append(u["alias"])
             info["cves"].update(u.get("cves") or ())
             add_cves(u.get("notes") or "")
             add_cves(u.get("title") or "")
@@ -2459,7 +2460,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             return "security erratum of a passed-over build", "被越过构建的安全勘误"
         # Anything else that set `security` is a released erratum of another
         # type (bugfix, enhancement) listing CVE ids or ranking high/urgent.
-        if g.get("changelog_cves") or not g.get("aliases"):
+        if g.get("changelog_cves") or not (g.get("aliases") or g.get("has_erratum")):
             return "changelog CVE", "更新日志 CVE"
         return ("non-security erratum (CVE ids or high severity)",
                 "非安全类勘误（含 CVE 或高严重度）")
@@ -2517,7 +2518,8 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     same_commit = bool(meta.get("commit_a")) and meta["commit_a"] == meta.get("commit_b")
     v["same_inputhash"] = same_input
     v["same_commit"] = same_commit
-    v["already_had"] = sorted({x["alias"] for g in groups for x in g.get("already_had", [])})
+    v["already_had"] = sorted({x["alias"] for g in groups
+                               for x in g.get("already_had", []) if x.get("alias")})
     # what each security finding rests on: an advisory rpm-ostree would show, a
     # Fedora erratum that only matched after stripping .secureblue.N, or just a
     # changelog CVE mention. The distinction used to be invisible outside the
@@ -2865,7 +2867,8 @@ def group_by_src(changed: list) -> list:
             g = groups[key] = {"src": key, "pkgs": [], "security": False,
                                "cves": set(), "dropped": set(), "aliases": [],
                                "why": [], "sev_rank": 0, "sec_sev_rank": 0, "important": False,
-                               "downgrade": False, "has_security_erratum": False,
+                               "downgrade": False, "has_erratum": False,
+                               "has_security_erratum": False,
                                "advisory_corresponding": False,
                                "changelog_cves": set(),
                                "erratum_severity": "",
@@ -2878,6 +2881,8 @@ def group_by_src(changed: list) -> list:
         g["cves"].update(cls.get("cves") or [])
         g["dropped"].update(cls.get("cves_dropped") or [])
         g["changelog_cves"].update(cls.get("changelog_cves") or [])
+        if cls.get("erratum"):
+            g["has_erratum"] = True
         if cls.get("advisory_corresponding"):
             g["advisory_corresponding"] = True
         if cls.get("has_security_erratum"):
@@ -2897,7 +2902,7 @@ def group_by_src(changed: list) -> list:
                 if _sev_rank_for_upstream(adv_sev) > _sev_rank_for_upstream(prev_s):
                     g["security_advisories"][adv_id] = adv_sev
         for a in cls.get("aliases") or []:
-            if a not in g["aliases"]:
+            if a and a not in g["aliases"]:
                 g["aliases"].append(a)
         for w in cls.get("why") or []:
             if w not in g["why"]:
@@ -3380,7 +3385,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("")
             for g in g_un:
                 W(f"- `{g['src']}`: "
-                  f"{clip_list(g['unreleased'], 4, lang='zh', joiner='，', render=lambda x: x['alias'] + ' (' + str(x['status']) + ')')}")
+                  f"{clip_list(g['unreleased'], 4, lang='zh', joiner='，', render=lambda x: str(x.get('alias') or '?') + ' (' + str(x.get('status') or '?') + ')')}")
         else:
             W(f"## Errata that exist but are not pushed yet ({len(g_un)})")
             W("")
@@ -3389,7 +3394,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("")
             for g in g_un:
                 W(f"- `{g['src']}`: "
-                  f"{clip_list(g['unreleased'], 4, render=lambda x: x['alias'] + ' (' + str(x['status']) + ')')}")
+                  f"{clip_list(g['unreleased'], 4, render=lambda x: str(x.get('alias') or '?') + ' (' + str(x.get('status') or '?') + ')')}")
         W("")
 
     # "every package has the same NEVRA" also needs an unchanged package *set*:
@@ -3514,7 +3519,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("| package | in image | newer stable build | severity | erratum |")
             W("|---|---|---|---|---|")
         for r in backlog[:25]:
-            W(f"| `{r['name']}` | {r['have']} | **{r['want']}** | {r['severity'] or '?'} | {r['alias']} |")
+            W(f"| `{r['name']}` | {r['have']} | **{r['want']}** | {r['severity'] or '?'} | {r.get('alias') or '—'} |")
         if len(backlog) > 25:
             # A fixed display cap: --backlog-candidates changes how many rows exist,
             # never how many fit here, so point at the complete JSON instead.
