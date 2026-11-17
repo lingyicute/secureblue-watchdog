@@ -78,5 +78,29 @@ class TestBacklogActualCoverage(unittest.TestCase):
         self.assertEqual(ups[0]["nvrs"], ["firefox-150.0-1.fc45"])
 
 
+    def test_mid_pagination_failure_marks_source_as_truncated(self):
+        import contextlib
+        import io
+        bodhi = S.Bodhi(cache_dir=None, max_calls=5, sleep=0)
+        page1 = [{"alias": f"FEDORA-2026-{i}", "type": "bugfix", "status": "stable",
+                  "builds": [{"nvr": f"kernel-7.3.{i}-1.fc45", "type": "rpm"}]}
+                 for i in range(S.BODHI_PAGE_SIZE)]
+        calls = 0
+
+        def fake_fetch(url, src):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {"total": S.BODHI_PAGE_SIZE + 10, "updates": page1}, page1
+            raise TimeoutError("page 2 timeout")
+
+        bodhi._fetch_page = fake_fetch
+        with contextlib.redirect_stderr(io.StringIO()):
+            ups = bodhi.updates_for_src("kernel", "F45")
+        self.assertEqual(len(ups), S.BODHI_PAGE_SIZE)
+        self.assertEqual(bodhi.failed, 1)
+        self.assertIn("kernel", bodhi.truncated_src)
+
+
 if __name__ == "__main__":
     unittest.main()

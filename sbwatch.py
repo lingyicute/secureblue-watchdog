@@ -1626,6 +1626,8 @@ class Bodhi:
                           f"not attempted (they count as failed)",
                           f"  ！Bodhi：连续 {self._streak} 次查询失败——视为不可用，"
                           f"本次运行不再尝试其余查询（计为失败）"))
+                if res:
+                    truncated = True
                 ok = False
                 break
             ok = True
