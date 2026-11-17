@@ -152,7 +152,7 @@ MANIFEST_ACCEPT = ",".join([
 # typographic hyphen. The strict `CVE-\d{4}-\d{4,7}` read none of those, so a
 # CVE fix was reported as "no CVE mentioned". Always go through find_cves().
 # `(?!\d)`: an id longer than seven digits must not be read as its first seven.
-CVE_RE = re.compile(r"CVE[-_ \u2010-\u2013]?(\d{4})[-_\u2010-\u2013](\d{4,7})(?!\d)", re.I)
+CVE_RE = re.compile(r"(?<![A-Za-z0-9])CVE[-_ \u2010-\u2013]?(\d{4})[-_\u2010-\u2013](\d{4,7})(?!\d)", re.I)
 SEC_WORDS_RE = re.compile(
     r"(security fix|fix(es)? .{0,40}vulnerab|buffer overflow|use-after-free|"
     r"privilege escalation|out.of.bounds)", re.I)

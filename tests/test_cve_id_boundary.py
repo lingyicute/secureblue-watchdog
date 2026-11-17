@@ -16,5 +16,11 @@ class TestCveIdBoundary(unittest.TestCase):
                          ["CVE-2026-1234567", "CVE-2026-114583", "CVE-2024-4741"])
 
 
+    def test_alphanumeric_prefix_before_cve_is_not_matched(self):
+        self.assertEqual(S.find_cves("nocve-2026-1234 abcve2026-5678 0cve-2026-9999"), [])
+        self.assertEqual(S.find_cves("(CVE-2026-1234),CVE-2026-5678"),
+                         ["CVE-2026-1234", "CVE-2026-5678"])
+
+
 if __name__ == "__main__":
     unittest.main()
