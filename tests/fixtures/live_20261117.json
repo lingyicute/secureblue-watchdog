@@ -1,0 +1,146 @@
+{
+  "retrieved_at": "2026-11-17T12:53:15Z",
+  "scope": "Representative immutable image facts and a normalized public Bodhi response; not a complete image scan.",
+  "registry": "ghcr.io/secureblue/silverblue-main-hardened",
+  "bodhi_url": "https://bodhi.fedoraproject.org/updates/?packages=dnf5&releases=F45&rows_per_page=100&page=1",
+  "images": {
+    "old": {
+      "digest": "sha256:949244280a26ee8c2c650c61a7199f8837b110bdad74209a39a17bf5e5010b0a",
+      "created": "2026-11-14T22:25:54Z",
+      "version": "45.20261114.0",
+      "packages": {
+        "glibc": {
+          "name": "glibc",
+          "version": "2.44",
+          "release": "2.fc45",
+          "epoch": "",
+          "arch": "x86_64",
+          "srpm": "glibc-2.44-2.fc45",
+          "src": "glibc",
+          "vendor": "Fedora Project",
+          "evr": "2.44-2.fc45",
+          "nvr": "glibc-2.44-2.fc45"
+        },
+        "dnf5": {
+          "name": "dnf5",
+          "version": "5.4.7.0",
+          "release": "1.fc45",
+          "epoch": "",
+          "arch": "x86_64",
+          "srpm": "dnf5-5.4.7.0-1.fc45",
+          "src": "dnf5",
+          "vendor": "Fedora Project",
+          "evr": "5.4.7.0-1.fc45",
+          "nvr": "dnf5-5.4.7.0-1.fc45"
+        },
+        "bubblewrap": {
+          "name": "bubblewrap",
+          "version": "0.13.1",
+          "release": "1.restricted",
+          "epoch": "",
+          "arch": "x86_64",
+          "srpm": "bubblewrap-0.13.1-1.restricted",
+          "src": "bubblewrap",
+          "vendor": "Fedora Copr - user secureblue",
+          "evr": "0.13.1-1.restricted",
+          "nvr": "bubblewrap-0.13.1-1.restricted"
+        }
+      },
+      "glibc_layers": [
+        {
+          "digest": "sha256:f3ef5af48e42f0a37eea445d96dfbaa57e0c7928f127adb4c99a1cba6c24c71f",
+          "size": 85450396,
+          "components": [
+            "rpm/glibc"
+          ],
+          "stability": 0.453
+        }
+      ]
+    },
+    "new": {
+      "digest": "sha256:4763ae68d78466b149814c6e9fdaf69ad373b8a16214c3b7ef168949350aa3f1",
+      "created": "2026-11-17T01:06:51Z",
+      "version": "45.20261116.0",
+      "packages": {
+        "glibc": {
+          "name": "glibc",
+          "version": "2.44",
+          "release": "2.fc45",
+          "epoch": "",
+          "arch": "x86_64",
+          "srpm": "glibc-2.44-2.fc45",
+          "src": "glibc",
+          "vendor": "Fedora Project",
+          "evr": "2.44-2.fc45",
+          "nvr": "glibc-2.44-2.fc45"
+        },
+        "dnf5": {
+          "name": "dnf5",
+          "version": "5.4.8.0",
+          "release": "2.fc45",
+          "epoch": "",
+          "arch": "x86_64",
+          "srpm": "dnf5-5.4.8.0-2.fc45",
+          "src": "dnf5",
+          "vendor": "Fedora Project",
+          "evr": "5.4.8.0-2.fc45",
+          "nvr": "dnf5-5.4.8.0-2.fc45"
+        },
+        "bubblewrap": {
+          "name": "bubblewrap",
+          "version": "0.13.1",
+          "release": "1.restricted",
+          "epoch": "",
+          "arch": "x86_64",
+          "srpm": "bubblewrap-0.13.1-1.restricted",
+          "src": "bubblewrap",
+          "vendor": "Fedora Copr - user secureblue",
+          "evr": "0.13.1-1.restricted",
+          "nvr": "bubblewrap-0.13.1-1.restricted"
+        }
+      },
+      "glibc_layers": [
+        {
+          "digest": "sha256:6014df9b3482ba06038f0cbd117a61044c1d7ea8e56594fe5524d251bc6e9272",
+          "size": 85450390,
+          "components": [
+            "rpm/glibc"
+          ],
+          "stability": 0.455
+        }
+      ]
+    }
+  },
+  "dnf5_advisory": {
+    "alias": "FEDORA-2026-b9a53ff63c",
+    "type": "security",
+    "severity": "high",
+    "status": "stable",
+    "title": "dnf5-5.4.8.0-2.fc45",
+    "notes": "Update for dnf5-5.4.8.0-1.fc45. It also fixes CVE-2026-123177.\n\n",
+    "cves": [
+      "CVE-2026-123177"
+    ],
+    "bugs": [
+      {
+        "bug_id": 2573156,
+        "title": "CVE-2026-123177 dnf5: dnf5daemon-server: unauthenticated privileged cmdline package fetch/open via add_cmdline_packages [fedora-all]",
+        "security": true
+      }
+    ],
+    "date_approved": "2026-11-12 05:18:02",
+    "date_stable": "2026-11-14 02:35:15",
+    "nvrs": [
+      "dnf5-5.4.8.0-2.fc45"
+    ],
+    "build_epochs": {
+      "dnf5-5.4.8.0-2.fc45": "0"
+    }
+  },
+  "snapshot_sha256": {
+    "previous-resolved.json": "3d70e1f668ce698d4779eb6a0dd9938be9029fcd5e8615fabf40b872ffb4d406",
+    "latest-resolved.json": "99bd1762516098261fa2ea8b1b00837389d44dfc94549512982c4ae62c5ad2e9",
+    "previous-packages.json": "c1e00925ac1dc830bbb94b5d5839844127185745c0295e2c5dbaa5167c44d8bf",
+    "latest-packages.json": "9f38cc86bfbe17f5dd073369a0cb471473269c37d6461a19ec3d0e314570c639"
+  }
+}
