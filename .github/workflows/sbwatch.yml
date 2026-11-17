@@ -310,7 +310,7 @@ jobs:
 
       - name: Push to Telegram
         # env.TELEGRAM_BOT_TOKEN is defined at *job* level, so it is visible here.
-        if: steps.notify.outputs.post == 'true' && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
+        if: always() && steps.notify.outputs.post == 'true' && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
         env:
           SUMMARY: ${{ steps.check.outputs.summary }}
         run: |
@@ -349,7 +349,7 @@ jobs:
           PY
 
       - name: Red run when security fixes are waiting
-        if: env.FAIL_ON_SECURITY == 'true' && steps.check.outputs.fail_on_security == 'true'
+        if: always() && env.FAIL_ON_SECURITY == 'true' && steps.check.outputs.fail_on_security == 'true'
         env:
           FAIL_REASON: ${{ steps.check.outputs.fail_reason }}
         run: |
@@ -366,7 +366,7 @@ jobs:
       # exactly like a quiet week. The report is already uploaded above, so
       # failing here still leaves the evidence in place.
       - name: Fail when the watch could not conclude anything
-        if: steps.check.outputs.verdict == 'unknown'
+        if: always() && steps.check.outputs.verdict == 'unknown'
         run: |
           echo "::error::verdict 'unknown' - the watch did not establish anything (no baseline image, or the registry could not be probed). See the run log and the uploaded report."
           exit 1
