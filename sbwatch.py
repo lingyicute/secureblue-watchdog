@@ -2518,7 +2518,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     same_commit = bool(meta.get("commit_a")) and meta["commit_a"] == meta.get("commit_b")
     v["same_inputhash"] = same_input
     v["same_commit"] = same_commit
-    v["already_had"] = sorted({x["alias"] for g in groups
+    v["already_had"] = sorted({x["alias"] for g in groups if not g["downgrade"]
                                for x in g.get("already_had", []) if x.get("alias")})
     # what each security finding rests on: an advisory rpm-ostree would show, a
     # Fedora erratum that only matched after stripping .secureblue.N, or just a
@@ -2876,39 +2876,41 @@ def group_by_src(changed: list) -> list:
                                "already_had": [], "unreleased": [], "passed_over": []}
         g["pkgs"].append(c)
         cls = c.get("cls") or {}
-        g["security"] = g["security"] or bool(cls.get("security"))
+        is_down = c.get("dir") == "downgrade"
         g["important"] = g["important"] or bool(cls.get("important_src"))
-        g["cves"].update(cls.get("cves") or [])
         g["dropped"].update(cls.get("cves_dropped") or [])
-        g["changelog_cves"].update(cls.get("changelog_cves") or [])
-        if cls.get("erratum"):
-            g["has_erratum"] = True
-        if cls.get("advisory_corresponding"):
-            g["advisory_corresponding"] = True
-        if cls.get("has_security_erratum"):
-            g["has_security_erratum"] = True
-            cand = cls.get("erratum_severity") or ""
-            # rpm-ostree takes the max severity across advisories, so keep the
-            # spelling that ranks highest under its own str2severity().  The
-            # sentinel matters: when a spelling Fedora/Bodhi cannot produce (or an
-            # empty one) is the only candidate, `_sev_rank_for_upstream` returns
-            # -1 for it, so a plain 0-initialised `>` would never store the first
-            # value and the group would report an empty severity.
-            cur = g.get("erratum_severity")
-            if cur is None or _sev_rank_for_upstream(cand) > _sev_rank_for_upstream(cur):
-                g["erratum_severity"] = cand
-            for adv_id, adv_sev in (cls.get("security_advisories") or {}).items():
-                prev_s = g["security_advisories"].get(adv_id, "")
-                if _sev_rank_for_upstream(adv_sev) > _sev_rank_for_upstream(prev_s):
-                    g["security_advisories"][adv_id] = adv_sev
-        for a in cls.get("aliases") or []:
-            if a and a not in g["aliases"]:
-                g["aliases"].append(a)
-        for w in cls.get("why") or []:
-            if w not in g["why"]:
-                g["why"].append(w)
-        g["sev_rank"] = max(g["sev_rank"], cls.get("sev_rank") or 0)
-        g["sec_sev_rank"] = max(g["sec_sev_rank"], cls.get("sec_sev_rank") or 0)
+        if not is_down:
+            g["security"] = g["security"] or bool(cls.get("security"))
+            g["cves"].update(cls.get("cves") or [])
+            g["changelog_cves"].update(cls.get("changelog_cves") or [])
+            if cls.get("erratum"):
+                g["has_erratum"] = True
+            if cls.get("advisory_corresponding"):
+                g["advisory_corresponding"] = True
+            if cls.get("has_security_erratum"):
+                g["has_security_erratum"] = True
+                cand = cls.get("erratum_severity") or ""
+                # rpm-ostree takes the max severity across advisories, so keep the
+                # spelling that ranks highest under its own str2severity().  The
+                # sentinel matters: when a spelling Fedora/Bodhi cannot produce (or an
+                # empty one) is the only candidate, `_sev_rank_for_upstream` returns
+                # -1 for it, so a plain 0-initialised `>` would never store the first
+                # value and the group would report an empty severity.
+                cur = g.get("erratum_severity")
+                if cur is None or _sev_rank_for_upstream(cand) > _sev_rank_for_upstream(cur):
+                    g["erratum_severity"] = cand
+                for adv_id, adv_sev in (cls.get("security_advisories") or {}).items():
+                    prev_s = g["security_advisories"].get(adv_id, "")
+                    if _sev_rank_for_upstream(adv_sev) > _sev_rank_for_upstream(prev_s):
+                        g["security_advisories"][adv_id] = adv_sev
+            for a in cls.get("aliases") or []:
+                if a and a not in g["aliases"]:
+                    g["aliases"].append(a)
+            for w in cls.get("why") or []:
+                if w not in g["why"]:
+                    g["why"].append(w)
+            g["sev_rank"] = max(g["sev_rank"], cls.get("sev_rank") or 0)
+            g["sec_sev_rank"] = max(g["sec_sev_rank"], cls.get("sec_sev_rank") or 0)
         for a in cls.get("already_had") or []:
             if a not in g["already_had"]:
                 g["already_had"].append(a)
