@@ -4079,7 +4079,7 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
             "version": img["annotations"].get("org.opencontainers.image.version"),
             "inputhash": img["annotations"].get("rpmostree.inputhash"),
             "kernel": img["annotations"].get("ostree.linux"), "image": img, "tags": []}
-    if days:                      # label: which dated tag currently points at a row
+    if days and days > 0:         # label: which dated tag currently points at a row
         # `20260917` and `20260917-44` both match and both point at the same build,
         # so bucket by calendar day first - otherwise --days 7 only labels ~4 days.
         by_day: dict = {}
@@ -4264,7 +4264,7 @@ def cmd_tags(args):
           f"缺失的日期表示当天没有发布构建）：")
     now = time.time()
     probe_warnings: list = []
-    for i in range(args.days):        # day 0 is today (UTC): the tag most likely to be new
+    for i in range(max(0, args.days)):  # day 0 is today (UTC): the tag most likely to be new
         d = time.strftime("%Y%m%d", time.gmtime(now - i * 86400))
         dig = tag_exists(reg, d, warn=probe_warnings)
         if not dig:
