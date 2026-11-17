@@ -1513,7 +1513,9 @@ class TestDoDiffFastPathSameRpmdb(unittest.TestCase):
             ]
         }
 
-        res = S.do_diff(args, "a", "b", images=(img_a, img_b))
+        from unittest.mock import patch
+        with patch.object(S.Registry, "_token", return_value=None):
+            res = S.do_diff(args, "a", "b", images=(img_a, img_b))
         self.assertTrue(res["diff"]["same_rpmdb"])
         self.assertTrue(res["xc"]["versions_known"])
         self.assertEqual(res["verdict"]["level"], "no-change")

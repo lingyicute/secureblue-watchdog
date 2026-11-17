@@ -286,7 +286,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
-python3 -m unittest discover -s tests -v
+python3 tests/run_offline.py
 ```
 
 覆盖的行为（每组都对应一个曾经真实出错的判定）：
