@@ -3659,8 +3659,11 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
     """
     want = {}
     for n, p in pkgs.items():
-        if _src_matches_pool(p["src"], BACKLOG_POOL):
-            want.setdefault(p["src"], []).append((n, p))
+        if not _src_matches_pool(p["src"], BACKLOG_POOL):
+            continue
+        if _is_third_party(p) and not re.search(r"\.secureblue\.\d+", p.get("release") or ""):
+            continue
+        want.setdefault(p["src"], []).append((n, p))
     # Security-sensitive sources first, as in classify_order(): `limit` and
     # --max-bodhi both cut this list from its end, and in plain name order the
     # live image's 55 candidates lost systemd, webkitgtk and xdg-desktop-portal

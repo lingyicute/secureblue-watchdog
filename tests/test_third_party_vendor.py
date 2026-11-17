@@ -11,6 +11,8 @@ class _Bodhi:
     def __init__(self, updates):
         self.updates = updates
         self.queried = []
+        self.failed = 0
+        self.skipped = 0
 
     def updates_for_src(self, src, release):
         self.queried.append((src, release))
@@ -105,6 +107,27 @@ class TestThirdPartyVendor(unittest.TestCase):
         self.assertFalse(cls["has_security_erratum"])
         self.assertEqual([x["alias"] for x in cls["passed_over"]], ["FEDORA-2026-655049a906"])
         self.assertEqual(cls["cves"], ["CVE-2026-4242"])
+
+
+    def test_security_backlog_skips_third_party_fork_but_keeps_copr_secureblue_kernel(self):
+        pkgs = {
+            "bubblewrap": dict(pkg("bubblewrap", "0.13.1-1.restricted"),
+                               vendor="Fedora Copr - user secureblue"),
+            "kernel": dict(pkg("kernel", "7.2.15-300.secureblue.1.fc45"),
+                           vendor="Fedora Copr - user secureblue"),
+        }
+        bodhi = _Bodhi([
+            {"alias": "FEDORA-2026-bwrap", "type": "security", "severity": "high",
+             "status": "stable", "notes": "", "cves": ["CVE-2026-1111"],
+             "nvrs": ["bubblewrap-0.13.1-2.fc45"]},
+            {"alias": "FEDORA-2026-655049a906", "type": "security", "severity": "medium",
+             "status": "stable", "notes": "", "cves": [],
+             "nvrs": ["kernel-7.3.3-300.fc45"]},
+        ])
+        rows, cov = S.security_backlog(pkgs, "F45", bodhi)
+        self.assertEqual(bodhi.queried, [("kernel", "F45")])
+        self.assertEqual([r["src"] for r in rows], ["kernel"])
+        self.assertEqual(cov["candidates"], 1)
 
 
 if __name__ == "__main__":
