@@ -2195,7 +2195,9 @@ def crosscheck_chunks(ldiff: dict, diff: dict, src_of: dict | None = None,
     if not versions_known:
         return out
     changed_versions = {c["name"] for c in diff["changed"]}
-    changed_src = {c["src"] for c in diff["changed"]}
+    changed_src = {c["src"] for c in diff["changed"]} | {
+        (c.get("old") or {}).get("src") for c in diff["changed"]
+        if (c.get("old") or {}).get("src")}
     # A package this update adds or removes moves its source's chunk as well. That
     # is a package-set change, not a rebuild "with the same version" - a brand-new
     # package sitting in a chunk of its own used to be listed as silently rebuilt.
