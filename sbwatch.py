@@ -1531,7 +1531,13 @@ class Bodhi:
             self.calls += 1
             try:
                 with urllib.request.urlopen(url, timeout=40) as r:
-                    data = json.load(r)
+                    cl = r.headers.get("Content-Length") if getattr(r, "headers", None) else None
+                    if cl and str(cl).isdigit() and int(cl) > MAX_JSON_BYTES:
+                        raise ValueError(f"Bodhi response exceeds {human(MAX_JSON_BYTES)}")
+                    raw = r.read(MAX_JSON_BYTES + 1)
+                    if len(raw) > MAX_JSON_BYTES:
+                        raise ValueError(f"Bodhi response exceeds {human(MAX_JSON_BYTES)}")
+                    data = json.loads(raw)
                 if not isinstance(data, dict):
                     raise ValueError("Bodhi response is not a JSON object")
                 page_ups = data.get("updates", [])
