@@ -63,5 +63,17 @@ class TestChangedEpochIsShown(unittest.TestCase):
         self.assertEqual((item["old"], item["new"]), ("0:1.2-3.fc44", "1:1.2-3.fc44"))
 
 
+    def test_group_by_src_prefers_source_named_binary_for_evr_and_epoch(self):
+        d = S.pkg_diff(
+            {"bpftool": pkg("bpftool", "7.3.2-300.fc45", src="kernel"),
+             "kernel": pkg("kernel", "7.3.2-300.secureblue.1.fc45", src="kernel")},
+            {"bpftool": pkg("bpftool", "7.3.3-300.fc45", src="kernel"),
+             "kernel": pkg("kernel", "7.3.3-300.secureblue.2.fc45", src="kernel")},
+        )
+        g = S.group_by_src(d["changed"])[0]
+        self.assertEqual(g["old_evr"], "7.3.2-300.secureblue.1.fc45")
+        self.assertEqual(g["new_evr"], "7.3.3-300.secureblue.2.fc45")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2931,7 +2931,8 @@ def group_by_src(changed: list) -> list:
         g["cves"] = sorted(g["cves"])
         g["dropped"] = sorted(g["dropped"])
         g["changelog_cves"] = sorted(g["changelog_cves"])
-        o, n = g["pkgs"][0]["old"], g["pkgs"][0]["new"]
+        rep = min(g["pkgs"], key=lambda p: (p["name"] != g["src"], p["name"]))
+        o, n = rep["old"], rep["new"]
         g["old_evr"], g["new_evr"] = _build_evr(o), _build_evr(n)
         if _epoch(o) != _epoch(n):
             # neither string carries the epoch: an epoch-only change read "1.2-3 → 1.2-3"
