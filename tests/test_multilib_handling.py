@@ -37,5 +37,13 @@ class TestMultilibHandling(unittest.TestCase):
         self.assertTrue(any("glibc.i686" in str(n) for n in res["notes"]))
 
 
+    def test_collision_with_differing_epochs_records_both_epochs(self):
+        t = S.PackageTable()
+        S.table_put(t, dict(pkg("foo", "1.0-1.fc45", epoch="0"), arch="x86_64"))
+        S.table_put(t, dict(pkg("foo", "1.0-1.fc45", epoch="1"), arch="i686"))
+        self.assertEqual(t.collisions[0]["kept_evr"], "1:1.0-1.fc45")
+        self.assertEqual(t.collisions[0]["shadowed_evr"], "0:1.0-1.fc45")
+
+
 if __name__ == "__main__":
     unittest.main()

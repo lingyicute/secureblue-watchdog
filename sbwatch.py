@@ -1418,10 +1418,11 @@ def table_put(pkgs: "PackageTable", e: dict) -> None:
         cmp = evr_cmp(e, old)
         take_new = cmp > 0 or (cmp == 0 and (e.get("arch") or "") > (old.get("arch") or ""))
         winner, loser = (e, old) if take_new else (old, e)
+        kept_evr, shad_evr = _evr_pair(winner, loser)
         pkgs.collisions.append({"name": name, "kept_arch": winner.get("arch"),
-                                "kept_evr": winner.get("evr"),
+                                "kept_evr": kept_evr,
                                 "shadowed_arch": loser.get("arch"),
-                                "shadowed_evr": loser.get("evr")})
+                                "shadowed_evr": shad_evr})
         pkgs[name] = winner
         return
     if evr_cmp(e, old) > 0:
