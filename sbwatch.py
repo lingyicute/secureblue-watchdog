@@ -4955,20 +4955,14 @@ def cmd_check(args):
                 f"{args.image}:{args.to} 无新构建——仍为 {ver}"
                 f"（{cur['digest'][:19]}...），无需下载任何内容")
         log(msg)
-        # silent exit: no report needed, but keep GITHUB_OUTPUT for the workflow
-        # to skip notify/upload. Under GITHUB_ACTIONS still write a placeholder, so
-        # the upload step (if-no-files-found: ignore) has something to point at and
-        # the run summary is not blank.
+        # Refresh both outputs on every successful run, including local cron.
+        # A stale security report must not survive an unchanged digest, and a
+        # failed write must be visible rather than silently reporting success.
         report = args.report or "report.md"
-        try:
-            # write a tiny placeholder if the workflow expects a file; otherwise skip
-            if os.environ.get("GITHUB_ACTIONS"):
-                _atomic_write_text(report, f"# No new build 无新构建\n\n{msg}\n")
-                _atomic_write_json(report + ".json", {
-                    "verdict": {"level": "no-update", "headline": msg}, "version": ver,
-                    "digest": cur["digest"], "download_bytes": 0})
-        except Exception:
-            pass
+        _atomic_write_text(report, f"# No new build 无新构建\n\n{msg}\n")
+        _atomic_write_json(report + ".json", {
+            "verdict": {"level": "no-update", "headline": msg}, "version": ver,
+            "digest": cur["digest"], "download_bytes": 0})
         gh_outputs({"verdict": "no-update", "digest": cur["digest"], "summary": msg,
                     "download_bytes": 0, "report": report, "version": ver,
                     "inputhash": cur["annotations"].get("rpmostree.inputhash") or ""})
@@ -5091,20 +5085,13 @@ def cmd_check(args):
         msg = T(f"new build ({ver}) but no earlier image available to diff against",
                 f"有新构建（{ver}），但没有可用于对比的更早镜像")
         log(msg)
-        # first run / no baseline: don't fail the workflow, just report unknown
-        # and let the workflow decide whether to notify. This used to return 1
-        # which made the GitHub Action red.
         report = args.report or "report.md"
-        try:
-            if os.environ.get("GITHUB_ACTIONS"):
-                _atomic_write_text(report, f"# {msg}\n\nNo baseline image found to diff "
-                                          f"against / 未找到可用于对比的基线镜像. "
-                                          f"Current 当前: {ver} {cur['digest'][:19]}...\n")
-                _atomic_write_json(report + ".json", {"verdict": {"level": "unknown"},
-                                                      "version": ver,
-                                                      "digest": cur["digest"]})
-        except Exception:
-            pass
+        _atomic_write_text(report, f"# {msg}\n\nNo baseline image found to diff "
+                                  f"against / 未找到可用于对比的基线镜像. "
+                                  f"Current 当前: {ver} {cur['digest'][:19]}...\n")
+        _atomic_write_json(report + ".json", {
+            "verdict": {"level": "unknown", "headline": msg},
+            "version": ver, "digest": cur["digest"]})
         gh_outputs({"verdict": "unknown", "digest": cur["digest"], "summary": msg,
                     "download_bytes": 0, "report": report, "version": ver})
         # Remember the checkpoint for a future build, not a successful analysis.
