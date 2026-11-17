@@ -1632,6 +1632,9 @@ class Bodhi:
             self._streak = 0
             total = data.get("total", total)
             for u in page_ups:
+                ctype = (u.get("content_type") or "").strip().lower()
+                if ctype and ctype != "rpm":
+                    continue
                 # Bodhi's /updates/ payload has NO "cves" key (verified against the
                 # live API); CVE ids live in the notes text and in bugs[].title,
                 # e.g. "CVE-2026-2673 openssl: TLS 1.3 server may choose ...".
@@ -1655,7 +1658,9 @@ class Bodhi:
                     "bugs": bugs,
                     "date_approved": u.get("date_approved"),
                     "date_stable": u.get("date_stable"),
-                    "nvrs": [b.get("nvr") for b in (u.get("builds") or []) if isinstance(b, dict)],
+                    "nvrs": [b.get("nvr") for b in (u.get("builds") or [])
+                             if isinstance(b, dict)
+                             and (b.get("type") or "rpm").lower() == "rpm"],
                 })
             if len(page_ups) < BODHI_PAGE_SIZE:
                 break                       # last page

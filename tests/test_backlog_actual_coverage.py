@@ -61,5 +61,22 @@ class TestBacklogActualCoverage(unittest.TestCase):
         self.assertNotIn("unrelated", out.getvalue())
 
 
+    def test_non_rpm_content_types_and_builds_are_ignored(self):
+        bodhi = S.Bodhi(cache_dir=None, max_calls=2, sleep=0)
+        raw = [
+            {"alias": "FEDORA-FLATPAK-1", "content_type": "flatpak", "type": "security",
+             "status": "stable", "builds": [{"nvr": "firefox-150.0-1.fc45", "type": "flatpak"}]},
+            {"alias": "FEDORA-RPM-1", "content_type": "rpm", "type": "security",
+             "status": "stable", "builds": [
+                 {"nvr": "firefox-150.0-1.fc45", "type": "rpm"},
+                 {"nvr": "firefox-151.0-1.module", "type": "module"},
+             ]},
+        ]
+        bodhi._fetch_page = lambda url, src: ({"total": 2, "updates": raw}, raw)
+        ups = bodhi.updates_for_src("firefox", "F45")
+        self.assertEqual([u["alias"] for u in ups], ["FEDORA-RPM-1"])
+        self.assertEqual(ups[0]["nvrs"], ["firefox-150.0-1.fc45"])
+
+
 if __name__ == "__main__":
     unittest.main()
