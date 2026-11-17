@@ -282,7 +282,7 @@ stdout 或 `--json-out` 的 `verdict.level` 读取）；非零退出码只表示
 
 ## 测试
 
-`tests/` 包含 **457 项离线回归测试**，不需要网络、不访问 registry
+`tests/` 包含 **498 项离线回归测试**，不需要网络、不访问 registry
 或 Bodhi，也不依赖 `rpm` 二进制或 python `rpm` 模块：
 
 ```bash
@@ -368,6 +368,8 @@ python3 -m unittest discover -s tests -v
 - `test_sourcerpm_name.py` / `test_rpm_header_store_bounds.py` / `test_multilib_handling.py`：兼容非数字开头版本的 SRPM 解析；RPM 头部读取严格限制在数据区边界内；multilib 同版本按架构确定性择优并同时披露旧镜像冲突；JSON diff 输出补齐变化的 epoch。
 - `test_downgrade_headline.py` / `test_already_had_section.py` / `test_report_language_split.py` / `test_manifest_only_footer.py`：内核或常规包降级不再计为正向升级；已拥有勘误去重并排除被降级回退的包；中英文报告半区彻底隔离；`--exact 0` 页脚不再声称拉取了 `rpmdb.sqlite`。
 - `test_tar_links.py` / `test_timestamp_offsets.py` / `test_check_swapped_title.py` / `test_tag_digest_header.py` / `test_token_refresh.py` / `test_image_ref_parsing.py`：tar 软/硬链接可胜过 0 字节占位文件；带时区偏移的 RFC 3339 时间戳按 UTC 时刻排序；排除 `br-*` 分支预览构建与晚于目标的构建、保留同分钟多次构建；校验状态文件监控标签与摘要头；401 时自动刷新过期 pull token；拒绝空 `@` 摘要并忽略主机名大小写。
+
+- `test_redirect_schemes.py` / `test_bodhi_size_cap.py` / `test_rpmdb_basename_match.py` / `test_null_bodhi_alias.py` / `test_downgrade_target_erratum.py` / `test_mixed_direction_group.py` / `test_silent_rebuild_moved_src.py` / `test_fedora_release_selection.py` / `test_stream_major_history.py` / `test_negative_days.py` / `test_markdown_table_escape.py`：拒绝 `file:`/`ftp:` 重定向与含路径穿越或查询符的引用、统一小写 registry 主机名、兼容大小写/多方案 Bearer 头并剥离 realm 片段、校验 manifest 层大小/摘要/有限浮点数、限制 Bodhi 响应体积并忽略非 RPM 勘误与标记分页中途失败、精确匹配 `rpmdb.sqlite` 基名与多级/多条 tar 链接、拒绝标量头部标签返回数组、补齐 `CVE_RE` 前导边界、修正独立版本子包的 SRPM 候选与 Copr `.secureblue.N` 内核越过勘误、在 backlog 中跳过第三方 Copr 分支包（如 `bubblewrap`）、兼容空勘误编号、防止回滚因旧构建勘误抬升为 `update-now` 并保留同源码组升级子包的 CVE、锁定主版本分支标签（如 `44`）的历史与基线、兼容 Python 3.10 纳秒时间戳、强制 JSON UTF-8 与禁 `NaN`、转义 Markdown 表格管道符。
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
