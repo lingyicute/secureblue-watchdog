@@ -46,6 +46,17 @@ class TestMalformedManifest(unittest.TestCase):
         bad["annotations"]["org.chunkah.stability"] = "high"
         self._refused(json.dumps({"layers": [bad]}).encode())
 
+    def test_negative_or_boolean_layer_size_is_refused(self):
+        self._refused(json.dumps({"layers": [_layer(size=-5)]}).encode())
+        self._refused(json.dumps({"layers": [_layer(size=True)]}).encode())
+
+    def test_non_finite_stability_or_bad_layer_digest_is_refused(self):
+        for s in ("nan", "inf", "-inf"):
+            bad = _layer(size=5)
+            bad["annotations"]["org.chunkah.stability"] = s
+            self._refused(json.dumps({"layers": [bad]}).encode())
+        self._refused(json.dumps({"layers": [{"digest": "bad", "size": 5}]}).encode())
+
     def test_a_well_formed_manifest_still_resolves(self):
         out = _registry(json.dumps({"layers": [_layer(size=5)]}).encode()).resolve(
             "latest", light=True)

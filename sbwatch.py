@@ -51,6 +51,7 @@ import gzip
 import hashlib
 import http.client
 import json
+import math
 import os
 import pathlib
 import re
@@ -959,6 +960,8 @@ class Registry:
         check_digest(actual, top_digest, f"manifest {what}")
         top_digest = "sha256:" + actual
         man = json.loads(raw)
+        if not isinstance(man, dict):
+            raise TypeError("manifest must be a JSON object")
         out = {"ref": what, "index_digest": top_digest, "mediaType": ctype,
                "is_index": "index" in ctype or "manifests" in man}
         ann = dict(man.get("annotations") or {})
@@ -979,6 +982,8 @@ class Registry:
             check_digest(plat_hex, pick_dig,
                          f"manifest {clip_hash(pick_dig, 19)}", required=True)
             man = json.loads(raw)
+            if not isinstance(man, dict):
+                raise TypeError("platform manifest must be a JSON object")
             out["digest"] = "sha256:" + plat_hex
             ann.update(dict(man.get("annotations") or {}))
         else:
@@ -992,6 +997,8 @@ class Registry:
             check_digest(hashlib.sha256(raw).hexdigest(), cfg_dig,
                          f"image config {clip_hash(cfg_dig, 19)}", required=True)
             cfg = json.loads(raw)
+            if not isinstance(cfg, dict):
+                raise TypeError("image config must be a JSON object")
             ann = {**dict((cfg.get("config") or {}).get("Labels") or {}), **ann}
         out["config"] = cfg
         out["annotations"] = ann
@@ -1000,13 +1007,31 @@ class Registry:
         out["created"] = rfc3339_seconds(cfg.get("created")
                                          or ann.get("org.opencontainers.image.created"))
         out["layers"] = []
-        for l in man.get("layers", []):
+        layers_raw = man.get("layers", [])
+        if not isinstance(layers_raw, list):
+            raise TypeError("manifest layers must be a list")
+        for l in layers_raw:
             la = l.get("annotations") or {}
+            ldig = _clean_sha256_header(l["digest"])
+            if not ldig:
+                raise ValueError(f"invalid layer digest {l['digest']!r}")
+            raw_sz = l["size"]
+            if isinstance(raw_sz, bool):
+                raise TypeError("layer size must not be boolean")
+            sz = int(raw_sz)
+            if sz < 0:
+                raise ValueError(f"negative layer size {sz}")
+            stab_raw = la.get("org.chunkah.stability", 0)
+            if isinstance(stab_raw, bool):
+                raise TypeError("layer stability must not be boolean")
+            stab = float(stab_raw or 0)
+            if not math.isfinite(stab):
+                raise ValueError(f"non-finite layer stability {stab_raw!r}")
             out["layers"].append({
-                "digest": l["digest"],
-                "size": int(l["size"]),
+                "digest": ldig,
+                "size": sz,
                 "components": la.get("org.chunkah.component", "chunkah/unclaimed").split(),
-                "stability": float(la.get("org.chunkah.stability", 0) or 0),
+                "stability": stab,
             })
         return out
 
