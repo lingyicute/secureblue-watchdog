@@ -1349,7 +1349,7 @@ def read_header(blob: bytes, stats: dict | None = None) -> dict:
                 out[name] = str(struct.unpack(">I", blob[p:p + 4])[0])
                 continue
             if typ in STR_TYPES:
-                if name in ("changelogname", "changelogtext") or typ == 8:
+                if name in ("changelogname", "changelogtext"):
                     if cnt > store_end - p:
                         raise ValueError("string array count exceeds remaining store")
                     arr, q = [], p
@@ -1357,7 +1357,7 @@ def read_header(blob: bytes, stats: dict | None = None) -> dict:
                         e = blob.index(b"\0", q, store_end)
                         arr.append(blob[q:e].decode("utf-8", "replace"))
                         q = e + 1
-                    out[name] = arr if cnt > 1 else (arr[0] if arr else "")
+                    out[name] = arr
                 else:
                     # An I18NSTRING holds one string per locale, C locale first
                     # (glfw, libraqm, usb_modeswitch ... translate their Summary),
