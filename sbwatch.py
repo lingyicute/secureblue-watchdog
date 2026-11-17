@@ -844,6 +844,14 @@ class Registry:
         self._tok = tok or ""
         return tok or None
 
+    @staticmethod
+    def _validate_ref(ref: str) -> str:
+        s = str(ref or "")
+        if not s or s in (".", "..") or re.search(r"[/\\?#%\s\x00-\x1f\x7f]", s):
+            raise RegistryError(T(f"invalid image tag or digest: {ref!r}",
+                                  f"无效的镜像 tag 或 digest：{ref!r}"))
+        return s
+
     def _open(self, path: str, accept: str, *, _refreshed: bool = False):
         url = f"https://{self.host}/v2/{self.repo}/{path.lstrip('/')}"
         had_cached = bool(self._tok)
@@ -914,7 +922,7 @@ class Registry:
         That is all a tag label needs; resolve() also fetches the platform
         manifest, i.e. a second round trip per tag.
         """
-        with self._open(f"manifests/{ref}", MANIFEST_ACCEPT) as r:
+        with self._open(f"manifests/{Registry._validate_ref(ref)}", MANIFEST_ACCEPT) as r:
             dig = _clean_sha256_header(r.headers.get("Docker-Content-Digest"))
             if dig:
                 return dig
@@ -935,7 +943,7 @@ class Registry:
                 f"（{type(e).__name__}：{e}）")) from None
 
     def _resolve(self, ref: str | None, light: bool) -> dict:
-        what = ref or self.default_ref
+        what = Registry._validate_ref(ref or self.default_ref)
         with self._open(f"manifests/{what}", MANIFEST_ACCEPT) as r:
             raw = self._read_all(r, f"manifest {what}")
             top_digest = r.headers.get("Docker-Content-Digest") or ""
@@ -4074,7 +4082,7 @@ def tag_exists(reg: Registry, tag: str, warn: list | None = None) -> str | None:
     is exactly what decides whether the build history is trustworthy.
     """
     try:
-        with reg._open(f"manifests/{tag}", MANIFEST_ACCEPT) as r:
+        with reg._open(f"manifests/{Registry._validate_ref(tag)}", MANIFEST_ACCEPT) as r:
             dig = _clean_sha256_header(r.headers.get("Docker-Content-Digest"))
             if dig:
                 return dig

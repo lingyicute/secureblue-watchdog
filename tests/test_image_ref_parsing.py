@@ -35,5 +35,16 @@ class TestImageRefParsing(unittest.TestCase):
                     S.Registry._split(bad)
 
 
+    def test_manifest_ref_rejects_path_traversal_query_fragment_and_whitespace(self):
+        reg = S.Registry("secureblue/silverblue-main-hardened")
+        for bad in ("../other/manifests/latest", "latest?n=1", "latest#frag",
+                    "latest%2f..", "latest\r\nX: 1", "a b", ".."):
+            with self.subTest(bad=bad):
+                with self.assertRaises(S.RegistryError):
+                    reg.resolve(bad, light=True)
+                with self.assertRaises(S.RegistryError):
+                    reg.index_digest(bad)
+
+
 if __name__ == "__main__":
     unittest.main()
