@@ -27,5 +27,13 @@ class TestImageRefParsing(unittest.TestCase):
             self.assertEqual(S.list_tags(reg), ["a", "b"])
 
 
+    def test_empty_repository_segment_is_rejected(self):
+        for bad in ("secureblue//silverblue-main-hardened",
+                    "ghcr.io/secureblue//silverblue-main-hardened:latest"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(SystemExit):
+                    S.Registry._split(bad)
+
+
 if __name__ == "__main__":
     unittest.main()

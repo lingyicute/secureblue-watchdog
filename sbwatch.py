@@ -763,7 +763,7 @@ class Registry:
             dig = tag
         else:
             repo, dig = rest, "latest"
-        if not repo or repo.startswith("/") or repo.endswith("/"):
+        if not repo or repo.startswith("/") or repo.endswith("/") or "//" in repo:
             raise SystemExit(T(f"need a reference like host/ns/name:tag, got: {ref}",
                                f"需要形如 host/ns/name:tag 的引用，实际收到：{ref}"))
         return host, (repo, dig or "latest")
