@@ -3898,6 +3898,17 @@ DATED_RE = re.compile(r"^(\d{8})(-\d+)?$")   # 20260917 / 20260917-44 are one da
 SIGTAG_RE = re.compile(r"^sha256-([0-9a-f]{64})\.sig$")
 
 
+def _stream_major(tag, cur: dict | None = None) -> str:
+    """Major release (`44`) a pinned stream tag (`44`, `20261104-44`) tracks, or ""."""
+    m = re.fullmatch(r"(?:\d{8}-)?(\d+)", str(tag or ""))
+    if not m:
+        return ""
+    maj = m.group(1)
+    ver = str(((cur or {}).get("annotations") or {}).get(
+        "org.opencontainers.image.version") or "")
+    return maj if ver.startswith(maj + ".") else ""
+
+
 def list_tags(reg: Registry, max_pages: int = TAG_LIST_MAX_PAGES) -> list:
     """All tags of the repo. ghcr returns them in push order; pages via Link header."""
     out, url = [], f"https://{reg.host}/v2/{reg.repo}/tags/list?n=1000"
@@ -3992,6 +4003,7 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
         cur = resolve(reg, to)
     # does the watched image carry the chunkah layout this tool diffs by?
     chunked = rpmdb_chunk({"layers": cur.get("layers") or []}) is not None
+    stream_maj = _stream_major(to, cur)
     # Lookups that failed for a reason other than "there is no such build". They
     # must not be silent: every one of them is a row that could have been in the
     # list, and `check` picks its baseline out of this list.
@@ -4014,7 +4026,13 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
         "version": cur["annotations"].get("org.opencontainers.image.version"),
         "inputhash": cur["annotations"].get("rpmostree.inputhash"),
         "kernel": cur["annotations"].get("ostree.linux"), "image": cur, "tags": [to]}}
-    for hexdig in reversed(sigs[-(scan * 8):]):
+    sig_pool = sigs
+    if stream_maj:
+        cur_hex = (cur.get("index_digest") or "").partition(":")[2]
+        if cur_hex in sigs:
+            sig_pool = sigs[:sigs.index(cur_hex) + 1]
+    sig_window = scan * 8
+    for hexdig in reversed(sig_pool[-sig_window:] if sig_window > 0 else ()):
         if len(recs) >= scan:
             break
         d = "sha256:" + hexdig
@@ -4039,6 +4057,9 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
         if not img.get("is_index"):
             # secureblue also publishes single-arch UKI images into this same repo
             # (latest-uki, 20260917-uki, ...); they are not builds of this image
+            continue
+        if stream_maj and not str((img.get("annotations") or {}).get(
+                "org.opencontainers.image.version") or "").startswith(stream_maj + "."):
             continue
         if chunked and rpmdb_chunk(img) is None:
             # ...and its integration-test images (`integrationtest-<sha>` tags):
@@ -4980,34 +5001,42 @@ def cmd_check(args):
                 break
     if not ref_a:
         now = time.time()
+        stream_maj = _stream_major(args.to, cur)
         for i in range(1, 22):
-            d = time.strftime("%Y%m%d", time.gmtime(now - i * 86400))
-            dig = tag_exists(reg, d, warn=hist_warnings)
-            if not dig or dig == cur.get("index_digest"):
-                continue
-            # A watched tag that is not the repo's newest build (`44` once `latest`
-            # is on 45) has dated tags *after* it, and the first of them became the
-            # baseline: the report read `44 -> 20261114`, the watched image as the
-            # old side of an update it never received.
-            try:
-                cand = resolve(reg, d)
-            except (NoArchManifest, MalformedManifest):
-                continue
-            except RegistryError as e:
-                if e.http_code != 404:
-                    hist_warnings.append(T(
-                        f"could not read candidate baseline tag {d} "
-                        f"({e.http_code or 'network error'})",
-                        f"无法读取候选基线标签 {d}（{e.http_code or 'network error'}）"))
-                continue
-            if cand.get("digest") == cur["digest"]:
-                continue
-            if rpmdb_chunk(cur) is not None and rpmdb_chunk(cand) is None:
-                continue
-            if _ts_order(cand.get("created")) > (_ts_order(cur.get("created")) or "9"):
-                continue
-            ref_a, label_a, prev = d, d, cand
-            break
+            day = time.strftime("%Y%m%d", time.gmtime(now - i * 86400))
+            probe_tags = [day, f"{day}-{stream_maj}"] if stream_maj else [day]
+            for d in probe_tags:
+                dig = tag_exists(reg, d, warn=hist_warnings)
+                if not dig:
+                    continue
+                if dig == cur.get("index_digest"):
+                    break
+                try:
+                    cand = resolve(reg, d)
+                except (NoArchManifest, MalformedManifest):
+                    continue
+                except RegistryError as e:
+                    if e.http_code != 404:
+                        hist_warnings.append(T(
+                            f"could not read candidate baseline tag {d} "
+                            f"({e.http_code or 'network error'})",
+                            f"无法读取候选基线标签 {d}（{e.http_code or 'network error'}）"))
+                    continue
+                cand_ver = str((cand.get("annotations") or {}).get(
+                    "org.opencontainers.image.version") or "")
+                if stream_maj and not cand_ver.startswith(stream_maj + "."):
+                    continue
+                if cand.get("digest") == cur["digest"]:
+                    break
+                if rpmdb_chunk(cur) is not None and rpmdb_chunk(cand) is None:
+                    continue
+                if _ts_order(cand.get("created")) > (_ts_order(cur.get("created")) or "9"):
+                    # Same major, just newer than `cur`: no need to re-probe `day-<maj>`.
+                    break
+                ref_a, label_a, prev = d, d, cand
+                break
+            if ref_a:
+                break
     if not ref_a:
         msg = T(f"new build ({ver}) but no earlier image available to diff against",
                 f"有新构建（{ver}），但没有可用于对比的更早镜像")
