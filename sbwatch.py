@@ -1204,7 +1204,7 @@ def pick_tar_member(tf, match: str, label: str = ""):
                 f"tar has more than {MAX_TAR_MEMBERS} members (layer {label})",
                 f"tar 成员数超过 {MAX_TAR_MEMBERS}（层 {label}）"))
         nm = m.name.lstrip("./")
-        if match not in nm:
+        if nm != match and not nm.endswith("/" + match):
             continue
         if m.isfile():
             if best is None or m.size > best.size:
@@ -1349,7 +1349,8 @@ def rpmdb_chunk(resolved: dict) -> dict | None:
     fast path could skip a fetch whose result it had not actually verified.
     """
     cands = [l for l in resolved["layers"]
-             if any(CHUNK_MATCH in c for c in l["components"])]
+             if any(c == CHUNK_MATCH or c.endswith("/" + CHUNK_MATCH)
+                    for c in l["components"])]
     if not cands:
         return None
     cands.sort(key=lambda l: l["size"])
