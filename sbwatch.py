@@ -285,17 +285,28 @@ def ts_short(s) -> str:
     return str(s or "")[:19]
 
 
+_RFC3339_RE = re.compile(
+    r"^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.(\d+))?"
+    r"(Z|[+-]\d{2}:?\d{2})$", re.I)
+
+
 def _ts_order(s) -> str:
-    """Sortable key for an RFC 3339 timestamp, normalised to UTC when zoned."""
+    """Sortable key for an RFC 3339 timestamp, normalised to UTC (Python 3.10+)."""
     raw = str(s or "").strip()
     if not raw:
         return ""
-    try:
-        dt = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        if dt.tzinfo is not None:
-            return dt.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    except ValueError:
-        pass
+    m = _RFC3339_RE.match(raw)
+    if m:
+        day, hms, frac, zone = m.groups()
+        z = "+00:00" if zone.upper() == "Z" else (
+            zone if ":" in zone else f"{zone[:3]}:{zone[3:]}")
+        try:
+            dt = datetime.datetime.fromisoformat(f"{day}T{hms}{z}")
+            utc = dt.astimezone(datetime.timezone.utc)
+            ns = (frac or "").ljust(9, "0")[:9]
+            return utc.strftime("%Y-%m-%dT%H:%M:%S") + f".{ns}Z"
+        except ValueError:
+            pass
     return raw
 
 

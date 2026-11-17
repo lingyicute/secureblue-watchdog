@@ -16,5 +16,11 @@ class TestTimestampOffsets(unittest.TestCase):
         self.assertEqual((a2["ref"], b2["ref"]), ("old", "new"))
 
 
+    def test_nanosecond_and_compact_offset_timestamps_order_cleanly(self):
+        earlier = "2026-11-17T03:06:51.981777100+0200"
+        later = "2026-11-17T01:06:51.981777207Z"
+        self.assertLess(S._ts_order(earlier), S._ts_order(later))
+
+
 if __name__ == "__main__":
     unittest.main()
