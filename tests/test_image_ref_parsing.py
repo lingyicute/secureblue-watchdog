@@ -46,5 +46,20 @@ class TestImageRefParsing(unittest.TestCase):
                     reg.index_digest(bad)
 
 
+    def test_uppercase_registry_hostname_is_normalised(self):
+        import argparse
+        host, (repo, tag) = S.Registry._split("GHCR.IO/secureblue/silverblue-main-hardened:45")
+        self.assertEqual((host, repo, tag),
+                         ("ghcr.io", "secureblue/silverblue-main-hardened", "45"))
+        ns = argparse.Namespace(image="GHCR.IO/secureblue/silverblue-main-hardened",
+                                arch="amd64", to=None)
+        reg = S._registry(ns)
+        try:
+            self.assertEqual(reg.host, "ghcr.io")
+            self.assertEqual(ns.image, "ghcr.io/secureblue/silverblue-main-hardened")
+        finally:
+            reg.close()
+
+
 if __name__ == "__main__":
     unittest.main()

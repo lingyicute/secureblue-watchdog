@@ -766,7 +766,7 @@ class Registry:
         if not repo or repo.startswith("/") or repo.endswith("/") or "//" in repo:
             raise SystemExit(T(f"need a reference like host/ns/name:tag, got: {ref}",
                                f"需要形如 host/ns/name:tag 的引用，实际收到：{ref}"))
-        return host, (repo, dig or "latest")
+        return host.lower(), (repo, dig or "latest")
 
     def _token(self):
         """Anonymous pull token, or None when the registry needs none.
@@ -5087,7 +5087,7 @@ def _registry(args) -> Registry:
         if hasattr(args, attr) and getattr(args, attr) is None:
             setattr(args, attr, reg.default_ref)
     raw_img = (args.image or "").strip().removeprefix("docker://").removeprefix("oci:")
-    args.image = f"{reg.host}/{reg.repo}" if raw_img.startswith(reg.host + "/") else reg.repo
+    args.image = f"{reg.host}/{reg.repo}" if raw_img.lower().startswith(reg.host + "/") else reg.repo
     return reg
 
 
