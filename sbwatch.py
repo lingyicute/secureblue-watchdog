@@ -702,6 +702,10 @@ class _SameHostAuthRedirect(urllib.request.HTTPRedirectHandler):
     """
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urllib.parse.urlsplit(urllib.parse.urljoin(req.full_url, newurl))
+        if target.scheme.lower() not in ("http", "https"):
+            raise urllib.error.HTTPError(
+                req.full_url, code, f"refused redirect to {target.scheme}: URL", headers, fp)
         new = super().redirect_request(req, fp, code, msg, headers, newurl)
         if new is not None:
             old_url = urllib.parse.urlsplit(req.full_url)
