@@ -3027,6 +3027,11 @@ def _why_for_lang(w: str, lang: str) -> str:
     return s
 
 
+def _md_cell(s) -> str:
+    """Escape pipes and line breaks so untrusted metadata cannot break a table row."""
+    return str(s).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
 def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                            xc=None, backlog=None, groups=None) -> str:
     xc = xc or {}
@@ -3172,12 +3177,12 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
     if is_zh:
         W("| | 上一版 | 新版 |")
         W("|---|---|---|")
-        W(f"| 对比引用 | `{shortref(a['ref'])}` | `{shortref(b['ref'])}` |")
-        W(f"| 镜像版本 | {a['annotations'].get('org.opencontainers.image.version', '?')} | {b['annotations'].get('org.opencontainers.image.version', '?')} |")
-        W(f"| 构建时间 (UTC) | {a.get('created') or '?'} | {b.get('created') or '?'} |")
-        W(f"| 内核（`ostree.linux` 注解，来自 Fedora 基础镜像） | {a['annotations'].get('ostree.linux', '?')} | {b['annotations'].get('ostree.linux', '?')} |")
+        W(f"| 对比引用 | `{_md_cell(shortref(a['ref']))}` | `{_md_cell(shortref(b['ref']))}` |")
+        W(f"| 镜像版本 | {_md_cell(a['annotations'].get('org.opencontainers.image.version', '?'))} | {_md_cell(b['annotations'].get('org.opencontainers.image.version', '?'))} |")
+        W(f"| 构建时间 (UTC) | {_md_cell(a.get('created') or '?')} | {_md_cell(b.get('created') or '?')} |")
+        W(f"| 内核（`ostree.linux` 注解，来自 Fedora 基础镜像） | {_md_cell(a['annotations'].get('ostree.linux', '?'))} | {_md_cell(b['annotations'].get('ostree.linux', '?'))} |")
         if any(kernel_evr):
-            W(f"| `kernel` 软件包（rpmdb，实际安装的内核） | {kernel_evr[0] or '—'} | {kernel_evr[1] or '—'} |")
+            W(f"| `kernel` 软件包（rpmdb，实际安装的内核） | {_md_cell(kernel_evr[0] or '—')} | {_md_cell(kernel_evr[1] or '—')} |")
         W(f"| rpm-ostree 输入哈希 | `{clip_hash(a['annotations'].get('rpmostree.inputhash'), 12)}` | `{clip_hash(b['annotations'].get('rpmostree.inputhash'), 12)}` |")
         W(f"| ostree 提交 | `{clip_hash(a['annotations'].get('ostree.commit') or '—', 12)}` | `{clip_hash(b['annotations'].get('ostree.commit') or '—', 12)}` |")
         W(f"| 镜像摘要 (manifest) | `{a['digest'][:19]}…` | `{b['digest'][:19]}…` |")
@@ -3185,12 +3190,12 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
     else:
         W("| | previous | new |")
         W("|---|---|---|")
-        W(f"| compared refs | `{shortref(a['ref'])}` | `{shortref(b['ref'])}` |")
-        W(f"| image version | {a['annotations'].get('org.opencontainers.image.version', '?')} | {b['annotations'].get('org.opencontainers.image.version', '?')} |")
-        W(f"| built (UTC) | {a.get('created') or '?'} | {b.get('created') or '?'} |")
-        W(f"| kernel (`ostree.linux` annotation, from the Fedora base) | {a['annotations'].get('ostree.linux', '?')} | {b['annotations'].get('ostree.linux', '?')} |")
+        W(f"| compared refs | `{_md_cell(shortref(a['ref']))}` | `{_md_cell(shortref(b['ref']))}` |")
+        W(f"| image version | {_md_cell(a['annotations'].get('org.opencontainers.image.version', '?'))} | {_md_cell(b['annotations'].get('org.opencontainers.image.version', '?'))} |")
+        W(f"| built (UTC) | {_md_cell(a.get('created') or '?')} | {_md_cell(b.get('created') or '?')} |")
+        W(f"| kernel (`ostree.linux` annotation, from the Fedora base) | {_md_cell(a['annotations'].get('ostree.linux', '?'))} | {_md_cell(b['annotations'].get('ostree.linux', '?'))} |")
         if any(kernel_evr):
-            W(f"| `kernel` package (rpmdb, the kernel actually installed) | {kernel_evr[0] or '—'} | {kernel_evr[1] or '—'} |")
+            W(f"| `kernel` package (rpmdb, the kernel actually installed) | {_md_cell(kernel_evr[0] or '—')} | {_md_cell(kernel_evr[1] or '—')} |")
         W(f"| rpm-ostree inputhash | `{clip_hash(a['annotations'].get('rpmostree.inputhash'), 12)}` | `{clip_hash(b['annotations'].get('rpmostree.inputhash'), 12)}` |")
         W(f"| ostree.commit | `{clip_hash(a['annotations'].get('ostree.commit') or '—', 12)}` | `{clip_hash(b['annotations'].get('ostree.commit') or '—', 12)}` |")
         W(f"| manifest digest | `{a['digest'][:19]}…` | `{b['digest'][:19]}…` |")
@@ -3306,7 +3311,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                   or ", ".join(g["aliases"]) or "—")
             # the first line of a changelog entry lands here verbatim, and a bare
             # `|` in it ends the cell early and shifts every column after it
-            ev = ev.replace("|", "\\|")
+            ev = _md_cell(ev)
             cve_str = clip_list(g["cves"], CVE_CELL_CAP, lang=lang) or "—"
             pkg_col = fmt_pkgs(g, "zh" if is_zh else "en")
             W(f"| {pkg_col} ({g['src']}) | {g['old_evr']} → **{g['new_evr']}** | {cve_str} | {ev} |")
