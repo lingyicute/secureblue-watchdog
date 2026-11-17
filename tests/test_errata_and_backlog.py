@@ -48,5 +48,17 @@ class TestErrataAndBacklog(unittest.TestCase):
         self.assertEqual(bodhi.failed, 1)
 
 
+    def test_backlog_matches_stable_status_case_insensitively(self):
+        class _Stub:
+            failed = skipped = 0
+            def updates_for_src(self, src, release):
+                return [{"alias": "FEDORA-2026-upper", "type": "security",
+                         "severity": "high", "status": "Stable", "notes": "",
+                         "cves": [], "nvrs": ["curl-8.9.1-1.fc45"]}]
+
+        rows, _ = S.security_backlog({"curl": pkg("curl", "8.9.0-1.fc45")}, "F45", _Stub())
+        self.assertEqual([r["alias"] for r in rows], ["FEDORA-2026-upper"])
+
+
 if __name__ == "__main__":
     unittest.main()

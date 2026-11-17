@@ -3706,7 +3706,7 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
         pkgs_for_src = sorted(want[src], key=lambda np: (np[0] != src, np[0]))
         row = None
         for u in ups:
-            if u.get("type") != "security" or u.get("status") != "stable":
+            if u.get("type") != "security" or (u.get("status") or "").lower() not in PUSHED_STATUSES:
                 continue
             for n, p in pkgs_for_src:
                 best = None
