@@ -315,7 +315,7 @@ jobs:
           SUMMARY: ${{ steps.check.outputs.summary }}
         run: |
           python3 - <<'PY'
-          import json, os, urllib.request, sys
+          import json, os, urllib.error, urllib.request, sys
           try:
               with open("report.md", encoding="utf-8") as fh:
                   body = fh.read()
@@ -333,7 +333,7 @@ jobs:
               while cut > 0 and u16_len(
                   text[:cut] + f"\n… (+{len(text) - cut} chars - full report in the run summary)"
               ) > 4096:
-                  cut -= 32
+                  cut = max(0, cut - 32)
               text = text[:cut] + f"\n… (+{len(text) - cut} chars - full report in the run summary)"
           try:
               req = urllib.request.Request(
@@ -344,8 +344,12 @@ jobs:
               # a byte slice can end inside a multi-byte character (a CJK chat
               # title or bot name), which made a delivered push log as failed
               print(urllib.request.urlopen(req, timeout=30).read()[:150].decode("utf-8", "replace"))
+          except urllib.error.HTTPError as e:
+              print(f"Telegram push failed (non-fatal): HTTP {e.code} {e.reason}", file=sys.stderr)
+          except urllib.error.URLError as e:
+              print(f"Telegram push failed (non-fatal): {e.reason}", file=sys.stderr)
           except Exception as e:
-              print(f"Telegram push failed (non-fatal): {e}", file=sys.stderr)
+              print(f"Telegram push failed (non-fatal): {type(e).__name__}", file=sys.stderr)
           PY
 
       - name: Red run when security fixes are waiting
