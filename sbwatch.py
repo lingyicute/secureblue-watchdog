@@ -1453,9 +1453,15 @@ def package_list(reg: Registry, resolved: dict) -> dict:
             pkgs = PackageTable()
             stats: dict = {}
             for (blob,) in rows:
+                before = stats.get("headers_rejected", 0)
                 h = read_header(blob, stats)
                 name = h.get("name")
-                if not name or not h.get("version"):
+                if (not isinstance(name, str) or not name
+                        or not isinstance(h.get("version"), str) or not h["version"]
+                        or any(k in h and not isinstance(h[k], str)
+                               for k in ("release", "arch", "vendor", "sourcerpm"))):
+                    if stats.get("headers_rejected", 0) == before:
+                        stats["headers_rejected"] = before + 1
                     continue
                 if name in PSEUDO_PACKAGES:
                     continue
@@ -2868,6 +2874,20 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         elif v["level"] == "skip":
             bits.append("packages changed, but no CVE, erratum or sensitive package moved")
         v["level_basis"] = "; ".join(bits)
+    v["package_data_complete"] = diff.get("rpmdb_complete", versions_known)
+    if diff.get("rpmdb_complete") is False:
+        v["level"] = "unknown"
+        v["level_basis"] = "rpmdb coverage is incomplete; package-level conclusions are not established"
+        v["headline"] = ("The rpmdb comparison is incomplete (rejected headers, undecodable fields, "
+                         "shadowed packages or an empty table). Changes shown are partial, "
+                         "not proof of no change or a safe upgrade recommendation.")
+        v["headline_zh"] = ("rpmdb 对比不完整（包头被拒、字段无法解码、同名包被遮蔽或包表为空）。"
+                            "显示的变化仅为部分结果，不能据此断言无变化或给出可靠升级建议。")
+        v["secureblue_notification"] = dict(
+            sbn, level="unknown", message=None, why=[], why_zh=[], kernel_updated=None,
+            trivalent_updated=None, max_advisory_severity=None, security_advisory_count=None,
+            level_without_advisories="unknown", advisory_driven=False,
+            note="rpmdb coverage is incomplete")
     return v
 
 
@@ -3109,7 +3129,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             _badge = {"major": "**重大 (MAJOR)** (urgency=critical)",
                       "normal": "普通 (normal) (urgency=normal)",
                       "none": "无 (none)",
-                      "unknown": "未知（未读取软件包版本）"}.get(_lvl, _lvl)
+                      "unknown": ("未知（软件包信息不完整）" if verdict.get("package_data_complete") is False
+                                  else "未知（未读取软件包版本）")}.get(_lvl, _lvl)
             W("## secureblue 桌面通知预测")
             W("")
             msg_str = (f" — \"{_sbn['message']}\"") if _sbn.get("message") else ""
@@ -3149,7 +3170,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             _badge = {"major": "**MAJOR** (urgency=critical)",
                       "normal": "normal (urgency=normal)",
                       "none": "none",
-                      "unknown": "unknown (package versions not read)"}.get(_lvl, _lvl)
+                      "unknown": ("unknown (incomplete package information)" if verdict.get("package_data_complete") is False
+                                  else "unknown (package versions not read)")}.get(_lvl, _lvl)
             W("## secureblue Notification Prediction")
             W("")
             msg_str = (f" — \"{_sbn['message']}\"") if _sbn.get("message") else ""
@@ -3464,6 +3486,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
     # an update that only added or removed packages used to be told it was
     # entirely rebuilt content.
     if (not changed and not diff["added"] and not diff["removed"]
+            and diff.get("rpmdb_complete", True)
             and (isinstance(diff.get("count_a"), int) or diff.get("same_rpmdb"))):
         unowned = sum(ch["size"] for ch in ldiff.get("changed_chunks") or []
                       if "chunkah/unclaimed" in (ch.get("components") or []))
@@ -4708,6 +4731,9 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
             f"此镜像中有 {len(_c)} 个包名存在多个架构（multilib）；本表以包名为键，"
             f"因此较低 EVR 的那一个不参与 diff："
             f"{clip_list(_c, 4, lang='zh', joiner='，', render=_shadowed)}"))
+    diff["rpmdb_complete"] = bool(pa and pb) and not (hdr_rej or fld_skip or _c)
+    diff["rpmdb_issues"] = {"headers_rejected": hdr_rej, "fields_skipped": fld_skip,
+                           "shadowed_packages": len(_c), "empty_table": not (pa and pb)}
     # disclose changelog-scan truncation: a cap nobody reports is how "no CVE
     # found" silently becomes "no CVE read"
     trunc = []
