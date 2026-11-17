@@ -91,5 +91,21 @@ class TestThirdPartyVendor(unittest.TestCase):
             self.assertEqual(table["ffmpeg"]["vendor"], "negativo17.org")
 
 
+    def test_copr_secureblue_kernel_rebuild_catches_passed_over_fedora_erratum(self):
+        old = dict(pkg("kernel", "7.2.15-300.secureblue.1.fc45"),
+                   vendor="Fedora Copr - user secureblue")
+        new = dict(pkg("kernel", "7.3.4-300.secureblue.1.fc45"),
+                   vendor="Fedora Copr - user secureblue")
+        bodhi = _Bodhi([{"alias": "FEDORA-2026-655049a906", "type": "security",
+                         "severity": "medium", "status": "stable", "title": "",
+                         "notes": "", "cves": ["CVE-2026-4242"], "bugs": [],
+                         "date_approved": None, "nvrs": ["kernel-7.3.3-300.fc45"]}])
+        cls = S.classify_change(old, new, "F45", bodhi)
+        self.assertTrue(cls["security"])
+        self.assertFalse(cls["has_security_erratum"])
+        self.assertEqual([x["alias"] for x in cls["passed_over"]], ["FEDORA-2026-655049a906"])
+        self.assertEqual(cls["cves"], ["CVE-2026-4242"])
+
+
 if __name__ == "__main__":
     unittest.main()

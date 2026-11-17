@@ -1965,9 +1965,13 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
     third_party = _is_third_party(new)
     exact_new = set() if third_party else set(exact_new)
     norm_new = set(norm_new)
+    old_norm: set = set()
+    old_third_party = False
     if old:
-        old_exact, old_norm = nvr_candidates_split(old)
-        old_all = set(old_norm) if _is_third_party(old) else (set(old_exact) | set(old_norm))
+        old_exact, old_norm_list = nvr_candidates_split(old)
+        old_norm = set(old_norm_list)
+        old_third_party = _is_third_party(old)
+        old_all = set(old_norm) if old_third_party else (set(old_exact) | old_norm)
     else:
         old_all = set()
     if bodhi is not None and (not third_party or norm_new):
@@ -1986,7 +1990,8 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                 # the security erratum of 8.9.1) gains its fix all the same, and
                 # only a CVE id in the rpm changelog could say so before.
                 passed = (_passed_build(old, new, u["nvrs"])
-                          if (old and not third_party and not _is_third_party(old)) else None)
+                          if (old and (not third_party or norm_new)
+                              and (not old_third_party or old_norm)) else None)
                 if passed and u.get("type") == "security" and status in PUSHED_STATUSES:
                     info["passed_over"].append(
                         {"alias": u["alias"], "severity": u.get("severity"),
