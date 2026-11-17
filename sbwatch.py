@@ -4000,13 +4000,13 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
     # `br-testing-44`) as signed, chunked multi-arch indexes into this same repo.
     # Leave them out unless the caller is watching that branch tag itself.
     branch_digests: set = set()
-    if not str(to or "").startswith("br-"):
-        for bt in tags:
-            if bt.startswith("br-") and not bt.endswith("-uki"):
-                try:
-                    branch_digests.add(reg.index_digest(bt))
-                except (Exception, RegistryError):
-                    continue
+    watched_tag = str(to or "")
+    for bt in tags:
+        if bt != watched_tag and bt.startswith(("br-", "pr-")) and not bt.endswith("-uki"):
+            try:
+                branch_digests.add(reg.index_digest(bt))
+            except (Exception, RegistryError):
+                continue
     sigs = [m.group(1) for m in (SIGTAG_RE.match(t) for t in tags) if m]
     recs: dict = {cur["index_digest"]: {
         "digest": cur["index_digest"], "platform_digest": cur.get("digest"),

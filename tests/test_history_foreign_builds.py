@@ -57,5 +57,24 @@ class TestHistoryForeignBuilds(unittest.TestCase):
         self.assertEqual([r["digest"] for r in rows], [cur["digest"], live_prev["digest"]])
 
 
+    def test_pr_preview_and_sibling_branch_tags_are_excluded(self):
+        cur, pr_img, other_br, same_br = _image(4), _image(3), _image(2), _image(1)
+        images = {i["digest"]: i for i in (cur, pr_img, other_br, same_br)}
+        by_tag = {"pr-99-45": pr_img["digest"], "br-staging-45": other_br["digest"],
+                  "br-next-45": cur["digest"]}
+        tags = [*by_tag, *("sha256-" + i["digest"][7:] + ".sig"
+                           for i in (same_br, other_br, pr_img, cur))]
+
+        class _Reg:
+            def index_digest(self, ref):
+                return by_tag[ref]
+
+        with patch.object(S, "list_tags", return_value=tags), \
+                patch.object(S, "resolve",
+                             side_effect=lambda reg, ref, light=False: dict(images[ref], ref=ref)):
+            rows = S.build_history(_Reg(), scan=5, days=0, to="br-next-45", cur=cur)
+        self.assertEqual([r["digest"] for r in rows], [cur["digest"], same_br["digest"]])
+
+
 if __name__ == "__main__":
     unittest.main()
