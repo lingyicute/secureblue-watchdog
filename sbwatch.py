@@ -5551,6 +5551,9 @@ def main(argv=None):
     p.set_defaults(func=cmd_check)
 
     args = ap.parse_args(argv)
+    if args.cmd == "backlog" and args.no_bodhi:
+        ap.error(T("backlog requires Bodhi; --no-bodhi is incompatible",
+                   "backlog 需要查询 Bodhi，不能与 --no-bodhi 同用"))
     if args.require_cosign and not args.cosign_pub:
         ap.error(T("--require-cosign requires --cosign-pub",
                    "--require-cosign 必须同时提供 --cosign-pub"))

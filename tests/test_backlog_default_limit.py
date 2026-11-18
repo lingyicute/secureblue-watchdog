@@ -19,6 +19,12 @@ class TestBacklogDefaultLimit(unittest.TestCase):
         self.assertEqual(cov["checked"], len(S.BACKLOG_POOL))
         self.assertEqual(cov["skipped"], 0)
 
+    def test_disabled_bodhi_is_rejected_before_registry_access(self):
+        with patch.object(S, "_registry") as registry, self.assertRaises(SystemExit) as err:
+            S.main(["backlog", "--no-bodhi"])
+        self.assertEqual(err.exception.code, 2)
+        registry.assert_not_called()
+
     def test_the_cli_default_is_that_limit(self):
         seen = []
         with patch.object(S, "cmd_backlog", side_effect=lambda args: seen.append(args) or 0):
