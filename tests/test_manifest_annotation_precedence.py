@@ -9,6 +9,7 @@ from test_sbwatch import S
 class TestResolveManifestAnnotationsPrecedence(unittest.TestCase):
     def test_manifest_annotations_are_not_clobbered_by_stale_config_labels(self):
         cfg_bytes = json.dumps({
+            "architecture": "amd64", "os": "linux",
             "created": "2026-11-16T03:44:35Z",
             "config": {
                 "Labels": {

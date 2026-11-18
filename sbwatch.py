@@ -1010,6 +1010,15 @@ class Registry:
             cfg = json.loads(raw)
             if not isinstance(cfg, dict):
                 raise TypeError("image config must be a JSON object")
+            # A platform digest bypasses the index descriptor entirely. Check
+            # the digest-verified config before attributing packages to --arch.
+            arch, os_name = cfg.get("architecture"), cfg.get("os")
+            if not isinstance(arch, str) or not arch or not isinstance(os_name, str) or not os_name:
+                raise ValueError("image config has no valid os/architecture")
+            if (os_name, arch) != ("linux", self.arch):
+                raise NoArchManifest(T(
+                    f"{self.repo}:{what} is {os_name}/{arch}, not linux/{self.arch}",
+                    f"{self.repo}:{what} 为 {os_name}/{arch}，不是 linux/{self.arch}"))
             ann = {**dict((cfg.get("config") or {}).get("Labels") or {}), **ann}
         out["config"] = cfg
         out["annotations"] = ann
