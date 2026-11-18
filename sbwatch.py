@@ -4808,6 +4808,40 @@ def _cache_write(path: str, data, what: str) -> None:
               f"  ！无法写入{what}缓存 {os.path.basename(path)}：{e}——不使用它继续"))
 
 
+def _pkglist_from_cache(data):
+    """Accept only the shape emitted by package_list(), not merely version 6."""
+    if not isinstance(data, dict) or data.get("cache_version") != PKGLIST_CACHE_VERSION:
+        return None
+    packages, collisions = data.get("packages"), data.get("collisions")
+    counters = [data.get(k) for k in ("headers_rejected", "fields_skipped")]
+    if (not isinstance(packages, dict) or not isinstance(collisions, list)
+            or any(type(n) is not int or n < 0 for n in counters)
+            or any(not isinstance(c, dict) or any(not isinstance(c.get(k), str) for k in
+                   ("name", "kept_arch", "kept_evr", "shadowed_arch", "shadowed_evr")) for c in collisions)):
+        return None
+    for name, entry in packages.items():
+        if not isinstance(entry, dict) or entry.get("name") != name:
+            return None
+        if any(not isinstance(entry.get(k), str) or not entry[k] for k in
+               ("name", "src", "arch", "version", "release", "evr", "nvr")):
+            return None
+        if any(not isinstance(entry.get(k), str) for k in ("vendor", "srpm", "epoch")):
+            return None
+        epoch = entry.get("source_epoch", "0")
+        if not isinstance(epoch, str) or re.fullmatch(r"[0-9]+", epoch) is None:
+            return None
+        changelog = entry.get("changelog")
+        if not isinstance(changelog, list) or any(
+                not isinstance(c, dict) or type(c.get("time")) is not int
+                or not isinstance(c.get("text"), str) or not isinstance(c.get("who"), str)
+                for c in changelog):
+            return None
+    pk = PackageTable(packages)
+    pk.collisions = collisions
+    pk.headers_rejected, pk.fields_skipped = counters
+    return pk
+
+
 def load_pkglist(reg, img, ref, cache_dir, notes):
     try:
         os.makedirs(cache_dir, exist_ok=True)
@@ -4815,22 +4849,20 @@ def load_pkglist(reg, img, ref, cache_dir, notes):
         log(T(f"  ! cannot use the cache directory {cache_dir}: {e} - continuing without a cache",
               f"  ！无法使用缓存目录 {cache_dir}：{e}——不使用缓存继续"))
     cf = os.path.join(cache_dir, f"pkglist-{img['digest'].replace(':', '')}.json")
-    if os.path.exists(cf) and os.path.getsize(cf) > 10_000:
-        try:
-            with open(cf, encoding="utf-8") as fh:
-                data = json.load(fh)
-            if (isinstance(data, dict) and isinstance(data.get("packages"), dict)
-                    and data.get("cache_version") == PKGLIST_CACHE_VERSION):
-                pk = PackageTable(data["packages"])
-                pk.collisions = list(data.get("collisions") or [])
-                pk.headers_rejected = int(data.get("headers_rejected") or 0)
-                pk.fields_skipped = int(data.get("fields_skipped") or 0)
-                notes.append(T(f"package list of `{ref}` served from `{cf}` (no download)",
-                               f"`{ref}` 的软件包列表来自缓存 `{cf}`（未下载）"))
-                return pk
-        except Exception:
-            log(T(f"  ! cache {cf} corrupted, refetching",
-                  f"  ！缓存 {cf} 已损坏，重新获取"))
+    try:
+        with open(cf, encoding="utf-8") as fh:
+            pk = _pkglist_from_cache(json.load(fh))
+        if pk is not None:
+            notes.append(T(f"package list of `{ref}` served from `{cf}` (no download)",
+                           f"`{ref}` 的软件包列表来自缓存 `{cf}`（未下载）"))
+            return pk
+        log(T(f"  ! cache {cf} outdated or invalid, refetching",
+              f"  ！缓存 {cf} 版本过旧或数据无效，重新获取"))
+    except FileNotFoundError:
+        pass  # no cache, or pruned before open
+    except (OSError, ValueError, RecursionError):
+        log(T(f"  ! cache {cf} unreadable, refetching",
+              f"  ！缓存 {cf} 无法读取，重新获取"))
     log(T(f"  fetching rpmdb chunk of {ref} ({img['digest'][:19]}…)",
           f"  正在获取 {ref} 的 rpmdb chunk（{img['digest'][:19]}…）"))
     pk = package_list(reg, img)

@@ -3843,8 +3843,8 @@ class TestPkgsUsesThePackageListCache(unittest.TestCase):
     def test_second_call_for_the_same_digest_does_not_fetch(self):
         import contextlib
         import types
-        table = S.PackageTable({f"p{i}": pkg(f"p{i}", "1.0-1.fc45", changelog=[
-            {"time": 1, "who": "w", "text": "t" * 40}]) for i in range(200)})
+        table = S.PackageTable({f"p{i}": dict(pkg(f"p{i}", "1.0-1.fc45", changelog=[
+            {"time": 1, "who": "w", "text": "t" * 40}]), vendor="Fedora Project") for i in range(200)})
         fetched = []
         img = {"digest": "sha256:" + "a" * 64, "annotations": {}, "layers": []}
         saved = S._registry, S.resolve, S.package_list
