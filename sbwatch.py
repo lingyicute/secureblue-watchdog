@@ -5308,8 +5308,6 @@ def cmd_check(args):
                # to the JSON output for the rest - for `check`, that is this file
                "behind_stable_security": res.get("backlog") or [],
                "backlog_coverage": res.get("backlog_coverage")})
-    save_state({"prev_digest": prev["digest"], "prev_label": label_a,
-                "last_verdict": v["level"]})
     prune_days = getattr(args, "prune_days", 0) or 0
     if prune_days > 0:
         pruned = prune_cache(getattr(args, "cache_dir", None)
@@ -5347,6 +5345,9 @@ def cmd_check(args):
                 "security_packages": ",".join(v["security_pkgs"]),
                 "security_packages_count": len(v["security_pkgs"]),
                 "changed_count": v["changed_pkg_count"], "fail_reason": fail_reason})
+    # A failed CI output is not a delivered analysis. Retry it on the next run.
+    save_state({"prev_digest": prev["digest"], "prev_label": label_a,
+                "last_verdict": v["level"]})
     if args.fail_on == "security" and v["level"] == "update-now":
         return 10
     return 0
