@@ -302,7 +302,7 @@ python3 tests/run_offline.py
 | A2 | `build_history` 的行必须同时带 index digest 与 platform digest，两者不可互换（`list_tags` 已打桩，套件零网络访问） |
 | A4 | 未读取软件包版本时，不得断言"版本相同但被重建" |
 | A5 | `A B` 中 A 必须是较旧的一方，否则自动纠正 |
-| A6 | `rpmvercmp` 与 rpm 上游 **91 条**测试向量逐条一致（含 `^`、数字段胜过字母段、`~`） |
+| A6 | `rpmvercmp` 与 rpm 上游 **103 条**测试向量逐条一致（含 `^`、数字段胜过字母段、`~`） |
 | A7 | Bodhi 匹配必须同时提供**源码包拼写**（shim-x64 → `shim-16.1-5` 等 246/1107 个无同名二进制的源码包）与剥离 `.secureblue.N` 后的拼写 |
 | B1 | Bodhi 缓存损坏/形状不符时丢弃重取；CVE 可从 `bugs[].title` 提取 |
 | — | Bodhi 分页：超过一页的勘误必须全部读到，读到上限时要报告"审计不完整" |

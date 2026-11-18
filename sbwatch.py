@@ -617,7 +617,7 @@ def rpmvercmp(a: str, b: str) -> int:
         always newer than an alphabetic one (xyz.4 < 8);
       * numeric segments compare by digit count after leading zeros are
         stripped, so 10.0001 == 10.1 and 1.0 < 1.0.0.
-    Verified against all 91 vectors in rpm's own tests/rpmvercmp.at
+    Verified against all 103 vectors in rpm's own tests/rpmvercmp.at
     (see tests/test_sbwatch.py).
     """
     a = a or ""

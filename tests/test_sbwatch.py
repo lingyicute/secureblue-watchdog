@@ -13,7 +13,7 @@ at the regression it guards:
          this suite makes NO network calls at all)
   A4     crosscheck_chunks must not invent "same version" claims
   A5     orient(): A must be the older build
-  A6     rpmvercmp against rpm's own 91 upstream test vectors
+  A6     rpmvercmp against rpm's own 103 upstream test vectors
   A7     nvr_candidates: source-name spellings (shim/webkitgtk/krb5/...) and the
          stripped .secureblue.N marker must both be offered to Bodhi matching
   B1     Bodhi cache poisoning / CVEs that only live in bugs[].title
@@ -182,7 +182,7 @@ def webkitgtk_report():
 # A6 - rpmvercmp must match rpm itself
 # --------------------------------------------------------------------------- #
 class TestRpmvercmp(unittest.TestCase):
-    """Ported from rpm's own tests/rpmvercmp.at (91 vectors, scraped into JSON)."""
+    """Ported from rpm's own tests/rpmvercmp.at (103 vectors, scraped into JSON)."""
 
     @classmethod
     def setUpClass(cls):
@@ -190,7 +190,7 @@ class TestRpmvercmp(unittest.TestCase):
             cls.vectors = json.load(fh)
 
     def test_upstream_vectors(self):
-        self.assertGreaterEqual(len(self.vectors), 90, "vector fixture looks truncated")
+        self.assertGreaterEqual(len(self.vectors), 103, "vector fixture looks truncated")
         bad = []
         for a, b, want in self.vectors:
             got = S.rpmvercmp(a, b)
