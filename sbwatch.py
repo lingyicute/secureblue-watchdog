@@ -5322,6 +5322,7 @@ def cmd_check(args):
     prev = None
     state_lost = False
     state_base_dig = None
+    state_base_index = None
     state_base_lbl = None
     if not ref_a:
         pending = state.get("last_verdict") == "unknown"
@@ -5330,11 +5331,13 @@ def cmd_check(args):
             # An inconclusive target is not a checkpoint. If the tag returned to
             # the last usable baseline, compare it to itself, not to the failure.
             state_base_dig = previous
+            state_base_index = state.get("prev_index_digest")
             if previous:
                 state_base_lbl = clip_text(state.get("prev_label") or previous,
                                             BASELINE_LABEL_CAP, lang="both")
         elif state.get("digest") and state["digest"] != cur["digest"]:
             state_base_dig = state["digest"]
+            state_base_index = state.get("index_digest")
             state_base_lbl = _state_label(state)
     if state_base_dig:
         # Resolved here, before the baseline is settled: the image analysed last
@@ -5343,7 +5346,20 @@ def cmd_check(args):
         # to end the run before the state was rewritten, so every later run died
         # on the same digest until someone deleted the cache by hand.
         try:
-            prev = cur if state_base_dig == cur["digest"] else resolve(reg, state_base_dig)
+            state_base_index = _clean_sha256_header(state_base_index)
+            if state_base_dig == cur["digest"]:
+                prev = cur
+            elif state_base_index and state_base_index != state_base_dig:
+                try:
+                    saved_index = resolve(reg, state_base_index)
+                except RegistryError as e:
+                    if e.http_code != 404:
+                        raise
+                else:
+                    if saved_index["digest"] == state_base_dig:
+                        prev = saved_index
+            if prev is None:  # older checkpoints, or only the platform still exists
+                prev = resolve(reg, state_base_dig)
         except RegistryError as e:
             if e.http_code != 404:
                 raise
@@ -5386,10 +5402,11 @@ def cmd_check(args):
             pd = row.get("platform_digest") or row["digest"]
             if pd == cur["digest"]:
                 continue
-            candidate = read_candidate(pd)
-            if not candidate or not is_earlier_candidate(candidate):
+            candidate = read_candidate(row["digest"])
+            if (not candidate or candidate["digest"] != pd
+                    or not is_earlier_candidate(candidate)):
                 continue
-            ref_a, label_a, prev = pd, _state_label(dict(row, digest=pd)), candidate
+            ref_a, label_a, prev = row["digest"], _state_label(dict(row, digest=pd)), candidate
             break
     if not ref_a and cur_time:
         try:
@@ -5577,7 +5594,8 @@ def cmd_check(args):
                 "security_packages_count": len(v["security_pkgs"]),
                 "changed_count": v["changed_pkg_count"], "fail_reason": fail_reason})
     # A failed CI output is not a delivered analysis. Retry it on the next run.
-    save_state({"prev_digest": prev["digest"], "prev_label": label_a,
+    save_state({"prev_digest": prev["digest"], "prev_index_digest": prev.get("index_digest"),
+                "prev_label": label_a,
                 "last_verdict": v["level"]})
     if args.fail_on == "security" and v["level"] == "update-now":
         return 10

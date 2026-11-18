@@ -451,7 +451,9 @@ chronological reordering. `watched_digest` and `watched_version` identify the
 watched tag independently. The state tracks that tag, and the Actions output
 has separate `digest` (comparison target) and `watched_digest` keys.
 `from_index_digest`, `index_digest` and `watched_index_digest` record the top-level
-references resolved by the run (a platform digest if the input named it directly).
+references resolved by the run. Automatic baselines retain the index when it is
+still available and maps to the saved platform; otherwise the resolved platform
+manifest is the top-level reference.
 Both `diff` and `check` exports include added and removed packages, old/new
 architectures, available advisory evidence, and any RPM inventory issues.
 
