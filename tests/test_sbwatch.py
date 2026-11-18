@@ -2255,12 +2255,13 @@ class TestWorkflowHygiene(unittest.TestCase):
                 ln, r"^[A-Z_]+: \$\{\{ steps\.check\.outputs\.(fail_reason|summary) \}\}$")
 
     def test_an_unchanged_cache_is_not_saved_again(self):
-        # a `no-update` run writes nothing into ~/.cache/sbwatch; a failed run
-        # (empty verdict) must still save what it has
+        # A no-update run has nothing new to save. Failed publication must retry.
         wf = self._workflow()
         step = wf.split("- name: Save sbwatch cache")[1].split("- name:")[0]
         cond = re.search(r"^\s*if: (.*)$", step, re.M).group(1)
-        self.assertEqual(cond, "always() && steps.ns.outputs.ns != '' && steps.check.outputs.verdict != '' && steps.check.outputs.verdict != 'no-update'")
+        self.assertEqual(cond, "success() && steps.ns.outputs.ns != '' && steps.check.outputs.verdict != '' && steps.check.outputs.verdict != 'no-update'")
+        self.assertLess(wf.index("- name: Comment on (or open)"), wf.index("- name: Save sbwatch cache"))
+        self.assertLess(wf.index("- name: Save sbwatch cache"), wf.index("- name: Red run when"))
 
     def test_an_inconclusive_run_is_not_green(self):
         wf = self._workflow()
