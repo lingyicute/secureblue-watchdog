@@ -94,11 +94,6 @@ jobs:
       contents: read
       issues: write   # sticky issue comment
       actions: write  # pruning old caches via the API
-    # Job-level, so the Telegram step's `if: env.X != ''` sees them without
-    # exposing secrets to the `test` job's `pip install`.
-    env:
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -273,11 +268,13 @@ jobs:
           fi
 
       - name: Push to Telegram
-        # env.TELEGRAM_BOT_TOKEN is defined at *job* level, so it is visible here.
-        if: always() && steps.notify.outputs.post == 'true' && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
+        if: ${{ !cancelled() && steps.notify.outputs.post == 'true' }}
         env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SUMMARY: ${{ steps.check.outputs.summary }}
         run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then exit 0; fi
           python3 - <<'PY'
           import json, os, urllib.error, urllib.request, sys
           try:
