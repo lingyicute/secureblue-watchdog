@@ -2736,6 +2736,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
          "cves": cves, "advisory_wide_cves": sorted(shared_cves),
           "cves_dropped": sorted({c for g in lost for c in g["dropped"]}),
          "cves_reverted": sorted({c for g in lost for c in g.get("reverted") or ()}),
+         "errata_reverted": [],
          "downgrades": [g["src"] for g in down], "severity_rank": sev,
          "kernel_changed": kernel_moved, "kernel_in_diff": kernel_in_diff,
          "kernel_annotation_changed": kernel_annot_moved,
@@ -2957,6 +2958,19 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         dl_txt_zh = clip_list(down, 3, render=_dl, lang="zh", joiner="，")
         v["headline"] += (" | WARNING: this update downgrades " + dl_txt)
         v["headline_zh"] += (" ｜ 警告：此次更新会降级 " + dl_txt_zh)
+        # The security errata of the builds being left, by the report's own rule
+        # for its downgrade section: a push or a CI summary shows the headline
+        # alone, and it never said what the rollback takes away.
+        errata = list(dict.fromkeys(
+            x["alias"] for g in down for x in g.get("already_had") or []
+            if x.get("alias") and x.get("type") == "security"
+            and (x.get("status") or "").lower() in PUSHED_STATUSES))
+        v["errata_reverted"] = errata
+        if errata:
+            v["headline"] += (" - this reverts published security errata: "
+                              + clip_list(errata, 3))
+            v["headline_zh"] += ("——这会回退已发布的安全勘误："
+                                 + clip_list(errata, 3, lang="zh", joiner="，"))
         # A version that went backwards is evidence (the rpmdb says so). The
         # changelog-based `cves_dropped` below is not, which is why only this one
         # is allowed to raise the level.
