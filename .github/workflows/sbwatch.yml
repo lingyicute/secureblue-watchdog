@@ -151,7 +151,7 @@ jobs:
         id: check
         run: |
           set -uo pipefail
-          args=(--image "$SB_IMAGE" --arch "$SB_ARCH" --max-bodhi 100 --report report.md)
+          args=(--image "$SB_IMAGE" --arch "$SB_ARCH" --max-bodhi 100 --bodhi-seconds 600 --report report.md)
           [ -n "${SB_FROM:-}" ] && args+=(--a "$SB_FROM")
           [ "${SB_FORCE:-}" = "true" ] && args+=(--force)
           if [ -f cosign.pub ]; then

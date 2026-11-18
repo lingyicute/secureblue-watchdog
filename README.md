@@ -402,6 +402,8 @@ CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并�
 - `sbwatch.py check` → `report.md` + `report.md.json` → summary + artifact
   （workflow 不传 `--exact` / `--no-fast`，所以走默认值：`--exact 1` + `--fast` 开启，
   见上文「`check --fast` 与 manifest-only」）
+- CI 使用 `--bodhi-seconds 600`，给报表和投递留出时间。此预算限制启动新的 Bodhi 请求，
+  与 `--max-bodhi` 同时生效；仍读取可用缓存，未查完整的来源会披露。CLI 默认不设时间预算。
 - 若 verdict 是 `update-now`/`consider`（`skip` 仅在 `POST_SKIP_VERDICT=true` 时），会评论到
   标题恰为 `secureblue update watch` 的 sticky issue（GitHub 评论上限 65536 字符，
   超长报告会被截断并注明，完整报告见 run summary / artifact）

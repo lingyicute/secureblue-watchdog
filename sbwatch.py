@@ -1544,12 +1544,18 @@ def package_list(reg: Registry, resolved: dict) -> dict:
 # --------------------------------------------------------------------------- #
 # Fedora Bodhi: errata for a build (type=security, severity, CVE list)
 # --------------------------------------------------------------------------- #
+class BodhiTimeLimit(Exception):
+    """No new HTTP attempt may start after the run's Bodhi time budget."""
+
+
 class Bodhi:
     BASE = "https://bodhi.fedoraproject.org"
 
-    def __init__(self, cache_dir=None, sleep=0.3, max_calls=80, ttl=BODHI_TTL):
+    def __init__(self, cache_dir=None, sleep=0.3, max_calls=80, ttl=BODHI_TTL, max_seconds=0):
         self.cache_dir, self.sleep, self.max_calls, self.ttl = cache_dir, sleep, max_calls, ttl
         self.calls, self._mem = 0, {}
+        self.deadline = time.monotonic() + max_seconds if max_seconds else None
+        self.time_limited = False
         self.failed = 0          # queries that errored => verdict must not claim "clean"
         self.skipped = 0         # queries we never made because of --max-bodhi
         self.truncated_src = set()   # srcs where we could not read every erratum
@@ -1564,6 +1570,22 @@ class Bodhi:
                       f"continuing without a cache",
                       f"  ！无法使用 Bodhi 缓存目录 {cache_dir}：{e}——不使用缓存继续"))
                 self.cache_dir = None
+
+    def _remaining(self):
+        if self.deadline is None:
+            return math.inf
+        left = self.deadline - time.monotonic()
+        if left <= 0:
+            self.time_limited = True
+        return max(0, left)
+
+    def _budget_reached(self):
+        return self.calls >= self.max_calls or not self._remaining()
+
+    def _memo_budget_miss(self, key):
+        self.skipped += 1
+        self._mem[key] = {"total": None, "truncated": False, "updates": [], "unqueried": "skipped"}
+        return []
 
     def _cf(self, key):
         """Cache file of one `<src>-<release>` key, never shared with another key.
@@ -1635,9 +1657,12 @@ class Bodhi:
         """
         retried = False
         while True:
+            remaining = self._remaining()
+            if not remaining:
+                raise BodhiTimeLimit
             self.calls += 1
             try:
-                with urllib.request.urlopen(url, timeout=40) as r:
+                with urllib.request.urlopen(url, timeout=min(40, remaining)) as r:
                     cl = r.headers.get("Content-Length") if getattr(r, "headers", None) else None
                     if cl and str(cl).isdigit() and int(cl) > MAX_JSON_BYTES:
                         raise ValueError(f"Bodhi response exceeds {human(MAX_JSON_BYTES)}")
@@ -1675,12 +1700,12 @@ class Bodhi:
                             raise ValueError(f"invalid Bodhi update field: {k}")
                 return data, page_ups
             except Exception as ex:
-                if retried or self._streak or self.calls >= self.max_calls:
+                if retried or self._streak or self._budget_reached():
                     raise
                 retried = True
                 log(T(f"  ! bodhi lookup failed for {src} ({ex}) - trying once more",
                       f"  ！查询 Bodhi 失败：{src}（{ex}）——再试一次"))
-                time.sleep(self.sleep)
+                time.sleep(min(self.sleep, self._remaining()))
 
     def updates_for_src(self, src: str, release: str) -> list:
         """Every Fedora erratum for one source package in one release.
@@ -1718,13 +1743,9 @@ class Bodhi:
             self.failed += 1
             self._mem[key] = {"total": None, "truncated": False, "updates": [], "unqueried": "failed"}
             return []
-        if self.calls >= self.max_calls:
-            self.skipped += 1
-            # Classification asks once per binary and the backlog asks again.
-            # Count this unqueried source/release once, without re-reading a stale
-            # disk cache each time. Never persist a budget miss as a clean answer.
-            self._mem[key] = {"total": None, "truncated": False, "updates": [], "unqueried": "skipped"}
-            return []
+        if self._budget_reached():
+            # Cache hits still count even when no further requests may be made.
+            return self._memo_budget_miss(key)
 
         res: list = []
         total = None
@@ -1736,14 +1757,14 @@ class Bodhi:
         inconsistent = False
         ok = False
         for page in range(1, MAX_BODHI_PAGES + 1):
-            if page > 1 and self.calls >= self.max_calls:
+            if page > 1 and self._budget_reached():
                 # --max-bodhi caps API calls, and every page is one call: the
                 # guard above only ran before page 1, so a 127-erratum package
                 # walked past the budget. Stop here and say the audit is partial.
                 truncated = budget_cut = True
-                log(T(f"  ! bodhi: --max-bodhi reached after {len(res)} of {total} errata "
+                log(T(f"  ! bodhi: query budget reached after {len(res)} of {total} errata "
                       f"for {src} - this package's audit is INCOMPLETE",
-                      f"  ！Bodhi：{src} 只取到 {total} 条勘误中的 {len(res)} 条时 --max-bodhi "
+                      f"  ！Bodhi：{src} 只取到 {total} 条勘误中的 {len(res)} 条时查询预算"
                       f"已用尽——该包的审计不完整"))
                 break
             url = f"{self.BASE}/updates/?" + urllib.parse.urlencode(
@@ -1751,6 +1772,11 @@ class Bodhi:
                  "rows_per_page": str(BODHI_PAGE_SIZE), "page": str(page)})
             try:
                 data, page_ups = self._fetch_page(url, src, page)
+            except BodhiTimeLimit:
+                if page == 1:
+                    return self._memo_budget_miss(key)
+                truncated = budget_cut = True
+                break
             except Exception as ex:
                 self.failed += 1
                 log(T(f"  ! bodhi lookup failed for {src} (page {page}): {ex}",
@@ -1837,7 +1863,7 @@ class Bodhi:
                       f"  ！Bodhi：{src} 只取到 {total} 条勘误中的 {len(res)} 条"
                       f"（MAX_BODHI_PAGES={MAX_BODHI_PAGES}）——该包的审计不完整"))
                 break
-            time.sleep(self.sleep)
+            time.sleep(min(self.sleep, self._remaining()))
         if inconsistent and not truncated:
             truncated = True
             log(T(f"  ! Bodhi pagination shifted while reading {src}; audit is incomplete",
@@ -2988,8 +3014,12 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                 why.append(f"{bad} Bodhi query(ies) failed")
                 why_zh.append(f"{bad} 次 Bodhi 查询失败")
             if miss:
-                why.append(f"{miss} package(s) were not queried (--max-bodhi)")
-                why_zh.append(f"{miss} 个软件包未被查询 (--max-bodhi)")
+                budget = "--bodhi-seconds / --max-bodhi" if bodhi_state.get("time_limited") else "--max-bodhi"
+                why.append(f"{miss} package(s) were not queried ({budget})")
+                why_zh.append(f"{miss} 个软件包未被查询（{budget}）")
+            if bodhi_state.get("time_limited") and not miss:
+                why.append("Bodhi time budget exhausted (--bodhi-seconds)")
+                why_zh.append("Bodhi 时间预算用尽（--bodhi-seconds）")
             if trunc:
                 why.append(f"errata list truncated for {trunc} package(s)")
                 why_zh.append(f"{trunc} 个软件包的勘误列表被截断")
@@ -4082,17 +4112,20 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
     cov["skipped_queries"] = audit_skipped if isinstance(mem, dict) else bodhi.skipped
     trunc = getattr(bodhi, "truncated_src", None) or ()
     cov["truncated"] = sorted(src for src in chosen if src in trunc)
+    if getattr(bodhi, "time_limited", False):
+        cov["time_limited"] = True
     return rows, cov
 
 
 def coverage_line(cov: dict) -> str:
     """One honest sentence about how much of the backlog audit actually ran."""
+    budget = "--bodhi-seconds / --max-bodhi" if cov.get("time_limited") else "--max-bodhi"
     en = (f"backlog audit coverage: {cov['checked']} of {cov['candidates']} candidate source "
           f"packages in the image were queried"
           + (f", {cov['skipped']} were cut off by --backlog-candidates "
              f"({clip_list(cov.get('skipped_names', []), 6)})"
              if cov.get("skipped") else "")
-          + (f", {cov['skipped_queries']} not queried (--max-bodhi)"
+          + (f", {cov['skipped_queries']} not queried ({budget})"
              if cov.get("skipped_queries") else "")
           + (f", {cov['failed']} failed" if cov.get("failed") else "")
           + (f", {len(cov['truncated'])} with truncated errata"
@@ -4103,7 +4136,7 @@ def coverage_line(cov: dict) -> str:
           + (f"，{cov['skipped']} 个因 --backlog-candidates 上限被截断"
              f"（{clip_list(cov.get('skipped_names', []), 6, lang='zh', joiner='，')}）"
              if cov.get("skipped") else "")
-          + (f"，{cov['skipped_queries']} 个因 --max-bodhi 未查询"
+          + (f"，{cov['skipped_queries']} 个因 {budget} 未查询"
              if cov.get("skipped_queries") else "")
           + (f"，{cov['failed']} 个查询失败" if cov.get("failed") else "")
           + (f"，{len(cov['truncated'])} 个勘误列表被截断"
@@ -4145,7 +4178,8 @@ def cmd_backlog(args):
         raise SystemExit(T("could not determine the Fedora release from this image's package "
                            "list, so no errata can be queried",
                            "无法从此镜像的软件包列表判断 Fedora 版本，因此无法查询勘误"))
-    bodhi = Bodhi(cache_dir=cache_dir, max_calls=args.max_bodhi)
+    bodhi = Bodhi(cache_dir=cache_dir, max_calls=args.max_bodhi,
+                  max_seconds=getattr(args, "bodhi_seconds", 0))
     # --backlog-candidates caps how many source packages get audited, as it does
     # for `check --audit`; --max-bodhi only caps the API calls spent on them.
     rows, cov = security_backlog(pkgs, rel, bodhi,
@@ -4178,8 +4212,8 @@ def cmd_backlog(args):
                 f"  ！{cov['failed']} 次 Bodhi 查询失败——这些软件包未被检查"))
     if cov.get("skipped_queries"):
         print(T(f"  ! {cov['skipped_queries']} source package(s) were not queried because "
-                "--max-bodhi ran out - those packages were NOT checked",
-                f"  ！{cov['skipped_queries']} 个源码包因 --max-bodhi 用尽而未被查询——"
+                "the Bodhi query budget ran out - those packages were NOT checked",
+                f"  ！{cov['skipped_queries']} 个源码包因 Bodhi 查询预算用尽而未被查询——"
                 "这些软件包未被检查"))
     if cov.get("truncated"):
         tr_en = clip_list(cov["truncated"], 8)
@@ -4970,7 +5004,8 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
                        "list, so no Bodhi errata were consulted",
                        "警告：无法从软件包列表判断 Fedora 版本，因此未查询任何 Bodhi 勘误"))
     bodhi = None if (args.no_bodhi or not rel) else Bodhi(cache_dir=cache_dir,
-                                                         max_calls=args.max_bodhi)
+                                                         max_calls=args.max_bodhi,
+                                                         max_seconds=getattr(args, "bodhi_seconds", 0))
     for c in classify_order(diff["changed"]):       # report order stays by name
         if c["dir"] == "arch-change":
             # An equal-EVR arch replacement is not a new version or .upgraded.
@@ -5050,7 +5085,8 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
                                               limit=getattr(args, "backlog_candidates", None))
     if bodhi is not None:
         bstate = {"failed": bodhi.failed, "skipped": bodhi.skipped,
-                  "truncated": sorted(bodhi.truncated_src)}
+                  "truncated": sorted(bodhi.truncated_src),
+                  "time_limited": getattr(bodhi, "time_limited", False)}
     elif args.no_bodhi:
         bstate = {"disabled": 1}
     else:
@@ -5080,7 +5116,7 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
             f"package, fewer if --max-bodhi ran out), so 'no security fix' for them is NOT "
             f"established",
             f"警告：以下软件包的勘误未能全部读取：{tr_zh}——它们的结论仅基于已读取的勘误"
-            f"（每包最多 {MAX_BODHI_PAGES * BODHI_PAGE_SIZE} 条；若 --max-bodhi 用尽则更少），"
+            f"（每包最多 {MAX_BODHI_PAGES * BODHI_PAGE_SIZE} 条；若查询预算用尽则更少），"
             f"因此对它们而言「没有安全修复」并未被证实"))
     return {"a": a, "b": b, "diff": diff, "layers": ld, "xc": xc, "verdict": v,
             "notes": notes, "release": rel, "backlog": backlog, "backlog_coverage": coverage,
@@ -5628,6 +5664,9 @@ def add_common(p):
                         "不查询 Fedora Bodhi（仅按更新日志匹配 CVE）")
     p.add_argument("--max-bodhi", type=int, default=100,
                    help="cap on Bodhi API calls / Bodhi API 调用上限")
+    p.add_argument("--bodhi-seconds", type=int, default=0,
+                   help="elapsed time budget for new Bodhi requests (0 = unlimited) / "
+                        "启动 Bodhi 请求的时间预算（0 = 不限制）")
     p.add_argument("--backlog-candidates", type=int, default=None,
                    help="with --audit: how many candidate source packages the "
                         "'still behind' check may look at (default: all candidates; shares the --max-bodhi "
@@ -5747,6 +5786,8 @@ def main(argv=None):
     if args.cmd == "history" and args.at_digest is not None:
         if not _clean_sha256_header(args.at_digest) or args.at_digest != args.at_digest.strip():
             ap.error(T("--at-digest requires sha256:<64 hex>", "--at-digest 需要 sha256:<64 位十六进制>"))
+    if args.bodhi_seconds < 0:
+        ap.error(T("--bodhi-seconds cannot be negative", "--bodhi-seconds 不能为负数"))
     if args.backlog_candidates is not None and args.backlog_candidates < 1:
         ap.error(T("--backlog-candidates must be positive", "--backlog-candidates 必须为正数"))
     if args.cmd == "backlog" and args.no_bodhi:
