@@ -4480,10 +4480,15 @@ def cmd_pkgs(args):
     # ~33 MB rpmdb chunk again on every call.
     pkgs = load_pkglist(reg, r, args.ref,
                         args.cache_dir or os.path.expanduser("~/.cache/sbwatch"), [])
+    coverage = package_coverage(pkgs)
+    if not coverage["rpmdb_complete"]:
+        log(T(f"  ! incomplete RPM inventory: {coverage['rpmdb_issues']}",
+              f"  ！RPM 包表不完整：{coverage['rpmdb_issues']}"))
     if args.json:
         slim = {k: {a: b for a, b in v.items() if a != "changelog"} for k, v in pkgs.items()}
         _atomic_write_json(args.json, {"ref": args.ref, "digest": r["digest"],
-                                       "annotations": r["annotations"], "packages": slim},
+                                       "annotations": r["annotations"], "packages": slim,
+                                       "coverage": coverage},
                            indent=1)
         log(T(f"wrote {args.json}: {len(pkgs)} packages",
               f"已写入 {args.json}：{len(pkgs)} 个软件包"))
