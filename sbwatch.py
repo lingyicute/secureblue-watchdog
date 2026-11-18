@@ -4075,6 +4075,16 @@ def coverage_line(cov: dict) -> str:
     return T(en, zh)
 
 
+def _note_head(notes) -> tuple:
+    """(first non-blank line, how many more non-blank lines) of an erratum's notes.
+
+    Bodhi ends most notes with a blank line, and counting that as text made
+    every one-line note read "(+1 more line(s))".
+    """
+    lines = [ln.strip() for ln in str(notes or "").splitlines() if ln.strip()]
+    return (lines[0], len(lines) - 1) if lines else ("", 0)
+
+
 def cmd_backlog(args):
     reg = _registry(args)
     reg._token()
@@ -4103,11 +4113,10 @@ def cmd_backlog(args):
     for r in rows:
         print(f"  {r['name']:28} {r['have']:>26}  ->  {r['want']:<26} "
               f"{(r['severity'] or '?'):9} {r['alias']}")
-        if r["notes"]:
-            _lines = r["notes"].splitlines() or [""]
-            _rest = f" (+{len(_lines)-1} more line(s) / 另有 {len(_lines)-1} 行)" \
-                if len(_lines) > 1 else ""
-            print(f"  {'':28}{'':26}     {clip_text(_lines[0], 110)}{_rest}")
+        head, more = _note_head(r["notes"])
+        if head:
+            _rest = f" (+{more} more line(s) / 另有 {more} 行)" if more else ""
+            print(f"  {'':28}{'':26}     {clip_text(head, 110)}{_rest}")
     if not rows and (cov.get("rpmdb_complete") is False or cov.get("truncated")):
         print(T("  no match in the available records; coverage is incomplete",
                 "  在可读取的记录中没有匹配项；审计覆盖不完整"))
