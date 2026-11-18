@@ -126,7 +126,7 @@ BASELINE_LABEL_CAP = 80  # characters of a baseline label read back from the sta
 #                          whole digest (71), which shortref() then abbreviates. The
 #                          former 26 cut check's own label and appended a 40-character
 #                          marker to it - once more on every --force run.
-PKGLIST_CACHE_VERSION = 5  # RPM header type, size and changelog coverage validation
+PKGLIST_CACHE_VERSION = 6  # track all shadowed packages, even the same architecture
 BODHI_CACHE_VERSION = 6  # v5 could cache a repeated, apparently complete page
 OLD_LOG_CAP = 1000  # changelog entries (dropped by this build) scanned for lost fixes
 RETAINED_LOG_CAP = 1000  # unchanged entries that may still mention a purportedly gained/lost CVE
@@ -1403,8 +1403,8 @@ def rpmdb_chunk(resolved: dict) -> dict | None:
 def table_put(pkgs: "PackageTable", e: dict) -> None:
     """Insert one binary package into the name-keyed table.
 
-    Same name, different architecture (multilib: `foo.i686` next to `foo.x86_64`)
-    is the one case where two entries compete for one key. The higher EVR wins -
+    Multilib and multiple installed builds of the same architecture can both
+    compete for one key. The higher EVR wins -
     that is what the rest of this file assumes - but the loser is *recorded*, so
     the report can say that a change to it would not be visible in the diff.
     """
@@ -1413,19 +1413,14 @@ def table_put(pkgs: "PackageTable", e: dict) -> None:
     if old is None:
         pkgs[name] = e
         return
-    if old.get("arch") != e.get("arch"):
-        cmp = evr_cmp(e, old)
-        take_new = cmp > 0 or (cmp == 0 and (e.get("arch") or "") > (old.get("arch") or ""))
-        winner, loser = (e, old) if take_new else (old, e)
-        kept_evr, shad_evr = _evr_pair(winner, loser)
-        pkgs.collisions.append({"name": name, "kept_arch": winner.get("arch"),
-                                "kept_evr": kept_evr,
-                                "shadowed_arch": loser.get("arch"),
-                                "shadowed_evr": shad_evr})
-        pkgs[name] = winner
-        return
-    if evr_cmp(e, old) > 0:
-        pkgs[name] = e
+    cmp = evr_cmp(e, old)
+    take_new = cmp > 0 or (cmp == 0 and (e.get("arch") or "") > (old.get("arch") or ""))
+    winner, loser = (e, old) if take_new else (old, e)
+    kept_evr, shad_evr = _evr_pair(winner, loser)
+    pkgs.collisions.append({"name": name, "kept_arch": winner.get("arch"),
+                            "kept_evr": kept_evr, "shadowed_arch": loser.get("arch"),
+                            "shadowed_evr": shad_evr})
+    pkgs[name] = winner
 
 
 def package_list(reg: Registry, resolved: dict) -> dict:
@@ -2271,14 +2266,16 @@ def pkg_diff(pa: dict, pb: dict) -> dict:
     common = keys_a & keys_b
     for n in sorted(common):
         x, y = pa[n], pb[n]
-        if _evr_tuple(x) == _evr_tuple(y):
+        arch_changed = x.get("arch") != y.get("arch")
+        if _evr_tuple(x) == _evr_tuple(y) and not arch_changed:
             continue
         d = evr_cmp(x, y)
         # "rebuild" is now only reachable for equal-comparing but differently
         # spelled EVRs (e.g. 1.0 vs 1.00); with the tuple check above, identical
         # (epoch, version, release) never gets here at all.
         changed.append({"name": n, "old": x, "new": y, "src": y["src"],
-                        "dir": "downgrade" if d > 0 else "upgrade" if d < 0 else "rebuild"})
+                        "dir": ("downgrade" if d > 0 else "upgrade" if d < 0
+                                else "arch-change" if arch_changed else "rebuild")})
     return {
         "added": sorted(keys_b - keys_a),
         "removed": sorted(keys_a - keys_b),
@@ -2635,7 +2632,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         en, zh = _evidence_pair(g)
         return f"{en} {zh}"
 
-    moved_names = {c["name"] for c in diff["changed"] if c.get("dir") != "downgrade"}
+    moved_names = {c["name"] for c in diff["changed"] if c.get("dir") not in ("downgrade", "arch-change")}
     kernel_downgraded = any(c["name"] == "kernel" and c.get("dir") == "downgrade"
                             for c in diff["changed"])
     kernel_in_diff = "kernel" in moved_names
@@ -3123,6 +3120,9 @@ def group_by_src(changed: list) -> list:
         rep = min(g["pkgs"], key=lambda p: (p["name"] != g["src"], p["name"]))
         o, n = rep["old"], rep["new"]
         g["old_evr"], g["new_evr"] = _build_evr(o), _build_evr(n)
+        if o.get("arch") != n.get("arch"):
+            g["old_evr"] += f".{o.get('arch') or '?'}"
+            g["new_evr"] += f".{n.get('arch') or '?'}"
         if _epoch(o) != _epoch(n):
             # neither string carries the epoch: an epoch-only change read "1.2-3 → 1.2-3"
             g["old_evr"] = f"{_epoch(o)}:{g['old_evr']}"
@@ -4826,6 +4826,9 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
     bodhi = None if (args.no_bodhi or not rel) else Bodhi(cache_dir=cache_dir,
                                                          max_calls=args.max_bodhi)
     for c in classify_order(diff["changed"]):       # report order stays by name
+        if c["dir"] == "arch-change":
+            # An equal-EVR arch replacement is not a new version or .upgraded.
+            continue
         c["cls"] = classify_change(c["old"], c["new"], rel, bodhi)
     # parse-quality notes: both of these used to fail silently, and both make the
     # diff look calmer than the data warrants
@@ -4854,11 +4857,11 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
             return f"{x['name']}.{x['shadowed_arch']} ({x['shadowed_evr']})"
 
         notes.append(T(
-            f"{len(_c)} package name(s) exist in more than one architecture in this image "
-            f"(multilib); the table is name-keyed, so the lower EVR is not diffed: "
+            f"{len(_c)} installed package record(s) share a name in one or both images "
+            f"(multiple versions or multilib); the name-keyed diff shadows entries: "
             f"{clip_list(_c, 4, render=_shadowed)}",
-            f"此镜像中有 {len(_c)} 个包名存在多个架构（multilib）；本表以包名为键，"
-            f"因此较低 EVR 的那一个不参与 diff："
+            f"两个镜像中有 {len(_c)} 条同名包记录（多个版本或架构）；"
+            f"包表以名称为键，部分记录未参与对比："
             f"{clip_list(_c, 4, lang='zh', joiner='，', render=_shadowed)}"))
     diff["rpmdb_complete"] = bool(pa and pb) and not (hdr_rej or fld_skip or _c)
     diff["rpmdb_issues"] = {"headers_rejected": hdr_rej, "fields_skipped": fld_skip,

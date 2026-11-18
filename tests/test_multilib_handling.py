@@ -44,6 +44,22 @@ class TestMultilibHandling(unittest.TestCase):
         self.assertEqual(t.collisions[0]["kept_evr"], "1:1.0-1.fc45")
         self.assertEqual(t.collisions[0]["shadowed_evr"], "0:1.0-1.fc45")
 
+    def test_same_architecture_multiple_builds_also_make_inventory_partial(self):
+        table = S.PackageTable()
+        S.table_put(table, pkg("kernel", "7.3.3-1.fc45"))
+        S.table_put(table, pkg("kernel", "7.3.4-1.fc45"))
+        self.assertEqual(table["kernel"]["version"], "7.3.4")
+        self.assertEqual(len(table.collisions), 1)
+        self.assertFalse(S.package_coverage(table)["rpmdb_complete"])
+
+    def test_same_version_with_different_arch_is_not_the_same_nevra(self):
+        old = dict(pkg("glibc", "2.42-1.fc45"), arch="i686")
+        new = dict(old, arch="x86_64")
+        d = S.pkg_diff({"glibc": old}, {"glibc": new})
+        self.assertEqual(d["changed"][0]["dir"], "arch-change")
+        g, = S.group_by_src(d["changed"])
+        self.assertEqual((g["old_evr"], g["new_evr"]), ("2.42-1.fc45.i686", "2.42-1.fc45.x86_64"))
+
 
 if __name__ == "__main__":
     unittest.main()
