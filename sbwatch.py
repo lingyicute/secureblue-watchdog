@@ -126,7 +126,7 @@ BASELINE_LABEL_CAP = 80  # characters of a baseline label read back from the sta
 #                          whole digest (71), which shortref() then abbreviates. The
 #                          former 26 cut check's own label and appended a 40-character
 #                          marker to it - once more on every --force run.
-PKGLIST_CACHE_VERSION = 4  # source_epoch is derived from the matching installed main RPM
+PKGLIST_CACHE_VERSION = 5  # RPM header type, size and changelog coverage validation
 BODHI_CACHE_VERSION = 5  # v1 clipped bug titles (200) and notes (1500) BEFORE
 #                          extracting CVE ids from them, so a v1 cache can be
 #                          missing CVEs. A cache without this marker is refetched.
@@ -1277,7 +1277,6 @@ RPMTAG = {
     1014: "license", 1022: "arch", 1044: "sourcerpm", 1080: "changelogtime",
     1081: "changelogname", 1082: "changelogtext",
 }
-STR_TYPES = {6, 8, 9}   # 6=STRING, 8=STRING_ARRAY, 9=I18NSTRING
 CHUNK_MATCH = "rpmdb.sqlite"
 # rpm pseudo-packages: they have no source rpm, no arch and no Fedora erratum, and
 # they churn on every keyring rotation, so they only add noise to a diff.
@@ -1336,14 +1335,13 @@ def read_header(blob: bytes, stats: dict | None = None) -> dict:
             return {}
         nindex, hlen = struct.unpack(">II", blob[:8])
         base = 8
-    # `base`, not a hard-coded 8: the legacy layout puts the index at offset 16.
-    # The index itself must fit, whatever slack the data store gets: the entry
-    # unpack below is not guarded, so a short index crashed the whole parse.
-    if base + 16 * nindex > len(blob) or base + 16 * nindex + hlen > len(blob) + 40:
+    # The index and the entire declared data store must fit. Salvaging a
+    # truncated store can hide missing tags (e.g. Epoch) without an error.
+    store = base + 16 * nindex
+    store_end = store + hlen
+    if store_end > len(blob):
         stats["headers_rejected"] = stats.get("headers_rejected", 0) + 1
         return {}
-    store = base + 16 * nindex
-    store_end = min(len(blob), store + hlen)
     out: dict = {}
     for i in range(nindex):
         tag, typ, off, cnt = struct.unpack(">IIII", blob[base + 16 * i: base + 16 * i + 16])
@@ -1360,31 +1358,27 @@ def read_header(blob: bytes, stats: dict | None = None) -> dict:
                 out[name] = list(struct.unpack(">%dI" % cnt, blob[p:p + 4 * cnt]))
                 continue
             if name == "epoch":
-                if typ != 4 or cnt < 1 or p + 4 > store_end:
-                    raise ValueError("epoch must be INT32 with count >= 1")
+                if typ != 4 or cnt != 1 or p + 4 > store_end:
+                    raise ValueError("epoch must be a single INT32")
                 out[name] = str(struct.unpack(">I", blob[p:p + 4])[0])
                 continue
-            if typ in STR_TYPES:
-                if name in ("changelogname", "changelogtext"):
-                    if cnt > store_end - p:
-                        raise ValueError("string array count exceeds remaining store")
-                    arr, q = [], p
-                    for _ in range(cnt):
-                        e = blob.index(b"\0", q, store_end)
-                        arr.append(blob[q:e].decode("utf-8", "replace"))
-                        q = e + 1
-                    out[name] = arr
-                else:
-                    # An I18NSTRING holds one string per locale, C locale first
-                    # (glfw, libraqm, usb_modeswitch ... translate their Summary),
-                    # so only a plain STRING has to be a single value. Rejecting
-                    # count > 1 outright reported 12 "undecodable" fields on the
-                    # live image - a parse warning in every single report.
-                    if cnt != 1 and not (typ == 9 and cnt > 1):
-                        raise ValueError("scalar string tag with count != 1")
-                    out[name] = blob[p:blob.index(b"\0", p, store_end)].decode("utf-8", "replace")
+            if name in ("changelogname", "changelogtext"):
+                if typ != 8 or cnt > store_end - p:
+                    raise ValueError("invalid RPM changelog string array")
+                arr, q = [], p
+                for _ in range(cnt):
+                    e = blob.index(b"\0", q, store_end)
+                    arr.append(blob[q:e].decode("utf-8", "replace"))
+                    q = e + 1
+                out[name] = arr
             else:
-                raise ValueError(f"unsupported RPM type {typ} for {name}")
+                # Only Summary and Description are translated; their first
+                # string is the C locale. Identity fields must be scalar.
+                translated = name in ("summary", "description") and typ == 9
+                if not (typ == 6 and cnt == 1 or translated and cnt > 0):
+                    raise ValueError(f"invalid scalar RPM tag {name}")
+                errors = "replace" if name in ("summary", "description") else "strict"
+                out[name] = blob[p:blob.index(b"\0", p, store_end)].decode("utf-8", errors)
         except (ValueError, struct.error):
             stats["fields_skipped"] = stats.get("fields_skipped", 0) + 1
             continue
@@ -1482,6 +1476,8 @@ def package_list(reg: Registry, resolved: dict) -> dict:
                     texts = [texts]
                 if isinstance(names, str):
                     names = [names]
+                if len({len(times), len(names), len(texts)}) != 1:
+                    stats["fields_skipped"] = stats.get("fields_skipped", 0) + 1
                 chlog = [{"time": (times[i] if i < len(times) else 0),
                           "who": (names[i] if i < len(names) else ""),
                           "text": t} for i, t in enumerate(texts)]
@@ -4805,10 +4801,10 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
     if hdr_rej or fld_skip:
         notes.append(T(
             f"rpmdb parsing: {hdr_rej} package header(s) were "
-            f"rejected (size fields inconsistent) and {fld_skip} "
+            f"rejected (invalid header or identity) and {fld_skip} "
             f"field(s) could not be decoded - missing fields silently weaken the diff "
             f"(epoch, changelog/CVE scan)",
-            f"rpmdb 解析：{hdr_rej} 个包头部被拒（尺寸字段不自洽）、"
+            f"rpmdb 解析：{hdr_rej} 个包头部被拒（包头或身份字段无效）、"
             f"{fld_skip} 个字段无法解码——字段缺失会静默削弱 diff 的"
             f"准确性（epoch、更新日志/CVE 扫描）"))
     _seen_col, _c = set(), []
