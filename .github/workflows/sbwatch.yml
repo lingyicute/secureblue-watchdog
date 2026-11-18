@@ -276,7 +276,11 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SUMMARY: ${{ steps.check.outputs.summary }}
         run: |
-          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then exit 0; fi
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] && [ -z "$TELEGRAM_CHAT_ID" ]; then exit 0; fi
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo '::error::Telegram needs both TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID'
+            exit 1
+          fi
           python3 - <<'PY'
           import json, os, urllib.error, urllib.request, sys
           try:
@@ -304,15 +308,16 @@ jobs:
                   data=json.dumps({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text,
                                    "disable_web_page_preview": True}).encode(),
                   headers={"Content-Type": "application/json"})
-              # a byte slice can end inside a multi-byte character (a CJK chat
-              # title or bot name), which made a delivered push log as failed
-              print(urllib.request.urlopen(req, timeout=30).read()[:150].decode("utf-8", "replace"))
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  result = json.loads(response.read(1 << 20))
+              if not isinstance(result, dict) or result.get("ok") is not True:
+                  raise ValueError("Telegram did not acknowledge the message")
           except urllib.error.HTTPError as e:
-              print(f"Telegram push failed (non-fatal): HTTP {e.code} {e.reason}", file=sys.stderr)
-          except urllib.error.URLError as e:
-              print(f"Telegram push failed (non-fatal): {e.reason}", file=sys.stderr)
+              sys.exit(f"Telegram delivery failed (HTTP {e.code})")
           except Exception as e:
-              print(f"Telegram push failed (non-fatal): {type(e).__name__}", file=sys.stderr)
+              # Do not write URLs or response bodies to Actions logs.
+              sys.exit(f"Telegram delivery failed ({type(e).__name__})")
+          print("Telegram acknowledged the report")
           PY
 
       - name: Save sbwatch cache

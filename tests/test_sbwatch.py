@@ -2974,13 +2974,9 @@ class TestTelegramPush(unittest.TestCase):
         code = workflow_python("Push to Telegram")
         sent = {}
 
-        class Resp:
-            def read(self_inner):
-                return reply
-
         def fake_urlopen(req, timeout=None):
             sent.update(json.loads(req.data.decode("utf-8")))
-            return Resp()
+            return io.BytesIO(reply)
 
         saved = S.urllib.request.urlopen
         saved_env = dict(os.environ)
@@ -2992,8 +2988,9 @@ class TestTelegramPush(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as d:
                 os.chdir(d)
-                with open("report.md", "w", encoding="utf-8") as fh:
-                    fh.write(report)
+                if report is not None:
+                    with open("report.md", "w", encoding="utf-8") as fh:
+                        fh.write(report)
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
                     exec(compile(code, "telegram-step", "exec"), {"__name__": "__main__"})
         finally:
@@ -3015,8 +3012,8 @@ class TestTelegramPush(unittest.TestCase):
         self.assertEqual(text, "sum\n\n" + body)
 
     def test_a_missing_report_is_not_fatal(self):
-        text, err = self._push("", summary="sum")
-        self.assertEqual(text, "sum\n\n")
+        text, err = self._push(None, summary="sum")
+        self.assertEqual(text, "sum\n\n(no report)")
         self.assertNotIn("failed", err)
 
 

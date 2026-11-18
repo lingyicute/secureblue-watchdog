@@ -406,6 +406,7 @@ CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并�
   运行时不再从网络取钥；上游换钥会在这里失败，而不是静默改变"已验证"的含义
 - 若配置了 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` secrets，推送到 Telegram
   （Telegram 单条消息上限 4096 字符，超出部分会被截断并注明，完整报告见 run summary）
+  只设置其中一个或发送失败时不会保存检查点；下次会重试，已送达的 issue 评论可能重复。
 
 环境变量（workflow_dispatch 输入）：
 - `SB_IMAGE` (默认 `secureblue/silverblue-main-hardened`)
