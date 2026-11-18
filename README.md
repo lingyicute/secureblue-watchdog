@@ -233,6 +233,8 @@ python3 sbwatch.py backlog latest --max-bodhi 80
 以及逐包的 `verdict.security_basis`，区分「安全勘误」「对应 Fedora 勘误（归一化匹配）」、
 「被越过构建的安全勘误」「非安全类勘误（含 CVE 或高严重度）」与「更新日志 CVE」——
 只有新版更新日志里真的出现了 CVE 编号，才会标成「更新日志 CVE」。
+Bodhi 的多源码包勘误（例如依赖库更新与批量重建）中的 CVE 会在 `advisory_wide_cves`
+中单列，不能归因给每个命中的源码包；`verdict.cves` 仍列出全部证据中的编号。
 
 
 报告里会包含：

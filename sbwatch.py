@@ -2027,8 +2027,22 @@ def classify_order(changed: list) -> list:
                   key=lambda c: not _src_matches_pool(c.get("src") or "", IMPORTANT_SRC))
 
 
+def _advisory_cve_scope(update: dict) -> tuple[set, set]:
+    """Return (source-level, advisory-wide) CVE IDs, not per-binary proof."""
+    ids = set(update.get("cves") or ())
+    for text in (update.get("title"), update.get("notes"),
+                 *(bug.get("title") for bug in update.get("bugs") or ())):
+        ids.update(find_cves(text))
+    names = {parts[0] for nvr in update.get("nvrs") or () if nvr
+             if len(parts := nvr.rsplit("-", 2)) == 3}
+    # Bodhi CVEs belong to the whole update, e.g. the libxml2 transition in
+    # FEDORA-2026-91259c13b9 also includes hundreds of dependent rebuilds.
+    return (set(), ids) if len(names) > 1 else (ids, set())
+
+
 def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) -> dict:
-    info = {"security": False, "cves": set(), "cves_dropped": set(), "aliases": [],
+    info = {"security": False, "cves": set(), "cves_dropped": set(),
+            "advisory_wide_cves": set(), "aliases": [],
             "severities": [], "sec_severities": [], "bodhi_type": None, "why": [], "erratum": None,
             # set only by a *pushed* type=security erratum that shipped a build in
             # the NEW image *and* matched its release string exactly - the exact
@@ -2056,6 +2070,11 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
     def add_cves(text, into=None):
         for c in find_cves(text):
             (into if into is not None else info["cves"]).add(c)
+
+    def add_advisory_cves(update):
+        source, shared = _advisory_cve_scope(update)
+        info["cves"].update(source)
+        info["advisory_wide_cves"].update(shared)
 
     # (a) changelog entries that are new in this build: Fedora writes CVE ids there.
     # The per-package caps only guard against a pathological changelog (no real
@@ -2146,7 +2165,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                         {"alias": u["alias"], "severity": u.get("severity"),
                          "nvr": passed})
                     info["security"] = True
-                    info["cves"].update(u.get("cves") or ())
+                    add_advisory_cves(u)
                     info["severities"].append((u.get("severity") or "").lower())
                     info["sec_severities"].append((u.get("severity") or "").lower())
                     info["why"].append(
@@ -2178,11 +2197,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                 continue
             if u.get("alias"):
                 info["aliases"].append(u["alias"])
-            info["cves"].update(u.get("cves") or ())
-            add_cves(u.get("notes") or "")
-            add_cves(u.get("title") or "")
-            for bg in u.get("bugs") or []:
-                add_cves(bg.get("title"))
+            add_advisory_cves(u)
             sev_word = (u.get("severity") or "").lower()
             info["severities"].append(sev_word)
             cand_err = {"alias": u["alias"], "type": u["type"],
@@ -2236,13 +2251,14 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
     # A CVE carried by the new build's pushed erratum is not a dropped fix even if
     # the RPM changelog entry that used to mention it was trimmed or reworded.
     info["cves_dropped"] -= info["cves"]
-    if info["cves"]:
+    if info["cves"] or info["advisory_wide_cves"]:
         info["security"] = True
     if info["cves_dropped"]:
         info["why"].insert(1 if chlog_cves else 0,
                            "no longer mentioned/不再提及: "
                            + clip_list(sorted(info["cves_dropped"]), 8, lang="both"))
     info["cves"] = sorted(info["cves"])
+    info["advisory_wide_cves"] = sorted(info["advisory_wide_cves"])
     info["cves_dropped"] = sorted(info["cves_dropped"])
     info["important_src"] = _src_matches_pool(new["src"], IMPORTANT_SRC)
     # only severities belonging to a *pushed* erratum for the *new* build count
@@ -2643,7 +2659,8 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     # section: a downgraded group belongs to the downgrade warning below, and
     # calling it a "version bump" in the same headline contradicted that warning.
     imp = [g for g in groups if g["important"] and not g["security"] and not g["downgrade"]]
-    cves = sorted({c for g in sec for c in g["cves"]})
+    shared_cves = {c for g in sec for c in g.get("advisory_wide_cves", ())}
+    cves = sorted({c for g in sec for c in g["cves"]} | shared_cves)
     sev = max([g["sev_rank"] for g in sec] or [0])
     # `kernel` as a *binary package that actually moved* - the same test
     # secureblue runs against .rpm-diff.upgraded.  The ostree.linux annotation is
@@ -2707,7 +2724,8 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
          "security_pkgs": sorted({p["name"] for g in sec for p in g["pkgs"]
                                   if p.get("dir") != "downgrade"}),
          "important_pkgs": sorted({p["name"] for g in imp for p in g["pkgs"]}),
-         "cves": cves, "cves_dropped": sorted({c for g in lost for c in g["dropped"]}),
+         "cves": cves, "advisory_wide_cves": sorted(shared_cves),
+          "cves_dropped": sorted({c for g in lost for c in g["dropped"]}),
          "downgrades": [g["src"] for g in down], "severity_rank": sev,
          "kernel_changed": kernel_moved, "kernel_in_diff": kernel_in_diff,
          "kernel_annotation_changed": kernel_annot_moved,
@@ -2791,15 +2809,15 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             render=lambda g: f"{g['src']} "
                              f"（{clip_list(g['cves'], HEADLINE_CVE_CAP, lang='zh') or _evidence_pair(g)[1]}）")
         v["headline"] = (f"{plural(len(sec), 'source package')} "
-                         f"{'gains' if len(sec) == 1 else 'gain'} security fixes: {top_en}"
+                         f"{'has' if len(sec) == 1 else 'have'} security evidence: {top_en}"
                          + (f" — {len(cves)} CVE(s) total" if cves else "")
                          + (". Kernel version also changed" if kernel_moved else ""))
-        v["headline_zh"] = (f"{len(sec)} 个源码包获得安全修复：{top_zh}"
+        v["headline_zh"] = (f"{len(sec)} 个源码包有安全相关证据：{top_zh}"
                             + (f" —— 共 {len(cves)} 个 CVE" if cves else "")
                             + ("；内核版本也已变化" if kernel_moved else ""))
         if sev >= 3:
-            v["headline"] = "HIGH/CRITICAL severity fix present. " + v["headline"]
-            v["headline_zh"] = "存在 HIGH/CRITICAL（高/严重）级别修复。" + v["headline_zh"]
+            v["headline"] = "HIGH/CRITICAL security evidence present. " + v["headline"]
+            v["headline_zh"] = "存在 HIGH/CRITICAL（高/严重）级别的安全证据。" + v["headline_zh"]
     elif kernel_moved or imp or silent_key:
         v["level"] = "consider"
         bits, bits_zh = [], []
@@ -3091,6 +3109,7 @@ def group_by_src(changed: list) -> list:
             # subpackage, only to be thrown away.
             g = groups[key] = {"src": key, "pkgs": [], "security": False,
                                "cves": set(), "dropped": set(), "aliases": [],
+                               "advisory_wide_cves": set(),
                                "why": [], "sev_rank": 0, "sec_sev_rank": 0, "important": False,
                                "downgrade": False, "has_erratum": False,
                                "has_security_erratum": False,
@@ -3107,6 +3126,7 @@ def group_by_src(changed: list) -> list:
         if not is_down:
             g["security"] = g["security"] or bool(cls.get("security"))
             g["cves"].update(cls.get("cves") or [])
+            g["advisory_wide_cves"].update(cls.get("advisory_wide_cves") or [])
             g["changelog_cves"].update(cls.get("changelog_cves") or [])
             if cls.get("erratum"):
                 g["has_erratum"] = True
@@ -3153,6 +3173,7 @@ def group_by_src(changed: list) -> list:
     out = sorted(groups.values(), key=lambda g: (-g["sev_rank"], g["src"]))
     for g in out:
         g["cves"] = sorted(g["cves"])
+        g["advisory_wide_cves"] = sorted(g["advisory_wide_cves"])
         g["dropped"] = sorted(g["dropped"])
         g["changelog_cves"] = sorted(g["changelog_cves"])
         rep = min(g["pkgs"], key=lambda p: (p["name"] != g["src"], p["name"]))
@@ -3512,6 +3533,16 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             pkg_col = fmt_pkgs(g, "zh" if is_zh else "en")
             W(f"| {pkg_col} ({g['src']}) | {g['old_evr']} → **{g['new_evr']}** | {cve_str} | {ev} |")
         W("")
+        shared = verdict.get("advisory_wide_cves") or []
+        if shared:
+            W("### 多源码包勘误中的 CVE（按勘误统计）" if is_zh else
+              "### Advisory-wide CVEs (updates with multiple source packages)")
+            W("")
+            W("这些编号是整条勘误的证据，不能归给上述每个源码包。" if is_zh else
+              "These IDs are evidence for the advisory as a whole, not for every listed source.")
+            W("")
+            W(", ".join(shared))
+            W("")
         # A security report is the one place where an elided id is unacceptable:
         # the table cell cannot hold 113 of them, so the rest get a section of
         # their own rather than a "…".
@@ -3731,7 +3762,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W(f"## 你的（当前或新）镜像仍缺少的更新（{len(backlog)}）")
             W("")
             W("已发布的 **stable** Fedora 安全更新，其构建比镜像内的更新——"
-              "即无论是否跳过本次更新都存在的暴露面，但你应当知情。")
+              "这些是源码构建差距，不代表镜像内的每个二进制都受影响。")
             W("")
             W("| 软件包 | 镜像内版本 | 新 stable 构建 | 严重度 | 勘误 |")
             W("|---|---|---|---|---|")
@@ -3739,8 +3770,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W(f"## What your (current or new) image is still missing ({len(backlog)})")
             W("")
             W("Published **stable** Fedora security updates whose build is newer than the one in "
-              "the image — i.e. exposure that skipping this update does not change, but that you "
-              "may want to know about.")
+              "the image. These are source-build gaps, not proof that every binary is affected.")
             W("")
             W("| package | in image | newer stable build | severity | erratum |")
             W("|---|---|---|---|---|")
@@ -3966,16 +3996,18 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
                     continue
                 # full lists: the CLI preview and the report both clip *with a
                 # stated count*, and the JSON export must stay complete
+                cves, shared = _advisory_cve_scope(u)
                 if row is None:
                     row = {"name": n, "src": src,
                            "have": _build_evr(p) if n != src else p["evr"],
                            "want": f"{best['version']}-{best['release']}",
                            "_best": best,
                            "alias": u["alias"], "severity": u.get("severity"),
-                           "cves": set(u.get("cves") or ()),
+                           "cves": cves, "advisory_wide_cves": shared,
                            "notes": u.get("notes") or ""}
                 else:
-                    row["cves"].update(u.get("cves") or ())
+                    row["cves"].update(cves)
+                    row["advisory_wide_cves"].update(shared)
                     if evr_cmp(row["_best"], best) < 0:
                         row["_best"] = best
                         row["want"] = f"{best['version']}-{best['release']}"
@@ -3991,6 +4023,7 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
         if row is not None:
             row.pop("_best", None)
             row["cves"] = sorted(row["cves"])
+            row["advisory_wide_cves"] = sorted(row["advisory_wide_cves"])
             rows.append(row)
     rows.sort(key=lambda r: -order.get((r["severity"] or "").lower(), 0))
     cov["checked"] = queried
@@ -5030,6 +5063,7 @@ def cmd_diff(args):
                                 "dir": c["dir"],
                                 "security": bool((c.get("cls") or {}).get("security")),
                                 "cves": (c.get("cls") or {}).get("cves", []),
+                                 "advisory_wide_cves": (c.get("cls") or {}).get("advisory_wide_cves", []),
                                 "aliases": (c.get("cls") or {}).get("aliases", []),
                                 "already_had": (c.get("cls") or {}).get("already_had", []),
                                 "not_pushed": (c.get("cls") or {}).get("not_pushed", []),
@@ -5413,7 +5447,8 @@ def cmd_check(args):
                             "new": _evr_pair(c["old"], c["new"])[1],
                             "src": c["src"], "dir": c["dir"],
                             "security": bool((c.get("cls") or {}).get("security")),
-                            "cves": (c.get("cls") or {}).get("cves", [])}
+                            "cves": (c.get("cls") or {}).get("cves", []),
+                             "advisory_wide_cves": (c.get("cls") or {}).get("advisory_wide_cves", [])}
                            for c in res["diff"]["changed"]],
                # complete: the report's backlog table stops at 25 rows and refers
                # to the JSON output for the rest - for `check`, that is this file
