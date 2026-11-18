@@ -2254,8 +2254,10 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
     if info["cves"] or info["advisory_wide_cves"]:
         info["security"] = True
     if info["cves_dropped"]:
-        info["why"].insert(1 if chlog_cves else 0,
-                           "no longer mentioned/不再提及: "
+        # After the evidence: this is a hint, and at the front it used up the
+        # report's evidence cell before the erratum was reached (openssl on the
+        # F44 -> F45 rebase: "erratum FEDORA-2026-06… (+51 chars not shown)").
+        info["why"].append("no longer mentioned/不再提及: "
                            + clip_list(sorted(info["cves_dropped"]), 8, lang="both"))
     info["cves"] = sorted(info["cves"])
     info["advisory_wide_cves"] = sorted(info["advisory_wide_cves"])
