@@ -76,7 +76,7 @@ class TestThirdPartyVendor(unittest.TestCase):
             db = Path(td) / "rpmdb.sqlite"
             con = sqlite3.connect(db)
             con.execute("create table Packages (blob BLOB)")
-            blob = rpm_header([(1000, 6, b"ffmpeg\0"), (1001, 6, b"9.0.2\0"),
+            blob = rpm_header([(1022, 6, b"x86_64\0"), (1000, 6, b"ffmpeg\0"), (1001, 6, b"9.0.2\0"),
                                (1002, 6, b"2.fc45\0"), (1011, 6, b"negativo17.org\0"),
                                (1044, 6, b"ffmpeg-9.0.2-2.fc45.src.rpm\0")])
             con.execute("insert into Packages values (?)", (blob,))

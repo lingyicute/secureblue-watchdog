@@ -126,7 +126,7 @@ BASELINE_LABEL_CAP = 80  # characters of a baseline label read back from the sta
 #                          whole digest (71), which shortref() then abbreviates. The
 #                          former 26 cut check's own label and appended a 40-character
 #                          marker to it - once more on every --force run.
-PKGLIST_CACHE_VERSION = 2  # v1 omitted `vendor`, needed to ignore third-party repos
+PKGLIST_CACHE_VERSION = 3  # older entries missed undecodable fields and incomplete identities
 BODHI_CACHE_VERSION = 2  # v1 clipped bug titles (200) and notes (1500) BEFORE
 #                          extracting CVE ids from them, so a v1 cache can be
 #                          missing CVEs. A cache without this marker is refetched.
@@ -1387,6 +1387,8 @@ def read_header(blob: bytes, stats: dict | None = None) -> dict:
                     if cnt != 1 and not (typ == 9 and cnt > 1):
                         raise ValueError("scalar string tag with count != 1")
                     out[name] = blob[p:blob.index(b"\0", p, store_end)].decode("utf-8", "replace")
+            else:
+                raise ValueError(f"unsupported RPM type {typ} for {name}")
         except (ValueError, struct.error):
             stats["fields_skipped"] = stats.get("fields_skipped", 0) + 1
             continue
@@ -1465,14 +1467,15 @@ def package_list(reg: Registry, resolved: dict) -> dict:
                 before = stats.get("headers_rejected", 0)
                 h = read_header(blob, stats)
                 name = h.get("name")
-                if (not isinstance(name, str) or not name
-                        or not isinstance(h.get("version"), str) or not h["version"]
+                # Key pseudo-packages legitimately have no architecture.
+                if isinstance(name, str) and name in PSEUDO_PACKAGES:
+                    continue
+                if (any(not isinstance(h.get(k), str) or not h[k]
+                        for k in ("name", "version", "release", "arch"))
                         or any(k in h and not isinstance(h[k], str)
-                               for k in ("release", "arch", "vendor", "sourcerpm"))):
+                               for k in ("vendor", "sourcerpm"))):
                     if stats.get("headers_rejected", 0) == before:
                         stats["headers_rejected"] = before + 1
-                    continue
-                if name in PSEUDO_PACKAGES:
                     continue
                 srpm = (h.get("sourcerpm") or "").removesuffix(".src.rpm").removesuffix(".nosrc.rpm")
                 src = (srpm.rsplit("-", 2)[0] if srpm.count("-") >= 2 else "") or name

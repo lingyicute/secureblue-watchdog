@@ -17,7 +17,7 @@ class TestSourceRpmName(unittest.TestCase):
                 ("foo-libs", "r128", "foo-r128-1.fc45.src.rpm"),
                 ("polkit-qt6-1", "0.200.0", "polkit-qt-1-0.200.0-1.fc45.src.rpm"),
             ):
-                blob = rpm_header([(1000, 6, nm.encode() + b"\0"),
+                blob = rpm_header([(1022, 6, b"x86_64\0"), (1000, 6, nm.encode() + b"\0"),
                                    (1001, 6, ver.encode() + b"\0"),
                                    (1002, 6, b"1.fc45\0"),
                                    (1044, 6, srpm.encode() + b"\0")])
