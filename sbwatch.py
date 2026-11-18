@@ -2547,12 +2547,15 @@ def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
             "kernel_updated": kernel_updated, "trivalent_updated": trivalent_updated,
             "security_advisory_count": len(sevs),
             "level_without_advisories": stock, "advisory_driven": stock != level,
-            "delivery": {"observed": False, "requires": "cached rpm-ostree update",
+            "delivery": {"observed": False,
+                         "requires": "cached rpm-ostree update for a staged OCI deployment",
+                         "stock_oci_without_staged_deployment": "none",
                          "suppress_if_notified_today": ["critical", "normal"] if level == "normal"
                          else ["critical"]},
-            "severity_basis": ("rpm-ostree .advisories: released security errata whose "
-                               "EVR matches a package in the new image exactly; errata "
-                               "matched only after stripping .secureblue.N are excluded"),
+            "severity_basis": ("Bodhi stable source-build candidates; a local rpm-md "
+                               "binary NEVRA match is required and is not verified. "
+                               "Matches requiring .secureblue.N stripping are excluded."),
+            "rpm_md_observed": False,
             "why": why, "why_zh": why_zh}
 
 
@@ -2615,17 +2618,16 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                                       and not meta.get("kernel_pkg_unchanged")
                                       and not kernel_downgraded)
     sbn = secureblue_notification(diff, groups)
-    if diff.get("count_a") == "?" and not diff.get("same_rpmdb"):
-        # manifest-only mode (--exact 0): no rpmdb was read, so the package set
-        # is unknown and "no notification" would be an unfounded claim.
-        # Every input of the prediction is unknown as well: `False` / `none` for
-        # them read as "the kernel did not move, no advisory" - a claim.
-        sbn = dict(sbn, level="unknown", message=None, why=[], why_zh=[],
-                   kernel_updated=None, trivalent_updated=None,
+    if diff.get("count_a") == "?":
+        # Matching rpmdb digests prove there was no package delta, but do not
+        # identify which backend (rpm-ostree or bootc) the old image uses.
+        same_db = bool(diff.get("same_rpmdb"))
+        sbn = dict(sbn, level="unknown", message=None, why=[], why_zh=[], delivery=None,
+                   kernel_updated=False if same_db else None,
+                   trivalent_updated=False if same_db else None,
                    max_advisory_severity=None, security_advisory_count=None,
                    level_without_advisories="unknown", advisory_driven=False,
-                   note="package versions were not read (--exact 0), so the "
-                        "notification cannot be predicted")
+                   note="the booted image's notification backend was not read from the rpmdb")
     silent = xc.get("silent_rebuilds") or []
     # The whole list, not the first 60 entries: silent_rebuilds is sorted by chunk
     # size, and the packages that matter here (kernel, glibc, ...) are exactly the
@@ -2831,11 +2833,11 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         if sbn.get("advisory_driven"):
             # the advisory arm needs rpm-md metadata: see secureblue_notification()
             kernel_only = sbn.get("level_without_advisories") == "normal"
-            v["headline"] += (" - only where rpm-ostree computes advisories, i.e. with "
+            v["headline"] += (" - conditional on a staged deployment and matching rpm-md with "
                               "layered packages; a stock system gets "
                               + ("the normal notification for the kernel alone"
                                  if kernel_only else "no notification"))
-            v["headline_zh"] += ("——仅限 rpm-ostree 会计算勘误的系统，即叠加了软件包的系统；默认安装"
+            v["headline_zh"] += ("——需要已暂存部署及本机叠加包使用的匹配 rpm-md；默认安装"
                                  + ("只因内核升级弹出普通通知" if kernel_only else "不弹通知"))
     if v["same_inputhash_but_packages_moved"]:
         n_moved = n_bin + len(diff["added"]) + len(diff["removed"])
@@ -2967,7 +2969,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         v["headline_zh"] = ("rpmdb 对比不完整（包头被拒、字段无法解码、同名包被遮蔽或包表为空）。"
                             "显示的变化仅为部分结果，不能据此断言无变化或给出可靠升级建议。")
         v["secureblue_notification"] = dict(
-            sbn, level="unknown", message=None, why=[], why_zh=[], kernel_updated=None,
+            sbn, level="unknown", message=None, why=[], why_zh=[], delivery=None, kernel_updated=None,
             trivalent_updated=None, max_advisory_severity=None, security_advisory_count=None,
             level_without_advisories="unknown", advisory_driven=False,
             note="rpmdb coverage is incomplete")
@@ -3219,8 +3221,10 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             msg_str = (f" — \"{_sbn['message']}\"") if _sbn.get("message") else ""
             W(f"- 预测弹窗: {_badge}{msg_str}")
             if _sbn.get("delivery"):
-                W("- 仅预测触发条件：本机必须有已缓存或已暂存的更新；当天已有重大通知则不再提醒，"
-                  "普通通知也不会在当天重复。本报告未读取用户的通知记录。")
+                requirement = ("bootc 必须已有暂存部署" if _sbn.get("unconditional") else
+                               "rpm-ostree 必须有针对已暂存 OCI 部署的缓存更新（仅缓存 manifest 不会产生基础包差异）")
+                W(f"- 仅预测基础镜像的触发条件：{requirement}。当天已有重大通知则不再提醒，"
+                  "普通通知也不会在当天重复。本报告未读取通知记录，也未检查本机叠加包。")
             if _sbn.get("advisory_driven") and _lvl != "unknown":
                 W("- 未叠加软件包的系统（默认安装）: "
                   + ("普通 (normal)——仅因内核升级"
@@ -3235,23 +3239,10 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W(f"- 内核已升级: {k_up} · trivalent 已升级: {t_up} · "
               f"最高勘误等级 (rpm-ostree 体系): `{max_sev}`")
             W("")
-            W("> 这里的 severity 只取 *精确* EVR 命中：rpm-ostree 用 "
-              "`dnf_package_get_advisories(pkg, HY_EQ)` 填充 `.advisories`，"
-              "libdnf 只在 `pool_evrcmp(勘误 EVR, 包 EVR) == 0` 时才算命中。"
-              "因此 secureblue 自建包（如 `7.2.8-200.secureblue.1.fc44`）"
-              "即使对应着 Fedora 的 `7.2.8-200.fc44` 勘误，桌面也不会因此弹窗——"
-              "报告里会把它列为「对应 Fedora 勘误（归一化匹配）」。")
-            W("")
-            W("> `.advisories` 只在 rpm-ostree 持有本次更新的 rpm-md 元数据时才存在，而它只为"
-              "叠加了软件包（`rpm-ostree install`）的系统加载这些元数据。默认安装没有这份列表，"
-              "脚本读到的最高勘误等级恒为 none：那里只有 `kernel` / `trivalent` 升级会触发通知。")
-            W("")
-            W("> 依据 secureblue 的 `security-update-notification` 脚本：`trivalent` 升级 → 重大通知；"
-              "`kernel` 升级或最高勘误等级为 important/unknown → 普通通知。勘误等级取自 updateinfo 的 "
-              "`<severity>` 子元素（Bodhi 已映射为 RHEL 拼写：urgent→Critical、high→Important、"
-              "medium→Moderate、low→Low、unspecified→None），因此 `urgent` 级安全勘误同样会触发重大通知，"
-              "而 `medium`/`low` 级单独出现时不弹通知。")
-            W("")
+            if _sbn.get("delivery") and not _sbn.get("unconditional"):
+                W("> 勘误等级仅为 Bodhi stable 源构建候选。rpm-ostree 只有在持有本机 rpm-md 且找到"
+                  "精确二进制 NEVRA 时才会查勘误。旧记录可能已不在当前仓库；归一化匹配不计入预测。")
+                W("")
         else:
             _badge = {"major": "**MAJOR** (urgency=critical)",
                       "normal": "normal (urgency=normal)",
@@ -3261,9 +3252,12 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("## secureblue Notification Prediction")
             if _sbn.get("delivery"):
                 W("")
-                W("Eligibility only: a cached or staged update must exist locally. A critical "
-                  "notification today suppresses all repeats; a normal one suppresses another "
-                  "normal notification today. This report did not observe the user's timestamps.")
+                requirement = ("bootc needs a staged deployment" if _sbn.get("unconditional") else
+                               "rpm-ostree needs a cached update for a staged OCI deployment "
+                               "(a cached manifest alone has no base RPM diff)")
+                W(f"Base-image eligibility only: {requirement}. A critical notification today "
+                  "suppresses all repeats; a normal one suppresses another normal notification today. "
+                  "This report did not inspect local layered packages or notification stamps.")
             W("")
             msg_str = (f" — \"{_sbn['message']}\"") if _sbn.get("message") else ""
             W(f"- predicted popup: {_badge}{msg_str}")
@@ -3280,24 +3274,11 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               f"trivalent upgraded: {_yn_en(_sbn.get('trivalent_updated'))} · "
               f"max advisory severity (rpm-ostree scale): `{max_sev}`")
             W("")
-            W("> The severity used here only counts *exact* EVR hits: rpm-ostree fills "
-              "`.advisories` via `dnf_package_get_advisories(pkg, HY_EQ)`, and libdnf "
-              "accepts a hit only when `pool_evrcmp(advisory_evr, pkg_evr) == 0`. So a "
-              "secureblue-rebuilt package such as `7.2.8-200.secureblue.1.fc44` will not "
-              "pop a notification even though Fedora has an erratum for `7.2.8-200.fc44`; "
-              "the report lists those as \'corresponding Fedora erratum (normalised match)\'. ")
-            W("")
-            W("> `.advisories` only exists where rpm-ostree held rpm-md metadata for the update, "
-              "and it loads that only on a system with layered packages (`rpm-ostree install`). "
-              "A stock install has no such list and the script reads the maximum severity as "
-              "none: only a `kernel` / `trivalent` upgrade raises a notification there.")
-            W("")
-            W("> Based on secureblue's `security-update-notification` script: `trivalent` upgraded → major notification; "
-              "`kernel` upgraded or max advisory severity important/unknown → normal notification. The severity comes "
-              "from the updateinfo `<severity>` child element (Bodhi maps its own words to RHEL spellings before "
-              "publishing: urgent→Critical, high→Important, medium→Moderate, low→Low, unspecified→None), so an "
-              "`urgent` security advisory triggers a MAJOR notification too, while `medium`/`low` alone stay silent.")
-            W("")
+            if _sbn.get("delivery") and not _sbn.get("unconditional"):
+                W("> Advisory severity uses Bodhi stable source-build candidates. rpm-ostree "
+                  "requires a matching binary NEVRA in local rpm-md; older stable records "
+                  "may no longer be there. Normalised rebuild matches are not counted.")
+                W("")
 
     if is_zh:
         W(f"**如果现在更新，需要下载 {human(ldiff['download_bytes'])}** —— "

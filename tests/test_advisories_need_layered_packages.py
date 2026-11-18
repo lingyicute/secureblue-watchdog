@@ -55,6 +55,22 @@ class TestAdvisoriesNeedLayeredPackages(unittest.TestCase):
         self.assertIn("on a system without layered packages (a stock install): none", md)
         self.assertIn("未叠加软件包的系统（默认安装）: 无 (none)", md)
 
+    def test_registry_only_check_does_not_generate_a_base_diff(self):
+        diff, groups, v = _analyse(CURL_URGENT)
+        n = v["secureblue_notification"]
+        self.assertEqual(n["delivery"]["stock_oci_without_staged_deployment"], "none")
+        self.assertIn("staged OCI deployment", n["delivery"]["requires"])
+        self.assertFalse(n["rpm_md_observed"])
+        md = S.render_markdown("t", IMG, IMG, diff, LD, v, [], groups=groups)
+        self.assertIn("a cached manifest alone has no base RPM diff", md)
+        self.assertIn("older stable records may no longer be there", md)
+
+    def test_equal_unread_rpmdb_does_not_identify_update_backend(self):
+        v = S.verdict_of({"count_a": "?", "count_b": "?", "same_rpmdb": True,
+                          "changed": [], "added": [], "removed": []}, LD, {})
+        self.assertEqual(v["level"], "no-change")
+        self.assertEqual(v["secureblue_notification"]["level"], "unknown")
+
 
 if __name__ == "__main__":
     unittest.main()
