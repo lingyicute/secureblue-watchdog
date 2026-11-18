@@ -5323,17 +5323,19 @@ def cmd_check(args):
     state_lost = False
     state_base_dig = None
     state_base_lbl = None
-    if (not ref_a and state.get("prev_digest") and state["prev_digest"] != cur["digest"]
-            and (state.get("digest") == cur["digest"] or state.get("last_verdict") == "unknown")):
-        # A force re-run or an incomplete check has not established a new
-        # comparison baseline. Keep the last usable one even if the tag has
-        # advanced again, so changes in the inconclusive interval are not lost.
-        state_base_dig = state["prev_digest"]
-        state_base_lbl = clip_text(state.get("prev_label") or state["prev_digest"],
-                                   BASELINE_LABEL_CAP, lang="both")
-    elif not ref_a and state.get("digest") and state["digest"] != cur["digest"]:
-        state_base_dig = state["digest"]
-        state_base_lbl = _state_label(state)
+    if not ref_a:
+        pending = state.get("last_verdict") == "unknown"
+        previous = state.get("prev_digest")
+        if pending or (state.get("digest") == cur["digest"] and previous != cur["digest"]):
+            # An inconclusive target is not a checkpoint. If the tag returned to
+            # the last usable baseline, compare it to itself, not to the failure.
+            state_base_dig = previous
+            if previous:
+                state_base_lbl = clip_text(state.get("prev_label") or previous,
+                                            BASELINE_LABEL_CAP, lang="both")
+        elif state.get("digest") and state["digest"] != cur["digest"]:
+            state_base_dig = state["digest"]
+            state_base_lbl = _state_label(state)
     if state_base_dig:
         # Resolved here, before the baseline is settled: the image analysed last
         # time can be gone by now (registries prune old builds, and a schedule
@@ -5341,7 +5343,7 @@ def cmd_check(args):
         # to end the run before the state was rewritten, so every later run died
         # on the same digest until someone deleted the cache by hand.
         try:
-            prev = resolve(reg, state_base_dig)
+            prev = cur if state_base_dig == cur["digest"] else resolve(reg, state_base_dig)
         except RegistryError as e:
             if e.http_code != 404:
                 raise
