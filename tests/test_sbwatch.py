@@ -3271,7 +3271,7 @@ class TestTagsProbeIncludesToday(unittest.TestCase):
 
 
 class TestMultiArchIndexAnnotations(unittest.TestCase):
-    def test_index_and_descriptor_annotations_survive_light_resolve(self):
+    def test_light_resolve_does_not_mix_in_index_metadata(self):
         import hashlib
         plat = json.dumps({"layers": [], "annotations": {"ostree.linux": "7.2.6"}}).encode()
         idx = json.dumps({
@@ -3288,9 +3288,9 @@ class TestMultiArchIndexAnnotations(unittest.TestCase):
              "Content-Type": "application/vnd.oci.image.index.v1+json"}, idx)
         reg.get = lambda path, accept: plat
         out = reg.resolve("latest", light=True)
-        self.assertEqual(out["annotations"]["org.opencontainers.image.version"], "44.20260917.0")
+        self.assertNotIn("org.opencontainers.image.version", out["annotations"])
         self.assertEqual(out["annotations"]["ostree.linux"], "7.2.6")
-        self.assertEqual(out["created"], "2026-09-17T12:00:00Z")
+        self.assertEqual(out["created"], "")
 
 
 class TestRegistrySplit(unittest.TestCase):

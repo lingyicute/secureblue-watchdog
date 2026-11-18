@@ -61,6 +61,30 @@ class TestResolveManifestAnnotationsPrecedence(unittest.TestCase):
         )
         self.assertEqual(resolved["annotations"]["org.blue-build.build-id"], "build-123")
 
+    def test_resolving_the_platform_through_an_index_keeps_platform_metadata(self):
+        version = "org.opencontainers.image.version"
+        cfg = json.dumps({"architecture": "amd64", "os": "linux", "config": {
+            "Labels": {version: "45.20261117.0"}}}).encode()
+        digest = lambda data: "sha256:" + S.hashlib.sha256(data).hexdigest()
+        platform = json.dumps({"schemaVersion": 2, "config": {"digest": digest(cfg)},
+                               "layers": []}).encode()
+        index = json.dumps({"schemaVersion": 2, "annotations": {version: "other-index-version"},
+                            "manifests": [{"digest": digest(platform),
+                                           "platform": {"os": "linux", "architecture": "amd64"},
+                                           "annotations": {version: "other-descriptor-version"}}]}).encode()
+        from io import BytesIO
+        reg = S.Registry("secureblue/silverblue-main-hardened")
+        for ref, raw in (("latest", index), (digest(platform), platform)):
+            with self.subTest(ref=ref):
+                response = BytesIO(raw)
+                response.headers = {}
+                with patch.object(reg, "_open", return_value=response), patch.object(
+                    reg, "get", side_effect=lambda path, _: platform if path.startswith("manifests/") else cfg,
+                ):
+                    result = reg.resolve(ref)
+                self.assertEqual(result["digest"], digest(platform))
+                self.assertEqual(result["annotations"][version], "45.20261117.0")
+
 
 if __name__ == "__main__":
     unittest.main()

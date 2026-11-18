@@ -194,6 +194,8 @@ python3 sbwatch.py diff 20260916 latest --exact 0
 python3 sbwatch.py diff 20260916 latest --cosign-pub ./cosign.pub --require-cosign
 #    cosign 只对 digest 签名；sbwatch 会对按 digest 取回的 manifest、config 和 rpmdb blob
 #    逐一校验 sha256，内容与 digest 不符即中止，因此「签名通过」覆盖到实际被分析的数据
+#    校验的是平台 manifest。版本等分析元数据只取自该 manifest 或它的 config；不使用
+#    父 index / 平台描述符的注解。签名并不能证明可变 tag 仍指向发布方期望的 digest。
 #    --require-cosign 必须同时指定 --cosign-pub，否则在任何网络请求前报参数错误
 #    history 同样遵守签名选项：启用时逐一校验所有列出的镜像
 
