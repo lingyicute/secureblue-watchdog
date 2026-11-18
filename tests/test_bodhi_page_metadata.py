@@ -37,3 +37,11 @@ class TestBodhiPageMetadata(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(client.failed, 1)
         self.assertEqual(client.truncated_src, {"dnf5"})
+
+    def test_repeated_advisory_with_correct_page_number_is_incomplete(self):
+        first = {"total": 2, "pages": 2, "page": 1, "updates": [{"alias": "one"}]}
+        with tempfile.TemporaryDirectory() as td:
+            client, rows = self.ask([first, dict(first, page=2)], td)
+            self.assertEqual([r["alias"] for r in rows], ["one"])
+            self.assertEqual(client.truncated_src, {"dnf5"})
+            self.assertFalse(list(Path(td).glob("*.json")))

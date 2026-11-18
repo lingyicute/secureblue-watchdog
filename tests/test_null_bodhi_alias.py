@@ -48,7 +48,7 @@ class TestNullBodhiAlias(unittest.TestCase):
         bodhi = S.Bodhi(cache_dir=None, max_calls=1, sleep=0)
         raw = [{"alias": None, "updateid": "FEDORA-2026-fb", "type": "security",
                 "status": "stable", "builds": [{"nvr": "foo-1.2-1.fc45"}]}]
-        bodhi._fetch_page = lambda url, src: ({"total": 1, "updates": raw}, raw)
+        bodhi._fetch_page = lambda url, src, expected_page: ({"total": 1, "updates": raw}, raw)
         self.assertEqual(bodhi.updates_for_src("foo", "F45")[0]["alias"], "FEDORA-2026-fb")
 
 

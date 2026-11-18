@@ -72,7 +72,7 @@ class TestBacklogActualCoverage(unittest.TestCase):
                  {"nvr": "firefox-151.0-1.module", "type": "module"},
              ]},
         ]
-        bodhi._fetch_page = lambda url, src: ({"total": 2, "updates": raw}, raw)
+        bodhi._fetch_page = lambda url, src, expected_page: ({"total": 2, "updates": raw}, raw)
         ups = bodhi.updates_for_src("firefox", "F45")
         self.assertEqual([u["alias"] for u in ups], ["FEDORA-RPM-1"])
         self.assertEqual(ups[0]["nvrs"], ["firefox-150.0-1.fc45"])
@@ -87,7 +87,7 @@ class TestBacklogActualCoverage(unittest.TestCase):
                  for i in range(S.BODHI_PAGE_SIZE)]
         calls = 0
 
-        def fake_fetch(url, src):
+        def fake_fetch(url, src, expected_page):
             nonlocal calls
             calls += 1
             if calls == 1:

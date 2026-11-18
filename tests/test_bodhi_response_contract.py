@@ -10,6 +10,8 @@ from test_sbwatch import S, _FakeResp
 class TestBodhiResponseContract(unittest.TestCase):
     def test_invalid_pages_are_failed_not_cached(self):
         cases = [{"error": "service unavailable"}, {"updates": None},
+                 {"updates": [], "errors": [{"description": "unavailable"}]},
+                 {"updates": [{}]}, {"updates": [{"date_stable": float("nan")}]},
                  {"updates": [{"content_type": 3}]},
                  {"updates": [{"builds": [{"nvr": None, "type": 3}]}]},
                  {"updates": [{"bugs": {"title": "not a list"}}]}]

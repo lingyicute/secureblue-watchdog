@@ -127,9 +127,7 @@ BASELINE_LABEL_CAP = 80  # characters of a baseline label read back from the sta
 #                          former 26 cut check's own label and appended a 40-character
 #                          marker to it - once more on every --force run.
 PKGLIST_CACHE_VERSION = 5  # RPM header type, size and changelog coverage validation
-BODHI_CACHE_VERSION = 5  # v1 clipped bug titles (200) and notes (1500) BEFORE
-#                          extracting CVE ids from them, so a v1 cache can be
-#                          missing CVEs. A cache without this marker is refetched.
+BODHI_CACHE_VERSION = 6  # v5 could cache a repeated, apparently complete page
 OLD_LOG_CAP = 1000  # changelog entries (dropped by this build) scanned for lost fixes
 RETAINED_LOG_CAP = 1000  # unchanged entries that may still mention a purportedly gained/lost CVE
 TAG_LIST_RETRIES = 4                        # ghcr is flaky on tags/list pagination
@@ -1567,6 +1565,19 @@ class Bodhi:
                 # one request; trusting it costs a wrong verdict.
                 if data.get("cache_version") != BODHI_CACHE_VERSION:
                     return None
+                if type(data.get("truncated")) is not bool or any(
+                        not isinstance(u, dict) or not isinstance(u.get("nvrs"), list)
+                        or not isinstance(u.get("cves"), list)
+                        or not isinstance(u.get("build_epochs"), dict)
+                        or any(u.get(k) is not None and not isinstance(u[k], str)
+                               for k in ("alias", "type", "status", "severity", "title", "notes"))
+                        or not isinstance(u.get("bugs", []), list)
+                        or any(not isinstance(b, dict) or not isinstance(b.get("title"), str)
+                               for b in u.get("bugs", []))
+                        or any(n is not None and not isinstance(n, str) for n in u["nvrs"])
+                        or any(not isinstance(c, str) for c in u["cves"])
+                        for u in data["updates"]):
+                    return None
                 return data
             return None
         except Exception as e:
@@ -1578,7 +1589,7 @@ class Bodhi:
                 pass
             return None
 
-    def _fetch_page(self, url: str, src: str) -> tuple:
+    def _fetch_page(self, url: str, src: str, expected_page: int) -> tuple:
         """One page of /updates/ as (document, updates), validated.
 
         A failure out of the blue gets a second try. Bodhi takes 20 s for some
@@ -1600,16 +1611,23 @@ class Bodhi:
                     if len(raw) > MAX_JSON_BYTES:
                         raise ValueError(f"Bodhi response exceeds {human(MAX_JSON_BYTES)}")
                     data = json.loads(raw)
-                if not isinstance(data, dict):
-                    raise ValueError("Bodhi response is not a JSON object")
+                if not isinstance(data, dict) or data.get("error") or data.get("errors"):
+                    raise ValueError("Bodhi response is not a successful update collection")
+                for field in ("pages", "page", "total"):
+                    if field in data and (type(data[field]) is not int or data[field] < 0):
+                        raise ValueError(f"invalid Bodhi pagination field: {field}")
+                if data.get("page", expected_page) != expected_page:
+                    raise ValueError(f"Bodhi returned page {data['page']} instead of {expected_page}")
                 page_ups = data.get("updates")
                 if not isinstance(page_ups, list) or any(not isinstance(u, dict) for u in page_ups):
                     raise ValueError("Bodhi updates must be a list of JSON objects")
                 # Validate consumed fields inside the retry/error boundary. An
                 # error document is not a successful query with zero matches.
                 for u in page_ups:
+                    if not u:
+                        raise ValueError("empty Bodhi update record")
                     for k in ("alias", "updateid", "type", "status", "severity", "content_type",
-                              "title", "notes"):
+                              "title", "notes", "date_approved", "date_stable"):
                         if u.get(k) is not None and not isinstance(u[k], str):
                             raise ValueError(f"invalid Bodhi update field: {k}")
                     for k, fields in (("builds", ("nvr", "type")), ("bugs", ("title",))):
@@ -1649,7 +1667,11 @@ class Bodhi:
             ent = self._mem[key]
             return ent["updates"] if isinstance(ent, dict) else ent
         cf = self._cf(key)
-        if cf and os.path.exists(cf) and time.time() - os.path.getmtime(cf) < self.ttl:
+        try:
+            fresh = cf and time.time() - os.path.getmtime(cf) < self.ttl
+        except OSError:
+            fresh = False
+        if fresh:
             cached = self._read_cache_entry(cf)
             if cached is not None:
                 self._mem[key] = cached
@@ -1675,6 +1697,8 @@ class Bodhi:
         truncated = False
         budget_cut = False
         received = 0  # total counts all content types, not just the RPMs we keep
+        seen_aliases = set()
+        page_count = None
         inconsistent = False
         ok = False
         for page in range(1, MAX_BODHI_PAGES + 1):
@@ -1692,12 +1716,7 @@ class Bodhi:
                 {"packages": src, "releases": release,
                  "rows_per_page": str(BODHI_PAGE_SIZE), "page": str(page)})
             try:
-                data, page_ups = self._fetch_page(url, src)
-                for field in ("pages", "page", "total"):
-                    if field in data and (type(data[field]) is not int or data[field] < 0):
-                        raise ValueError(f"invalid Bodhi pagination field: {field}")
-                if data.get("page", page) != page:
-                    raise ValueError(f"Bodhi returned page {data['page']} instead of {page}")
+                data, page_ups = self._fetch_page(url, src, page)
             except Exception as ex:
                 self.failed += 1
                 log(T(f"  ! bodhi lookup failed for {src} (page {page}): {ex}",
@@ -1716,8 +1735,20 @@ class Bodhi:
                 break
             ok = True
             self._streak = 0
+            pages = data.get("pages")
+            if ((total is not None and data.get("total", total) != total)
+                    or (page_count is not None and pages is not None and pages != page_count)):
+                inconsistent = True
             total = data.get("total", total)
+            if pages is not None:
+                page_count = pages
             for u in page_ups:
+                alias = u.get("alias") or u.get("updateid")
+                if alias:
+                    if alias in seen_aliases:
+                        inconsistent = True
+                        continue
+                    seen_aliases.add(alias)
                 ctype = (u.get("content_type") or "").strip().lower()
                 if ctype and ctype != "rpm":
                     continue
@@ -1752,9 +1783,8 @@ class Bodhi:
                              and (b.get("type") or "rpm").lower() == "rpm"],
                 })
             received += len(page_ups)
-            pages = data.get("pages")
-            if pages is not None:
-                more = page < pages
+            if page_count is not None:
+                more = page < page_count
             elif total is not None:
                 more = received < total
             else:
@@ -1774,6 +1804,10 @@ class Bodhi:
                       f"（MAX_BODHI_PAGES={MAX_BODHI_PAGES}）——该包的审计不完整"))
                 break
             time.sleep(self.sleep)
+        if inconsistent and not truncated:
+            truncated = True
+            log(T(f"  ! Bodhi pagination shifted while reading {src}; audit is incomplete",
+                  f"  ！读取 {src} 时 Bodhi 分页发生变化，审计不完整"))
         if truncated:
             self.truncated_src.add(src)
         # never cache a failed query: an empty answer would blind later runs. A

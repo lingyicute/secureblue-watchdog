@@ -590,7 +590,7 @@ class TestBodhiCache(unittest.TestCase):
             b = S.Bodhi(cache_dir=d, max_calls=0)
             cf = b._cf("rpm-F44")
             with open(cf, "w") as fh:
-                json.dump([{"alias": "FEDORA-2026-1"}], fh)
+                json.dump([{"alias": "FEDORA-2026-1", "nvrs": [], "cves": [], "build_epochs": {}}], fh)
             self.assertIsNone(b._read_cache_entry(cf))
             self.assertEqual(b.updates_for_src("rpm", "F44"), [])
             self.assertEqual(b.skipped, 1)
@@ -602,9 +602,10 @@ class TestBodhiCache(unittest.TestCase):
             with open(cf, "w") as fh:
                 json.dump({"cache_version": S.BODHI_CACHE_VERSION, "total": 1,
                            "truncated": False,
-                           "updates": [{"alias": "FEDORA-2026-1"}]}, fh)
+                           "updates": [{"alias": "FEDORA-2026-1", "nvrs": [], "cves": [],
+                                        "build_epochs": {}}]}, fh)
             self.assertEqual(b.updates_for_src("rpm", "F44"),
-                             [{"alias": "FEDORA-2026-1"}])
+                             [{"alias": "FEDORA-2026-1", "nvrs": [], "cves": [], "build_epochs": {}}])
             self.assertEqual(b.truncated_src, set())
 
     def test_cache_without_the_version_marker_is_refetched_not_trusted(self):
@@ -641,7 +642,7 @@ class TestBodhiCache(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             b = S.Bodhi(cache_dir=d, max_calls=0)      # 0 calls => provably offline
             cf = b._cf("kernel-F44")
-            payload = [{"alias": "FEDORA-2026-1"}]
+            payload = [{"alias": "FEDORA-2026-1", "nvrs": [], "cves": [], "build_epochs": {}}]
             with open(cf, "w") as fh:
                 json.dump({"cache_version": S.BODHI_CACHE_VERSION, "total": 1,
                            "truncated": False, "updates": payload}, fh)
