@@ -96,6 +96,16 @@ class TestPassedOverErrata(unittest.TestCase):
         self.assertFalse(info["security"])
         self.assertEqual(info["passed_over"], [])
 
+    def test_an_old_branch_build_is_not_crossed_by_a_rebase(self):
+        old = rpm("bluez", "5.87", "1.fc44")
+        new = rpm("bluez", "5.88", "1.fc45")
+        self.assertIsNone(S._passed_build(old, new, ["bluez-5.87-2.fc44"]))
+
+    def test_a_binary_transferred_between_sources_has_no_common_range(self):
+        old = rpm("shared-lib", "1", "1.fc45", src="old-source")
+        new = rpm("shared-lib", "3", "1.fc45", src="new-source")
+        self.assertIsNone(S._passed_build(old, new, ["new-source-2-1.fc45"]))
+
     def test_the_verdict_rises_while_the_notification_prediction_does_not(self):
         info = classify([erratum("FEDORA-2026-mid", "curl-8.9.1-1.fc45", severity="urgent")])
         changed = [{"name": "curl", "old": OLD, "new": NEW, "src": "curl",

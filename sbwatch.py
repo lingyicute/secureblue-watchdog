@@ -1933,6 +1933,9 @@ def _passed_build(old: dict, new: dict, nvrs, epochs=None) -> str | None:
     """
     old_dist = _dist_tag(old.get("release"))
     new_dist = _dist_tag(new.get("release"))
+    # Numeric ordering is meaningful only within the same source lineage.
+    if old.get("src") != new.get("src") or old_dist != new_dist:
+        return None
     for b in nvrs or []:
         parts = (b or "").rsplit("-", 2)
         if len(parts) != 3:
@@ -1942,7 +1945,7 @@ def _passed_build(old: dict, new: dict, nvrs, epochs=None) -> str | None:
         if bn != new["name"] and bn != new.get("src"):
             continue
         # Packages like shim and fedora-release carry no .fcNN tag on any side.
-        if _dist_tag(br) != old_dist or (not old_dist and new_dist):
+        if _dist_tag(br) != old_dist:
             continue
         by_src = bn != new["name"]
         epoch = (epochs or {}).get(b)
