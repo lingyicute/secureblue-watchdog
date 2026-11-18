@@ -5262,60 +5262,62 @@ def cmd_check(args):
         else:
             ref_a = state_base_dig
             label_a = state_base_lbl
+    cur_time = _image_order(cur)
+    stream_maj = _stream_major(args.to, cur)
+
+    def is_earlier_candidate(candidate):
+        build_time = _image_order(candidate)
+        version = str((candidate.get("annotations") or {}).get("org.opencontainers.image.version") or "")
+        return (candidate.get("digest") != cur["digest"]
+                and bool(build_time and cur_time and build_time < cur_time)
+                and (not stream_maj or version.startswith(stream_maj + "."))
+                and (rpmdb_chunk(cur) is None or rpmdb_chunk(candidate) is not None))
+
+    def read_candidate(ref):
+        try:
+            return resolve(reg, ref)
+        except RegistryError as e:
+            if e.http_code != 404:
+                reason = e.http_code or type(e).__name__
+                hist_warnings.append(T(f"could not read candidate baseline {shortref(ref)} ({reason})",
+                                       f"无法读取候选基线 {shortref(ref)}（{reason}）"))
+            return None
+
     if not ref_a and hist:
-        # build_history rows carry the *index* digest in "digest"; comparing that
-        # against cur["digest"] (the platform digest) never matched, so the current
-        # build was never skipped and the baseline silently became the image itself -
-        # a first run then reported "no-change" with a 0-byte download.
-        for r in hist:
-            pd = r.get("platform_digest") or r["digest"]
-            if pd != cur["digest"] and (_image_order(r.get("image") or r) or "9") <= (_image_order(cur) or "9"):
-                ref_a = pd
-                # the state file's label rule: a light resolve reads annotations
-                # only, and a build without the version one was titled `None @ ...`
-                label_a = _state_label(dict(r, digest=pd))
-                break
-    if not ref_a:
-        cur_time = _image_order(cur)
+        # History is a light scan: that row guarantees neither a readable config
+        # nor the same creation time as a full resolution of the OCI image.
+        for row in hist:
+            pd = row.get("platform_digest") or row["digest"]
+            if pd == cur["digest"]:
+                continue
+            candidate = read_candidate(pd)
+            if not candidate or not is_earlier_candidate(candidate):
+                continue
+            ref_a, label_a, prev = pd, _state_label(dict(row, digest=pd)), candidate
+            break
+    if not ref_a and cur_time:
         try:
             anchor = datetime.date.fromisoformat(cur_time[:10])
         except ValueError:
             anchor = datetime.datetime.now(datetime.timezone.utc).date()
-        stream_maj = _stream_major(args.to, cur)
         for i in range(22):
             day = (anchor - datetime.timedelta(days=i)).strftime("%Y%m%d")
             probe_tags = [day, f"{day}-{stream_maj}"] if stream_maj else [day]
-            for d in probe_tags:
-                dig = tag_exists(reg, d, warn=hist_warnings)
-                if not dig:
+            candidates = []
+            for tag in probe_tags:
+                dig = tag_exists(reg, tag, warn=hist_warnings)
+                if not dig or dig == cur.get("index_digest"):
                     continue
-                if dig == cur.get("index_digest"):
+                candidate = read_candidate(tag)
+                if candidate and candidate.get("index_digest") != dig:
+                    hist_warnings.append(T(f"candidate tag {tag} moved during the baseline probe; ignored",
+                                           f"基线探测期间标签 {tag} 已移动，已忽略"))
                     continue
-                try:
-                    cand = resolve(reg, d)
-                except (NoArchManifest, MalformedManifest):
-                    continue
-                except RegistryError as e:
-                    if e.http_code != 404:
-                        hist_warnings.append(T(
-                            f"could not read candidate baseline tag {d} "
-                            f"({e.http_code or 'network error'})",
-                            f"无法读取候选基线标签 {d}（{e.http_code or 'network error'}）"))
-                    continue
-                cand_ver = str((cand.get("annotations") or {}).get(
-                    "org.opencontainers.image.version") or "")
-                if stream_maj and not cand_ver.startswith(stream_maj + "."):
-                    continue
-                if cand.get("digest") == cur["digest"]:
-                    continue
-                if rpmdb_chunk(cur) is not None and rpmdb_chunk(cand) is None:
-                    continue
-                cand_time = _image_order(cand)
-                if cur_time and (not cand_time or cand_time > cur_time):
-                    continue
-                ref_a, label_a, prev = d, d, cand
-                break
-            if ref_a:
+                if candidate and is_earlier_candidate(candidate):
+                    candidates.append((tag, candidate))
+            if candidates:
+                ref_a, prev = max(candidates, key=lambda pair: _image_order(pair[1]))
+                label_a = ref_a
                 break
     if not ref_a:
         msg = T(f"new build ({ver}) but no earlier image available to diff against",
