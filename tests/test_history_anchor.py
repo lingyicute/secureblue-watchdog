@@ -34,3 +34,20 @@ class TestHistoryAnchor(unittest.TestCase):
             rows = S.build_history(None, scan=2, days=0, to='20261114', cur=target)
         self.assertEqual([row['digest'] for row in rows],
                          [target['digest'], old['digest']])
+
+
+class TestHistoryAtDigest(unittest.TestCase):
+    def test_watched_stream_can_be_named_without_re_resolving_tag(self):
+        from unittest.mock import patch
+        digest = "sha256:" + "a" * 64
+        img = {"digest": digest, "index_digest": digest, "annotations": {}}
+        row = {"digest": digest, "tags": ["44"], "version": "44.20261104.0",
+               "inputhash": None, "kernel": None, "image": img}
+        with (patch.object(S.Registry, "_token", return_value=None),
+              patch.object(S, "resolve", return_value=img) as resolver,
+              patch.object(S, "build_history", return_value=[row]) as history,
+              patch("builtins.print")):
+            self.assertEqual(S.main(["history", "--to", "44", "--at-digest", digest]), 0)
+        self.assertEqual([c.args[1] for c in resolver.call_args_list], [digest])
+        self.assertEqual(history.call_args.kwargs["to"], "44")
+        self.assertIs(history.call_args.kwargs["cur"], img)

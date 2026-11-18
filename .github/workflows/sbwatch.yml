@@ -182,13 +182,15 @@ jobs:
 
       - name: Append build history (several pushes a day share one version string)
         if: steps.check.outputs.verdict != 'no-update' && steps.check.outputs.verdict != 'no-change' && steps.check.outputs.verdict != '' && steps.check.outputs.verdict != 'unknown'
+        env:
+          WATCHED_INDEX: ${{ steps.check.outputs.watched_index_digest }}
         run: |
           {
             echo ""
-            echo "## Builds in this repo, newest last"
+            echo "## Builds through the watched snapshot, newest last"
             echo '```'
             python3 sbwatch.py history --image "$SB_IMAGE" --arch "$SB_ARCH" \
-              --scan 10 --days 7 2>&1 || echo "(history scan failed)"
+              --at-digest "$WATCHED_INDEX" --scan 10 --days 7 2>&1 || echo "(history scan failed)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

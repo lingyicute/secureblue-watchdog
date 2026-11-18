@@ -4387,8 +4387,10 @@ def cmd_history(args):
     reg = _registry(args)
     reg._token()
     hist_warnings: list = []
+    snapshot = getattr(args, "at_digest", None)
+    cur = resolve(reg, snapshot) if snapshot else None
     rows = build_history(reg, scan=args.scan, days=args.days, to=args.to,
-                         warn=hist_warnings)
+                         warn=hist_warnings, cur=cur)
     # The shared signature options apply to history too, not just to diff/check.
     if getattr(args, "cosign_pub", None) or getattr(args, "require_cosign", False):
         for row in rows:
@@ -5608,6 +5610,8 @@ def main(argv=None):
     p.add_argument("--days", type=int, default=7,
                    help="also resolve this many dated tags to label rows (0 = off) / "
                         "同时解析这么多天的日期标签来标注行（0 = 关闭）")
+    p.add_argument("--at-digest", help="anchor the history at this resolved top-level sha256 digest "
+                   "instead of re-reading --to / 用已解析的顶层 sha256 摘要定位历史，而不重新读取 --to")
     p.set_defaults(func=cmd_history)
 
     p = sub.add_parser("check", help="stateful digest watch (for CI/cron) / 有状态 digest 监控（用于 CI/cron）")
@@ -5647,6 +5651,9 @@ def main(argv=None):
     p.set_defaults(func=cmd_check)
 
     args = ap.parse_args(argv)
+    if args.cmd == "history" and args.at_digest is not None:
+        if not _clean_sha256_header(args.at_digest) or args.at_digest != args.at_digest.strip():
+            ap.error(T("--at-digest requires sha256:<64 hex>", "--at-digest 需要 sha256:<64 位十六进制>"))
     if args.backlog_candidates is not None and args.backlog_candidates < 1:
         ap.error(T("--backlog-candidates must be positive", "--backlog-candidates 必须为正数"))
     if args.cmd == "backlog" and args.no_bodhi:
