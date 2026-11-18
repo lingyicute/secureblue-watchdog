@@ -1903,31 +1903,19 @@ def nvr_candidates_split(pkg: dict) -> tuple:
       `%define buildid .secureblue.N`) - but rpm-ostree never attaches the
       advisory to this package, so it must not feed the notification prediction.
 
-    Name spellings: Bodhi lists errata builds by their *source* build NVR, while
-    the image only exposes *binary* NEVRAs. 246 of the live image's 1107 source
-    packages have no same-named binary (shim -> shim-x64/shim-ia32, webkitgtk ->
-    webkit2gtk4.1, krb5 -> krb5-libs, grub2, bind, git, dnf, python3.14, ...), and
-    every binary in a koji build shares the source build's EVR, so
-    `{src}-{version}-{release}` is a valid additional spelling. secureblue's own
-    packages (trivalent, brew-proxy, no_rlimit_as, run0edit, homebrew, crane, ...)
-    carry no dist tag and have no Fedora counterpart at all - correctly, no
-    spelling of theirs ever matches.
+    Bodhi lists Koji source builds, not binary NEVRAs. A binary can have a
+    different EVR from its source (e.g. nspr from nss), and a multi-build
+    advisory can contain an unrelated source with the binary's name. Prefer
+    the installed SRPM identity, not an extra candidate made from the binary.
+    Even an exact source match is only a candidate for the desktop rule:
+    rpm-ostree needs a matching binary NEVRA in local rpm-md.
     """
-    bin_evr = f"{pkg['version']}-{pkg['release']}"
-    exact = [f"{pkg['name']}-{bin_evr}"]
-    normalised = []
-    stripped = re.sub(r"\.secureblue\.\d+", "", pkg["release"])
-    if stripped != pkg["release"]:
-        normalised.append(f"{pkg['name']}-{pkg['version']}-{stripped}")
-    src = pkg.get("src")
-    if src:
-        bevr = _build_evr(pkg)
-        src_evr = bevr if (bevr and bevr != "?") else bin_evr
-        exact.append(f"{src}-{src_evr}")
-        bstripped = re.sub(r"\.secureblue\.\d+", "", src_evr)
-        if bstripped != src_evr:
-            normalised.append(f"{src}-{bstripped}")
-    return list(dict.fromkeys(exact)), list(dict.fromkeys(normalised))
+    src = pkg.get("src") or pkg["name"]
+    src_evr = _build_evr(pkg)
+    if not src_evr or src_evr == "?":
+        src_evr = f"{pkg['version']}-{pkg['release']}"
+    stripped = re.sub(r"\.secureblue\.\d+", "", src_evr)
+    return [f"{src}-{src_evr}"], ([f"{src}-{stripped}"] if stripped != src_evr else [])
 
 
 def nvr_candidates(pkg: dict) -> list:
@@ -1991,8 +1979,8 @@ def _passed_build(old: dict, new: dict, nvrs, epochs=None) -> str | None:
     `bluez-5.87-1.fc44` compared as behind `bluez-5.87-1.fc45` - its twin on the
     other branch, whose fix it already has.
     """
-    old_dist = _dist_tag(old.get("release"))
-    new_dist = _dist_tag(new.get("release"))
+    old_dist = _dist_tag(_build_evr(old).rpartition("-")[2])
+    new_dist = _dist_tag(_build_evr(new).rpartition("-")[2])
     # Numeric ordering is meaningful only within the same source lineage.
     if old.get("src") != new.get("src") or old_dist != new_dist:
         return None
@@ -2001,16 +1989,14 @@ def _passed_build(old: dict, new: dict, nvrs, epochs=None) -> str | None:
         if len(parts) != 3:
             continue
         bn, bv, br = parts
-        # Bodhi names the source build; accept it for this binary or its source
-        if bn != new["name"] and bn != new.get("src"):
+        if bn != (new.get("src") or new["name"]):
             continue
         # Packages like shim and fedora-release carry no .fcNN tag on any side.
         if _dist_tag(br) != old_dist:
             continue
-        by_src = bn != new["name"]
         epoch = (epochs or {}).get(b)
-        if (_is_behind(old, bv, br, use_build_evr=by_src, candidate_epoch=epoch)
-                and not _is_behind(new, bv, br, use_build_evr=by_src, candidate_epoch=epoch)):
+        if (_is_behind(old, bv, br, use_build_evr=True, candidate_epoch=epoch)
+                and not _is_behind(new, bv, br, use_build_evr=True, candidate_epoch=epoch)):
             return b
     return None
 
@@ -4046,18 +4032,14 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
                     if len(parts) != 3:
                         continue
                     bn, bv, br = parts
-                    # Bodhi lists the *source* build NVR; accept it when it names
-                    # either this binary package or its source (exact names, not
-                    # prefixes). Source matching is what makes shim/webkitgtk/
-                    # krb5/grub2/bind/... visible at all - their binaries never
-                    # share the source name (246 of 1107 live sources).
-                    if bn != n and bn != p["src"]:
+                    # Compare builds only within their source lineage.
+                    if bn != src:
                         continue
                     cand = {"name": n, "version": bv, "release": br}
                     epoch = (u.get("build_epochs") or {}).get(b)
                     if epoch is not None:
                         cand["epoch"] = str(epoch)
-                    if _is_behind(p, bv, br, use_build_evr=(bn != n), candidate_epoch=epoch) and (
+                    if _is_behind(p, bv, br, use_build_evr=True, candidate_epoch=epoch) and (
                             best is None or evr_cmp(best, cand) < 0):
                         best = cand
                 if best is None:
@@ -4068,7 +4050,7 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
 
                 build = {
                     "name": n,
-                    "have": with_epoch(_build_evr(p) if n != src else p["evr"], have_epoch),
+                    "have": with_epoch(_build_evr(p), have_epoch),
                     "want": with_epoch(f"{best['version']}-{best['release']}", want_epoch),
                     "have_epoch": have_epoch, "want_epoch": want_epoch,
                     "alias": u["alias"], "notes": u.get("notes") or "",

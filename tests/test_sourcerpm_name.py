@@ -40,7 +40,7 @@ class TestSourceRpmName(unittest.TestCase):
         nspr = {"name": "nspr", "version": "4.39.0", "release": "10.fc45",
                 "evr": "4.39.0-10.fc45", "src": "nss", "srpm": "nss-3.133.0-1.fc45"}
         exact, norm = S.nvr_candidates_split(nspr)
-        self.assertEqual(exact, ["nspr-4.39.0-10.fc45", "nss-3.133.0-1.fc45"])
+        self.assertEqual(exact, ["nss-3.133.0-1.fc45"])
         self.assertNotIn("nss-4.39.0-10.fc45", exact)
         self.assertEqual(norm, [])
 

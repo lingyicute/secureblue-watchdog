@@ -344,14 +344,14 @@ class TestClassifyChange(unittest.TestCase):
         # spelling must also be offered.
         cands = set(S.nvr_candidates(pkg("shim-x64", "16.1-5", src="shim")))
         self.assertIn("shim-16.1-5", cands)         # what Bodhi actually lists
-        self.assertIn("shim-x64-16.1-5", cands)     # binary spelling kept
+        self.assertNotIn("shim-x64-16.1-5", cands)  # not a Koji source build
         cands = set(S.nvr_candidates(pkg("webkitgtk6.0", "2.50.1-1.fc44", src="webkitgtk")))
         self.assertIn("webkitgtk-2.50.1-1.fc44", cands)
         # ... and the source spelling also gets the secureblue marker stripped
         cands = set(S.nvr_candidates(
             pkg("kernel-core", "7.2.5-200.secureblue.1.fc44", src="kernel")))
         self.assertIn("kernel-7.2.5-200.fc44", cands)
-        self.assertIn("kernel-core-7.2.5-200.secureblue.1.fc44", cands)
+        self.assertIn("kernel-7.2.5-200.secureblue.1.fc44", cands)
 
     def test_shim_erratum_is_classified_security(self):
         # end-to-end through classify_change with the live shim data: Fedora
