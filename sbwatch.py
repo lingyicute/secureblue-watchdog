@@ -5262,7 +5262,10 @@ def cmd_check(args):
     # and homebrew 7.0.2-26091605 -> 7.0.6-26092310, yet share inputhash
     # 4fde5b5a8c4f..., ostree.commit 4df81387..., ostree.linux and final-diffid.
     # Both annotations describe Fedora's compose, not secureblue's build.
-    if args.fast and not args.force:
+    # Equal inventories prove there is no version delta, not that Fedora has
+    # published no outstanding updates. The exact path reads a shared DB once.
+    wants_backlog = getattr(args, "audit", False) and not getattr(args, "no_bodhi", False)
+    if args.fast and not args.force and not wants_backlog:
         ra, rb = rpmdb_chunk(prev), rpmdb_chunk(cur)
         if ra and rb and ra["digest"] == rb["digest"]:
             log(T("  rpmdb chunk digest identical -> manifest-only comparison "

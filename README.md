@@ -262,8 +262,8 @@ manifest-only 模式只读 manifest，**没有任何软件包版本被读过**�
 
 ### `check --fast` 与 manifest-only
 
-`check` 默认带 `--fast`：当**两个镜像的 rpmdb chunk digest 相同**时，跳过 33MB 拉取、
-自动降级为 manifest-only。这是安全的——rpmdb.sqlite 逐字节相同 ⟹ 包集合必然没变。
+`check` 默认带 `--fast`：当**两个镜像的 rpmdb chunk digest 相同**且不需要 backlog 审计时，跳过 33MB 拉取、
+自动降级为 manifest-only。默认开启 backlog 审计时只读取一次共享包表：相同的 rpmdb 并不代表 Fedora 没有新发布的勘误。这是安全的——rpmdb.sqlite 逐字节相同 ⟹ 包集合必然没变。
 
 > [!important]
 > 早期版本用 `rpmostree.inputhash` 相同作为跳过依据，那是错的（见上文）。实测最近
