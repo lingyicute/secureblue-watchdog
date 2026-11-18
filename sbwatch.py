@@ -2651,7 +2651,8 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
          "secureblue_notification": sbn, "silent_rebuilds": [n for n, _ in silent],
          "silent_important": silent_key, "non_package_bytes": xc.get("non_package_bytes", 0),
          "download_human": human(ldiff["download_bytes"]),
-         "backlog_count": len(backlog or [])}
+         "backlog_audited": backlog is not None,
+         "backlog_count": len(backlog) if backlog is not None else None}
     same_input = bool(meta.get("inputhash_a")) and meta["inputhash_a"] == meta.get("inputhash_b")
     same_commit = bool(meta.get("commit_a")) and meta["commit_a"] == meta.get("commit_b")
     v["same_inputhash"] = same_input
@@ -4875,8 +4876,7 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
             if n in pa:
                 src_of[n] = pa[n]["src"]
     xc = crosscheck_chunks(ld, diff, src_of)
-    backlog, coverage = [], {"candidates": 0, "checked": 0, "skipped": 0, "failed": 0,
-                             "skipped_names": [], "pool_missing": [], "pool_size": 0}
+    backlog, coverage = [], None
     if getattr(args, "audit", False) and bodhi is not None:
         # Same Bodhi object as the diff classification above: one shared
         # --max-bodhi budget (an earlier revision quietly spent a *second*,
@@ -4897,7 +4897,7 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
     # One aggregation per run: the verdict and both halves of the report all read
     # the same source-package groups.
     groups = group_by_src(diff["changed"])
-    v = verdict_of(diff, ld, meta, xc, backlog, bstate, groups)
+    v = verdict_of(diff, ld, meta, xc, backlog if coverage is not None else None, bstate, groups)
     # `backlog` is always a list, so test what decides whether the audit ran:
     # without Bodhi (--no-bodhi, unknown release) there is no coverage to report,
     # and "0 of 0 candidate source packages were queried" read as nothing to do.

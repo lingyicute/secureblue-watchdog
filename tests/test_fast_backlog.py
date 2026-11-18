@@ -38,3 +38,10 @@ class TestFastBacklog(unittest.TestCase):
         result, reads, calls = self._run('--no-audit')
         self.assertEqual((reads, calls), (0, 0))
         self.assertEqual(result['verdict']['level'], 'no-change')
+
+    def test_no_bodhi_is_not_an_empty_successful_audit(self):
+        result, _, calls = self._run('--no-fast', '--no-bodhi')
+        self.assertEqual(calls, 0)
+        self.assertIsNone(result['backlog_coverage'])
+        self.assertFalse(result['verdict']['backlog_audited'])
+        self.assertIsNone(result['verdict']['backlog_count'])
