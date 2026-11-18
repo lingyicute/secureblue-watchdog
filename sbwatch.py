@@ -127,7 +127,7 @@ BASELINE_LABEL_CAP = 80  # characters of a baseline label read back from the sta
 #                          former 26 cut check's own label and appended a 40-character
 #                          marker to it - once more on every --force run.
 PKGLIST_CACHE_VERSION = 3  # older entries missed undecodable fields and incomplete identities
-BODHI_CACHE_VERSION = 3  # v1 clipped bug titles (200) and notes (1500) BEFORE
+BODHI_CACHE_VERSION = 4  # v1 clipped bug titles (200) and notes (1500) BEFORE
 #                          extracting CVE ids from them, so a v1 cache can be
 #                          missing CVEs. A cache without this marker is refetched.
 OLD_LOG_CAP = 1000  # changelog entries (dropped by this build) scanned for lost fixes
@@ -1676,6 +1676,8 @@ class Bodhi:
         total = None
         truncated = False
         budget_cut = False
+        received = 0  # total counts all content types, not just the RPMs we keep
+        inconsistent = False
         ok = False
         for page in range(1, MAX_BODHI_PAGES + 1):
             if page > 1 and self.calls >= self.max_calls:
@@ -1693,6 +1695,11 @@ class Bodhi:
                  "rows_per_page": str(BODHI_PAGE_SIZE), "page": str(page)})
             try:
                 data, page_ups = self._fetch_page(url, src)
+                for field in ("pages", "page", "total"):
+                    if field in data and (type(data[field]) is not int or data[field] < 0):
+                        raise ValueError(f"invalid Bodhi pagination field: {field}")
+                if data.get("page", page) != page:
+                    raise ValueError(f"Bodhi returned page {data['page']} instead of {page}")
             except Exception as ex:
                 self.failed += 1
                 log(T(f"  ! bodhi lookup failed for {src} (page {page}): {ex}",
@@ -1743,9 +1750,19 @@ class Bodhi:
                              if isinstance(b, dict)
                              and (b.get("type") or "rpm").lower() == "rpm"],
                 })
-            if len(page_ups) < BODHI_PAGE_SIZE:
-                break                       # last page
-            if isinstance(total, int) and len(res) >= total:
+            received += len(page_ups)
+            pages = data.get("pages")
+            if pages is not None:
+                more = page < pages
+            elif total is not None:
+                more = received < total
+            else:
+                more = len(page_ups) == BODHI_PAGE_SIZE
+            if not more or not page_ups:
+                if more or (total is not None and received != total):
+                    truncated = inconsistent = True
+                    log(T(f"  ! incomplete Bodhi result for {src}: read {received} of {total}",
+                          f"  ！{src} 的 Bodhi 结果不完整：已读 {received} 条，总数为 {total}"))
                 break
             if page == MAX_BODHI_PAGES:
                 truncated = True
@@ -1760,7 +1777,7 @@ class Bodhi:
             self.truncated_src.add(src)
         # never cache a failed query: an empty answer would blind later runs. A
         # budget-cut one is not cached either - the next run may have the budget.
-        if cf and ok and not budget_cut:
+        if cf and ok and not budget_cut and not inconsistent:
             _cache_write(cf, {"cache_version": BODHI_CACHE_VERSION,
                               "total": total, "truncated": truncated,
                               "updates": res}, "Bodhi")
