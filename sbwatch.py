@@ -126,8 +126,8 @@ BASELINE_LABEL_CAP = 80  # characters of a baseline label read back from the sta
 #                          whole digest (71), which shortref() then abbreviates. The
 #                          former 26 cut check's own label and appended a 40-character
 #                          marker to it - once more on every --force run.
-PKGLIST_CACHE_VERSION = 3  # older entries missed undecodable fields and incomplete identities
-BODHI_CACHE_VERSION = 4  # v1 clipped bug titles (200) and notes (1500) BEFORE
+PKGLIST_CACHE_VERSION = 4  # source_epoch is derived from the matching installed main RPM
+BODHI_CACHE_VERSION = 5  # v1 clipped bug titles (200) and notes (1500) BEFORE
 #                          extracting CVE ids from them, so a v1 cache can be
 #                          missing CVEs. A cache without this marker is refetched.
 OLD_LOG_CAP = 1000  # changelog entries (dropped by this build) scanned for lost fixes
@@ -1506,6 +1506,12 @@ def package_list(reg: Registry, resolved: dict) -> dict:
             os.unlink(path)
         except OSError:
             pass
+    # A subpackage may declare a different epoch. When the source's main
+    # binary is installed from the same SRPM, use its epoch, not the subpackage's.
+    for pkg in pkgs.values():
+        main = pkgs.get(pkg["src"])
+        if main and pkg["srpm"] and main["nvr"] == main["srpm"] == pkg["srpm"]:
+            pkg["source_epoch"] = _epoch(main)
     pkgs.headers_rejected = stats.get("headers_rejected", 0)
     pkgs.fields_skipped = stats.get("fields_skipped", 0)
     return pkgs
@@ -1746,6 +1752,9 @@ class Bodhi:
                     "bugs": bugs,
                     "date_approved": u.get("date_approved"),
                     "date_stable": u.get("date_stable"),
+                    "build_epochs": {b["nvr"]: str(b["epoch"]) for b in u.get("builds") or []
+                                     if b.get("nvr") and (b.get("type") or "rpm").lower() == "rpm"
+                                     and str(b.get("epoch")).isascii() and str(b.get("epoch")).isdigit()},
                     "nvrs": [b.get("nvr") for b in (u.get("builds") or [])
                              if isinstance(b, dict)
                              and (b.get("type") or "rpm").lower() == "rpm"],
@@ -1896,7 +1905,21 @@ def _dist_tag(release) -> str:
     return m.group(0) if m else ""
 
 
-def _passed_build(old: dict, new: dict, nvrs) -> str | None:
+def _comparable_epoch(pkg: dict):
+    """Installed source-build epoch, if known without guessing from a subpackage."""
+    if pkg.get("source_epoch") is not None:
+        return pkg["source_epoch"]
+    if pkg.get("name") == pkg.get("src") and (not pkg.get("srpm") or pkg.get("nvr") == pkg["srpm"]):
+        return _epoch(pkg)
+    return None
+
+
+def _epoch_matches(pkg: dict, nvr: str, epochs: dict) -> bool:
+    have, want = _comparable_epoch(pkg), epochs.get(nvr)
+    return have is None or want is None or rpmvercmp(str(have), str(want)) == 0
+
+
+def _passed_build(old: dict, new: dict, nvrs, epochs=None) -> str | None:
     """The erratum build, if any, that an update from `old` to `new` passes over.
 
     That is a build newer than the old one and not newer than the new one, in
@@ -1922,8 +1945,9 @@ def _passed_build(old: dict, new: dict, nvrs) -> str | None:
         if _dist_tag(br) != old_dist or (not old_dist and new_dist):
             continue
         by_src = bn != new["name"]
-        if (_is_behind(old, bv, br, use_build_evr=by_src)
-                and not _is_behind(new, bv, br, use_build_evr=by_src)):
+        epoch = (epochs or {}).get(b)
+        if (_is_behind(old, bv, br, use_build_evr=by_src, candidate_epoch=epoch)
+                and not _is_behind(new, bv, br, use_build_evr=by_src, candidate_epoch=epoch)):
             return b
     return None
 
@@ -2042,16 +2066,17 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
             # exact EVR match = the advisory is attached to this build (this is
             # what rpm-ostree will show under .advisories); a normalised match is
             # information about the upstream build only.
-            hit_attached = exact_new & nvrs
-            hit_corresponding = norm_new & nvrs
-            hit_old = old_all & nvrs
+            epochs = u.get("build_epochs") or {}
+            hit_attached = {b for b in exact_new & nvrs if _epoch_matches(new, b, epochs)}
+            hit_corresponding = {b for b in norm_new & nvrs if _epoch_matches(new, b, epochs)}
+            hit_old = {b for b in old_all & nvrs if _epoch_matches(old, b, epochs)}
             status = (u.get("status") or "").lower()
             if not (hit_attached or hit_corresponding or hit_old):
                 # In neither image, so its erratum matches neither side - but an
                 # update that passes over this build (curl 8.9.0 -> 8.9.3, past
                 # the security erratum of 8.9.1) gains its fix all the same, and
                 # only a CVE id in the rpm changelog could say so before.
-                passed = (_passed_build(old, new, u["nvrs"])
+                passed = (_passed_build(old, new, u["nvrs"], epochs)
                           if (old and (not third_party or norm_new)
                               and (not old_third_party or old_norm)) else None)
                 if passed and u.get("type") == "security" and status in PUSHED_STATUSES:
@@ -3754,21 +3779,18 @@ BACKLOG_CANDIDATES = len(BACKLOG_POOL)
 
 
 def _is_behind(p: dict, cand_version: str, cand_release: str,
-               use_build_evr: bool = False) -> bool:
-    """Is the image's package older than an erratum's build?
+               use_build_evr: bool = False, candidate_epoch=None) -> bool:
+    """Compare known source epochs first; never assume an absent epoch is zero.
 
-    Deliberately ignores the epoch: Bodhi's NVR strings never carry one, so
-    comparing the rpmdb epoch against a missing one made every epoch>0 package
-    (23 security-relevant binaries in the live image: cups, container-selinux,
-    bind, grub2, ...) permanently "newer" than any published update - they could
-    never appear in the backlog. Also strips secureblue's local release marker
-    first, so the comparison happens in Fedora's namespace: the image's
-    `7.2.5-200.secureblue.1.fc44` is secureblue's rebuild OF Fedora's
-    `7.2.5-200.fc44` (equal, not behind), while a genuinely newer Fedora build
-    (`7.2.6-…`, `7.2.5-201…`) still compares newer. Left unstripped, the alpha
-    `secureblue` segment rpm-compares above `fc`, i.e. the local rebuild would
-    claim to be newer than its own Fedora original.
+    When either source epoch is unavailable, retain the version/release heuristic.
+    A subpackage epoch is not evidence of its source epoch. Normalise secureblue's
+    release marker only after checking both epochs and versions.
     """
+    have_epoch = _comparable_epoch(p)
+    if candidate_epoch is not None and have_epoch is not None:
+        de = rpmvercmp(str(have_epoch), str(candidate_epoch))
+        if de:
+            return de < 0
     ver, rel = p.get("version", ""), p.get("release", "")
     if use_build_evr:
         bevr = _build_evr(p)
@@ -3860,7 +3882,10 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
                     if bn != n and bn != p["src"]:
                         continue
                     cand = {"name": n, "version": bv, "release": br}
-                    if _is_behind(p, bv, br, use_build_evr=(bn != n)) and (
+                    epoch = (u.get("build_epochs") or {}).get(b)
+                    if epoch is not None:
+                        cand["epoch"] = str(epoch)
+                    if _is_behind(p, bv, br, use_build_evr=(bn != n), candidate_epoch=epoch) and (
                             best is None or evr_cmp(best, cand) < 0):
                         best = cand
                 if best is None:
