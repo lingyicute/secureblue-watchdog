@@ -332,7 +332,7 @@ def _safe_read_limited(resp, limit: int) -> bytes:
     """Read from HTTPResponse with hard limit to avoid OOM / zip-bomb."""
     cl = resp.headers.get("Content-Length")
     if cl and cl.isdigit() and int(cl) > limit:
-        raise SystemExit(T(f"blob Content-Length {cl} > {human(limit)} limit - aborting",
+        raise RegistryError(T(f"blob Content-Length {cl} > {human(limit)} limit - aborting",
                            f"blob Content-Length {cl} 超过 {human(limit)} 限制——中止"))
     chunks = []
     total = 0
@@ -342,7 +342,7 @@ def _safe_read_limited(resp, limit: int) -> bytes:
             break
         total += len(chunk)
         if total > limit:
-            raise SystemExit(T(f"blob exceeds {human(limit)} limit during download - possible bomb",
+            raise RegistryError(T(f"blob exceeds {human(limit)} limit during download - possible bomb",
                                f"下载过程中 blob 超过 {human(limit)} 限制——疑似 zip 炸弹"))
         chunks.append(chunk)
     return b"".join(chunks)
@@ -367,25 +367,25 @@ def check_digest(actual_hex: str, digest: str, what: str, *,
     raw = str(digest or "").strip()
     if not raw:
         if required:
-            raise SystemExit(T(
+            raise RegistryError(T(
                 f"missing digest for {what} - refusing to trust unverified content",
                 f"{what} 缺少 digest——拒绝信任未校验的内容"))
         return
     if ":" not in raw:
         if required:
-            raise SystemExit(T(
+            raise RegistryError(T(
                 f"invalid digest {raw!r} for {what} - expected sha256:<64 hex>",
                 f"{what} 的 digest {raw!r} 无效——应为 sha256:<64位十六进制>"))
         return
     algo, _, want = raw.partition(":")
     algo, want = algo.lower(), want.lower()
     if algo != "sha256" or not re.fullmatch(r"[0-9a-f]{64}", want):
-        raise SystemExit(T(
+        raise RegistryError(T(
             f"unsupported or malformed digest {raw!r} for {what} - expected sha256:<64 hex>",
             f"{what} 的 digest {raw!r} 不受支持或格式错误——应为 sha256:<64位十六进制>"))
     if actual_hex == want:
         return
-    raise SystemExit(T(
+    raise RegistryError(T(
         f"digest mismatch for {what}: expected sha256:{want}, the content hashes to "
         f"sha256:{actual_hex} - refusing to analyse data the registry altered",
         f"{what} 的 digest 不匹配：应为 sha256:{want}，实际内容为 "
@@ -936,7 +936,7 @@ class Registry:
         """
         try:
             return _safe_read_limited(resp, MAX_JSON_BYTES)
-        except SystemExit:
+        except RegistryError:
             raise
         except Exception as e:
             # A RegistryError, like every other registry failure: the callers
@@ -968,7 +968,7 @@ class Registry:
         """manifest + config for one architecture, plus a normalized chunk list."""
         try:
             return self._resolve(ref, light)
-        except (ValueError, KeyError, TypeError, AttributeError) as e:
+        except (ValueError, KeyError, TypeError, AttributeError, OverflowError, RecursionError) as e:
             # A 200 whose body is no manifest (a proxy's error page, a layer
             # without `size`) used to end `diff` and `check` with a traceback.
             what = ref or self.default_ref
@@ -4243,9 +4243,8 @@ def list_tags(reg: Registry, max_pages: int = TAG_LIST_MAX_PAGES) -> list:
                 # Parsed inside the retry: a non-JSON or cut-short body (a proxy
                 # error page, a truncated 200) is as transient as a 5xx, and
                 # raising past the loop aborted the whole history scan instead.
-                # So is a read that dies mid-transfer: _read_all() reports it as a
-                # RegistryError, which is retried below. Any other SystemExit (the
-                # size cap) is no Exception and still ends the run.
+                # Read failures, including oversized documents, are reported as
+                # RegistryError and never silently turn into an empty page.
                 candidate = json.loads(body)
                 if not isinstance(candidate, dict) or "tags" not in candidate:
                     raise ValueError("tag list is not a JSON object with tags")
@@ -4566,15 +4565,7 @@ def tag_exists(reg: Registry, tag: str, warn: list | None = None) -> str | None:
             # Same fallback as index_digest()/resolve(): a registry that omits
             # the header still answered 200, and reporting None here made every
             # dated tag of such a registry read as "no build that day".
-            try:
-                body = reg._read_all(r, f"manifest {tag}")
-            except RegistryError:
-                raise
-            except SystemExit as e:
-                # _read_all() reports a failed read as a bare SystemExit, which
-                # would kill the run here; the contract of this function is that
-                # anything other than a 404 is "unknown" and goes through `warn`.
-                raise RegistryError(str(e.code)) from None
+            body = reg._read_all(r, f"manifest {tag}")
             return "sha256:" + hashlib.sha256(body).hexdigest()
     except RegistryError as e:
         if e.http_code == 404:

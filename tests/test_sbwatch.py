@@ -2655,7 +2655,7 @@ class TestTagLabelCostsOneRequest(unittest.TestCase):
         reg = self._reg({}, b"")
 
         def broken(resp, what):
-            raise SystemExit("failed reading " + what)
+            raise S.RegistryError("failed reading " + what)
 
         reg._read_all = broken
         warn = []
