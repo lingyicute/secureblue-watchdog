@@ -4960,6 +4960,8 @@ def cmd_diff(args):
         xc = res.get("xc") or {}
         # in manifest-only mode nothing ever gets a "cls", so never index it
         payload = {"verdict": res["verdict"],
+                   "from": res["a"]["ref"], "to": res["b"]["ref"],
+                   "from_digest": res["a"]["digest"], "digest": res["b"]["digest"],
                    "download_bytes": res["layers"]["download_bytes"],
                    "download_bytes_is_upper_bound": True,
                    "versions_known": xc.get("versions_known", True),
