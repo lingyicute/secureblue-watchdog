@@ -127,7 +127,7 @@ BASELINE_LABEL_CAP = 80  # characters of a baseline label read back from the sta
 #                          former 26 cut check's own label and appended a 40-character
 #                          marker to it - once more on every --force run.
 PKGLIST_CACHE_VERSION = 3  # older entries missed undecodable fields and incomplete identities
-BODHI_CACHE_VERSION = 2  # v1 clipped bug titles (200) and notes (1500) BEFORE
+BODHI_CACHE_VERSION = 3  # v1 clipped bug titles (200) and notes (1500) BEFORE
 #                          extracting CVE ids from them, so a v1 cache can be
 #                          missing CVEs. A cache without this marker is refetched.
 OLD_LOG_CAP = 1000  # changelog entries (dropped by this build) scanned for lost fixes
@@ -1604,11 +1604,26 @@ class Bodhi:
                     data = json.loads(raw)
                 if not isinstance(data, dict):
                     raise ValueError("Bodhi response is not a JSON object")
-                page_ups = data.get("updates", [])
-                if page_ups is not None and (not isinstance(page_ups, list)
-                                             or any(not isinstance(u, dict) for u in page_ups)):
+                page_ups = data.get("updates")
+                if not isinstance(page_ups, list) or any(not isinstance(u, dict) for u in page_ups):
                     raise ValueError("Bodhi updates must be a list of JSON objects")
-                return data, page_ups or []
+                # Validate consumed fields inside the retry/error boundary. An
+                # error document is not a successful query with zero matches.
+                for u in page_ups:
+                    for k in ("alias", "updateid", "type", "status", "severity", "content_type",
+                              "title", "notes"):
+                        if u.get(k) is not None and not isinstance(u[k], str):
+                            raise ValueError(f"invalid Bodhi update field: {k}")
+                    for k, fields in (("builds", ("nvr", "type")), ("bugs", ("title",))):
+                        rows = u.get(k)
+                        if rows is None:
+                            continue
+                        if not isinstance(rows, list) or any(
+                                not isinstance(row, dict) or any(
+                                    row.get(f) is not None and not isinstance(row[f], str)
+                                    for f in fields) for row in rows):
+                            raise ValueError(f"invalid Bodhi update field: {k}")
+                return data, page_ups
             except Exception as ex:
                 if retried or self._streak or self.calls >= self.max_calls:
                     raise
