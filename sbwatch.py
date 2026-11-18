@@ -748,33 +748,44 @@ class Registry:
 
     @staticmethod
     def _split(ref: str):
-        # strip first: with the whitespace still in front, the scheme prefix did
-        # not match and " docker://ghcr.io/..." was rejected as host `docker:`
         ref = (ref or "").strip().removeprefix("docker://").removeprefix("oci:")
-        if ref.count("/") < 1:
-            raise SystemExit(T(f"need a reference like host/ns/name:tag, got: {ref}",
-                               f"需要形如 host/ns/name:tag 的引用，实际收到：{ref}"))
-        first, _, rest_all = ref.partition("/")
-        if "." not in first and ":" not in first and first != "localhost":
-            host, rest = "ghcr.io", ref          # bare ns/name -> ghcr.io (secureblue's home)
+
+        def invalid():
+            return RegistryError(T(f"invalid image reference: {ref!r} (expected [host/]repo[:tag][@sha256:digest])",
+                                   f"无效的镜像引用：{ref!r}（需要 [host/]repo[:tag][@sha256:digest]）"))
+
+        first, slash, rest = ref.partition("/")
+        if not slash:
+            raise invalid()
+        if "." in first or ":" in first or first.lower() == "localhost":
+            host = first.lower()
+            # Validate the authority before inserting it into any URL. urlsplit
+            # also rejects malformed IPv6 literals and out-of-range ports.
+            try:
+                authority = urllib.parse.urlsplit(f"https://{host}")
+                if (not re.fullmatch(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
+                                     r"(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*"
+                                     r"|\[[0-9a-f:.]+\])(?::[0-9]+)?", host)
+                        or not authority.hostname or authority.port == 0):
+                    raise invalid()
+            except ValueError:
+                raise invalid() from None
         else:
-            host, rest = first, rest_all
-        if "@" in rest:
-            repo, _, dig = rest.partition("@")
-            if not dig:
-                raise SystemExit(T(f"missing digest after '@' in reference: {ref}",
-                                   f"引用中 '@' 后缺少 digest：{ref}"))
-            if ":" in repo.rsplit("/", 1)[-1]:
-                repo, _, _ = repo.rpartition(":")
-        elif ":" in rest.rsplit("/", 1)[-1]:
-            repo, _, tag = rest.rpartition(":")
-            dig = tag
-        else:
-            repo, dig = rest, "latest"
-        if not repo or repo.startswith("/") or repo.endswith("/") or "//" in repo:
-            raise SystemExit(T(f"need a reference like host/ns/name:tag, got: {ref}",
-                               f"需要形如 host/ns/name:tag 的引用，实际收到：{ref}"))
-        return host.lower(), (repo, dig or "latest")
+            host, rest = "ghcr.io", ref
+
+        named, at, digest = rest.partition("@")
+        repo, colon, tag = named.rpartition(":") if ":" in named.rsplit("/", 1)[-1] else (named, "", "")
+        # Distribution's repository grammar, not a general-purpose URL path.
+        component = r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*"
+        if not re.fullmatch(component + rf"(?:/{component})*", repo):
+            raise invalid()
+        if colon:
+            tag = Registry._validate_ref(tag)
+        if at:
+            if not _clean_sha256_header(digest) or digest != digest.strip():
+                raise invalid()
+            return host, (repo, Registry._validate_ref(digest))
+        return host, (repo, tag if colon else "latest")
 
     def _token(self):
         """Anonymous pull token, or None when the registry needs none.

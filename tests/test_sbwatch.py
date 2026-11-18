@@ -3309,9 +3309,9 @@ class TestRegistrySplit(unittest.TestCase):
         S._registry(a).close()
         self.assertEqual(a.image, "quay.io/fedora/silverblue")
 
-    def test_trailing_colon_defaults_to_latest(self):
-        self.assertEqual(S.Registry._split("secureblue/x:"),
-                         ("ghcr.io", ("secureblue/x", "latest")))
+    def test_trailing_colon_is_not_an_implicit_latest(self):
+        with self.assertRaises(S.RegistryError):
+            S.Registry._split("secureblue/x:")
 
     def test_empty_repo_is_rejected(self):
         for bad in ("ghcr.io/", "foo/"):

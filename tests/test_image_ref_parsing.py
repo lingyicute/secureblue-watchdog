@@ -46,6 +46,21 @@ class TestImageRefParsing(unittest.TestCase):
                     reg.index_digest(bad)
 
 
+    def test_repository_and_authority_use_distribution_syntax(self):
+        for bad in ("ghcr.io/ns/../name", "ghcr.io/ns/name?query", "ghcr.io/ns/name#fragment",
+                    "ghcr.io/ns/name%2E", "ghcr.io/ns/Name", "ghcr.io:65536/ns/name",
+                    "ns/name:", "ns/name@latest", "ns/name:bad tag@sha256:" + "a" * 64,
+                    "ns/name@ sha256:" + "a" * 64, "ghcr.io:0/ns/name"):
+            with self.subTest(bad=bad), self.assertRaises(S.RegistryError):
+                S.Registry(bad)
+
+    def test_qualified_digest_and_ipv6_registry_preserve_identity(self):
+        digest = "sha256:" + "a" * 64
+        self.assertEqual(S.Registry._split("oci:ns/a__b-c.v:stable@" + digest),
+                         ("ghcr.io", ("ns/a__b-c.v", digest)))
+        self.assertEqual(S.Registry._split("[::1]:5000/team/build:v2"),
+                         ("[::1]:5000", ("team/build", "v2")))
+
     def test_uppercase_registry_hostname_is_normalised(self):
         import argparse
         host, (repo, tag) = S.Registry._split("GHCR.IO/secureblue/silverblue-main-hardened:45")
