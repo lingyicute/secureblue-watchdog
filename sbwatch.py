@@ -5037,6 +5037,38 @@ def degrade_manifest_only_verdict(v: dict, ld: dict) -> dict:
     return v
 
 
+def _comparison_json(res: dict, from_label=None, to_label=None) -> dict:
+    """Shared reproducible output for interactive diffs and watch artifacts."""
+    a, b, d = res["a"], res["b"], res["diff"]
+    xc = res.get("xc") or {}
+    changed = []
+    for c in d["changed"]:
+        cls = c.get("cls") or {}
+        old, new = _evr_pair(c["old"], c["new"])
+        changed.append({"name": c["name"], "old": old, "new": new, "src": c["src"],
+                        "old_arch": c["old"].get("arch"), "new_arch": c["new"].get("arch"),
+                        "dir": c["dir"], "security": bool(cls.get("security")),
+                        "cves": cls.get("cves", []), "cves_dropped": cls.get("cves_dropped", []),
+                        "advisory_wide_cves": cls.get("advisory_wide_cves", []),
+                        "aliases": cls.get("aliases", []), "already_had": cls.get("already_had", []),
+                        "not_pushed": cls.get("not_pushed", []), "passed_over": cls.get("passed_over", []),
+                        "why": cls.get("why", [])})
+    return {"verdict": res["verdict"],
+            "from": a.get("ref") if from_label is None else from_label,
+            "to": b.get("ref") if to_label is None else to_label,
+            "from_digest": a["digest"], "digest": b["digest"],
+            "from_index_digest": a.get("index_digest"), "index_digest": b.get("index_digest"),
+            "version": (b.get("annotations") or {}).get("org.opencontainers.image.version", "?"),
+            "download_bytes": res["layers"]["download_bytes"],
+            "download_bytes_is_upper_bound": True,
+            "versions_known": xc.get("versions_known", d.get("count_a") != "?"),
+            "rpmdb_issues": d.get("rpmdb_issues"),
+            "changed": changed, "added": d.get("added", []), "removed": d.get("removed", []),
+            "silent_rebuilds": xc.get("silent_rebuilds", []),
+            "behind_stable_security": res.get("backlog") or [],
+            "backlog_coverage": res.get("backlog_coverage")}
+
+
 def cmd_diff(args):
     res = do_diff(args, args.a, args.b)
     md = render_markdown(f"{args.image}: {shortref(res['a']['ref'])} → {shortref(res['b']['ref'])}",
@@ -5049,32 +5081,7 @@ def cmd_diff(args):
     else:
         print(md)
     if args.json_out:
-        xc = res.get("xc") or {}
-        # in manifest-only mode nothing ever gets a "cls", so never index it
-        payload = {"verdict": res["verdict"],
-                   "from": res["a"]["ref"], "to": res["b"]["ref"],
-                   "from_digest": res["a"]["digest"], "digest": res["b"]["digest"],
-                   "download_bytes": res["layers"]["download_bytes"],
-                   "download_bytes_is_upper_bound": True,
-                   "versions_known": xc.get("versions_known", True),
-                   "changed": [{"name": c["name"],
-                                "old": _evr_pair(c["old"], c["new"])[0],
-                                "new": _evr_pair(c["old"], c["new"])[1], "src": c["src"],
-                                "dir": c["dir"],
-                                "security": bool((c.get("cls") or {}).get("security")),
-                                "cves": (c.get("cls") or {}).get("cves", []),
-                                 "advisory_wide_cves": (c.get("cls") or {}).get("advisory_wide_cves", []),
-                                "aliases": (c.get("cls") or {}).get("aliases", []),
-                                "already_had": (c.get("cls") or {}).get("already_had", []),
-                                "not_pushed": (c.get("cls") or {}).get("not_pushed", []),
-                                "passed_over": (c.get("cls") or {}).get("passed_over", []),
-                                "why": (c.get("cls") or {}).get("why", [])}
-                               for c in res["diff"]["changed"]],
-                   "silent_rebuilds": xc.get("silent_rebuilds", []),
-                   "behind_stable_security": res.get("backlog", []),
-                   "backlog_coverage": res.get("backlog_coverage"),
-                   "added": res["diff"]["added"], "removed": res["diff"]["removed"]}
-        _atomic_write_json(args.json_out, payload, indent=1)
+        _atomic_write_json(args.json_out, _comparison_json(res), indent=1)
     # Exit status reflects *execution*, not the verdict. This used to return
     # 1 for "consider" and 2 for "update-now", which turned an informational
     # recommendation into what every shell reads as an error (and broke any
@@ -5164,6 +5171,9 @@ def cmd_check(args):
     maybe_verify_resolved(reg, cur, args)
     ver = cur["annotations"].get("org.opencontainers.image.version", "?")
 
+    watched = {"watched_digest": cur["digest"], "watched_version": ver,
+               "watched_index_digest": cur.get("index_digest") or cur["digest"]}
+
     def save_state(extra=None):
         # `digest` is the per-arch (platform) digest - that is what a client of
         # --arch pulls and what every comparison in this file uses. `index_digest`
@@ -5194,10 +5204,10 @@ def cmd_check(args):
         _atomic_write_text(report, f"# No new build 无新构建\n\n{msg}\n")
         _atomic_write_json(report + ".json", {
             "verdict": {"level": "no-update", "headline": msg}, "version": ver,
-            "digest": cur["digest"], "download_bytes": 0})
+            "digest": cur["digest"], "download_bytes": 0, **watched})
         gh_outputs({"verdict": "no-update", "digest": cur["digest"], "summary": msg,
                     "download_bytes": 0, "report": report, "version": ver,
-                    "inputhash": cur["annotations"].get("rpmostree.inputhash") or ""})
+                    "inputhash": cur["annotations"].get("rpmostree.inputhash") or "", **watched})
         return 0
 
     # what do we compare against? 1) explicit --a  2) last digest we analysed
@@ -5329,9 +5339,9 @@ def cmd_check(args):
                                   f"Current 当前: {ver} {cur['digest'][:19]}...\n")
         _atomic_write_json(report + ".json", {
             "verdict": {"level": "unknown", "headline": msg},
-            "version": ver, "digest": cur["digest"]})
+            "version": ver, "digest": cur["digest"], **watched})
         gh_outputs({"verdict": "unknown", "digest": cur["digest"], "summary": msg,
-                    "download_bytes": 0, "report": report, "version": ver})
+                    "download_bytes": 0, "report": report, "version": ver, **watched})
         # Remember the checkpoint for a future build, not a successful analysis.
         # An unchanged digest must retry the missing baseline on the next run.
         save_state({"last_verdict": "unknown"})
@@ -5440,22 +5450,8 @@ def cmd_check(args):
                + f" | download 下载 {human(res['layers']['download_bytes'])}")
     print("\n" + "=" * 72, file=sys.stderr)
     print(summary, file=sys.stderr)
-    _atomic_write_json(report + ".json", {"verdict": v, "from": from_lbl, "to": to_lbl,
-               "from_digest": res["a"]["digest"], "digest": res["b"]["digest"],
-               "version": to_ver, "watched_digest": cur["digest"], "watched_version": ver,
-               "download_bytes": res["layers"]["download_bytes"],
-               "changed": [{"name": c["name"],
-                            "old": _evr_pair(c["old"], c["new"])[0],
-                            "new": _evr_pair(c["old"], c["new"])[1],
-                            "src": c["src"], "dir": c["dir"],
-                            "security": bool((c.get("cls") or {}).get("security")),
-                            "cves": (c.get("cls") or {}).get("cves", []),
-                             "advisory_wide_cves": (c.get("cls") or {}).get("advisory_wide_cves", [])}
-                           for c in res["diff"]["changed"]],
-               # complete: the report's backlog table stops at 25 rows and refers
-               # to the JSON output for the rest - for `check`, that is this file
-               "behind_stable_security": res.get("backlog") or [],
-               "backlog_coverage": res.get("backlog_coverage")})
+    _atomic_write_json(report + ".json", {**_comparison_json(res, from_lbl, to_lbl),
+                                          **watched})
     prune_days = getattr(args, "prune_days", 0) or 0
     if prune_days > 0:
         pruned = prune_cache(getattr(args, "cache_dir", None)
@@ -5484,8 +5480,7 @@ def cmd_check(args):
     else:
         fail_reason = ""
     gh_outputs({"verdict": v["level"], "digest": res["b"]["digest"], "version": to_ver,
-                "from_digest": res["a"]["digest"], "watched_digest": cur["digest"],
-                "watched_version": ver,
+                "from_digest": res["a"]["digest"], **watched,
                 "download_bytes": res["layers"]["download_bytes"], "summary": summary,
                 "report": report,
                 # complete, not clipped: a workflow consumer must never see a

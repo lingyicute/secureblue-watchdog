@@ -24,3 +24,23 @@ class TestDiffProvenance(unittest.TestCase):
             payload = json.loads(out.read_text())
         self.assertEqual((payload['from'], payload['to']), ('previous', 'latest'))
         self.assertEqual((payload['from_digest'], payload['digest']), (old['digest'], new['digest']))
+
+
+class TestSharedComparisonExport(unittest.TestCase):
+    def test_package_set_architecture_and_snapshot_details_survive_export(self):
+        res = {"a": {"ref": "old", "digest": "old-platform", "index_digest": "old-index"},
+               "b": {"ref": "new", "digest": "new-platform", "index_digest": "new-index"},
+               "diff": {"added": ["added"], "removed": ["removed"],
+                        "rpmdb_issues": {"fields_skipped": 2}, "changed": [
+                            {"name": "binary", "src": "source", "dir": "arch-change",
+                             "old": {"evr": "1-1", "arch": "i686"},
+                             "new": {"evr": "1-1", "arch": "x86_64"}}]},
+               "verdict": {"level": "unknown"}, "layers": {"download_bytes": 123}}
+        payload = S._comparison_json(res)
+        self.assertEqual((payload["from_digest"], payload["from_index_digest"]),
+                         ("old-platform", "old-index"))
+        self.assertEqual((payload["digest"], payload["index_digest"]), ("new-platform", "new-index"))
+        self.assertEqual((payload["added"], payload["removed"]), (["added"], ["removed"]))
+        self.assertEqual(payload["rpmdb_issues"], {"fields_skipped": 2})
+        row, = payload["changed"]
+        self.assertEqual((row["old_arch"], row["new_arch"], row["dir"]), ("i686", "x86_64", "arch-change"))

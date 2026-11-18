@@ -441,8 +441,12 @@ along with this program.  If not, see https://www.gnu.org/licenses.
 In an analysed `report.md.json`, `from_digest` identifies the comparison baseline;
 `digest` and `version` identify its target (`to`). An explicit `--a` can cause
 chronological reordering. `watched_digest` and `watched_version` identify the
-watched tag independently; the state file and Actions `digest` output still
-track that tag, not the reordered comparison target.
+watched tag independently. The state tracks that tag, and the Actions output
+has separate `digest` (comparison target) and `watched_digest` keys.
+`from_index_digest`, `index_digest` and `watched_index_digest` record the top-level
+references resolved by the run (a platform digest if the input named it directly).
+Both `diff` and `check` exports include added and removed packages, old/new
+architectures, available advisory evidence, and any RPM inventory issues.
 
 Notification levels describe eligibility, not observed delivery. The upstream
 script checks a per-user critical stamp before either update backend and also
