@@ -4530,8 +4530,8 @@ def cmd_tags(args):
     print(f"  created 构建时间: {cur.get('created')}   kernel 内核: {cur['annotations'].get('ostree.linux')}")
     print(f"  chunks 分块: {len(cur['layers'])}  total 总量: {human(sum(l['size'] for l in cur['layers']))}")
     print(f"\ndated tags, newest first (probing the last {args.days} days; a missing day "
-          f"means no build was published then): / 日期标签，从新到旧（探测最近 {args.days} 天；"
-          f"缺失的日期表示当天没有发布构建）：")
+          f"means no dated tag was found for that day): / 日期标签，从新到旧（探测最近 {args.days} 天；"
+          f"缺失的日期表示未找到对应日期标签）：")
     now = time.time()
     probe_warnings: list = []
     for i in range(max(0, args.days)):  # day 0 is today (UTC): the tag most likely to be new
