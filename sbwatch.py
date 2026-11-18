@@ -2868,14 +2868,24 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         up_groups = [g for g in groups if not g["downgrade"]]
         up_bin = sum(len(g["pkgs"]) for g in up_groups)
         v["level"] = "skip"
-        v["headline"] = (f"routine churn: {plural(len(up_groups), 'source package')} "
+        # A rollback is not "routine churn": that lead headed the report of a tag
+        # that had moved back three builds (eight source packages downgraded).
+        lead = lead_zh = ""
+        if down:
+            down_bin = sum(len(g["pkgs"]) for g in down)
+            lead = f"{plural(len(down), 'source package')} ({down_bin} binary) downgraded, "
+            lead_zh = f"{len(down)} 个源码包（{down_bin} 个二进制包）被降级，"
+        v["headline"] = ((lead or "routine churn: ")
+                         + f"{plural(len(up_groups), 'source package')} "
                          f"({up_bin} binary) bumped, {len(diff['added'])} added / "
                          f"{len(diff['removed'])} removed, no CVE and no security erratum"
+                         + (" among the upgrades" if down else "")
                          + (f", {len(silent)} chunk(s) rebuilt with identical versions" if silent else "")
                          + tail)
-        v["headline_zh"] = (f"常规更新：{len(up_groups)} 个源码包（{up_bin} 个二进制包）升级，"
+        v["headline_zh"] = ((lead_zh or "常规更新：")
+                            + f"{len(up_groups)} 个源码包（{up_bin} 个二进制包）升级，"
                             f"新增 {len(diff['added'])} 个 / 移除 {len(diff['removed'])} 个，"
-                            "无 CVE、无安全勘误"
+                            + ("升级部分无 CVE、无安全勘误" if down else "无 CVE、无安全勘误")
                             + (f"，{len(silent)} 个 chunk 以相同版本重建" if silent else "")
                             + tail_zh)
     # --- what secureblue's desktop will actually do ------------------------- #
