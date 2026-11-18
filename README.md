@@ -378,6 +378,8 @@ python3 tests/run_offline.py
 
 - `test_redirect_schemes.py` / `test_bodhi_size_cap.py` / `test_rpmdb_basename_match.py` / `test_null_bodhi_alias.py` / `test_downgrade_target_erratum.py` / `test_mixed_direction_group.py` / `test_silent_rebuild_moved_src.py` / `test_fedora_release_selection.py` / `test_stream_major_history.py` / `test_negative_days.py` / `test_markdown_table_escape.py`：拒绝 `file:`/`ftp:` 重定向与含路径穿越或查询符的引用、统一小写 registry 主机名、兼容大小写/多方案 Bearer 头并剥离 realm 片段、校验 manifest 层大小/摘要/有限浮点数、限制 Bodhi 响应体积并忽略非 RPM 勘误与标记分页中途失败、精确匹配 `rpmdb.sqlite` 基名与多级/多条 tar 链接、拒绝标量头部标签返回数组、补齐 `CVE_RE` 前导边界、修正独立版本子包的 SRPM 候选与 Copr `.secureblue.N` 内核越过勘误、在 backlog 中跳过第三方 Copr 分支包（如 `bubblewrap`）、兼容空勘误编号、防止回滚因旧构建勘误抬升为 `update-now` 并保留同源码组升级子包的 CVE、锁定主版本分支标签（如 `44`）的历史与基线、兼容 Python 3.10 纳秒时间戳、强制 JSON UTF-8 与禁 `NaN`、转义 Markdown 表格管道符。
 
+- `test_backlog_note_lines.py` / `test_evidence_before_hint.py` / `test_non_security_erratum_evidence.py` / `test_downgrade_reverted_cves.py` / `test_rollback_headline.py` / `test_rollback_reverted_errata.py` / `test_same_version_chunk_wording.py`：backlog 备注末尾的空行不计作「另有 N 行」；安全表依据列先列勘误、「不再提及」提示放最后；因高严重度或含 CVE 而判为安全相关的非 security 类勘误在依据列写明；被降级包丢失的 CVE 编号列入 `cves_reverted` 并按回退警告呈现；回滚不再以「常规更新」开头，headline 点名被回退的安全勘误（`errata_reverted`）；版本不变而 chunk 变化不再称作「重建」。
+
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
 
