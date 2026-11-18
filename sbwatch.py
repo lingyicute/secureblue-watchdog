@@ -1027,7 +1027,7 @@ class Registry:
         out["created"] = rfc3339_seconds(cfg.get("created")
                                          or ann.get("org.opencontainers.image.created"))
         out["layers"] = []
-        layers_raw = man.get("layers", [])
+        layers_raw = man["layers"]
         if not isinstance(layers_raw, list):
             raise TypeError("manifest layers must be a list")
         for l in layers_raw:
