@@ -24,7 +24,8 @@ class TestCheckSwappedTitle(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             state, report = Path(td) / "state.json", Path(td) / "report.md"
-            with patch.object(S.Registry, "_token", return_value=None), \
+            with patch.object(S, "gh_outputs") as output, \
+                    patch.object(S.Registry, "_token", return_value=None), \
                     patch.object(S, "resolve", side_effect=resolve), \
                     patch.object(S, "load_pkglist",
                                  side_effect=lambda reg, img, ref, d, n: S.PackageTable(
@@ -38,6 +39,9 @@ class TestCheckSwappedTitle(unittest.TestCase):
             self.assertEqual(rc, 0)
             data = json.loads(Path(str(report) + ".json").read_text())
             self.assertEqual((data["from_digest"], data["digest"]), (older["digest"], newer["digest"]))
+            fields = output.call_args.args[0]
+            for key in ("from_digest", "digest", "version", "watched_digest", "watched_version"):
+                self.assertEqual(fields[key], data[key])
             self.assertEqual(data["version"], "45.20261116.0")
             self.assertEqual(data["watched_digest"], older["digest"])
             self.assertEqual(data["watched_version"], "44.20261104.0")

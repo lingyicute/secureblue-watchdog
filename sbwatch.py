@@ -5380,7 +5380,9 @@ def cmd_check(args):
         fail_reason = "; ".join(reasons) or "update-now with no CVE/erratum attributed"
     else:
         fail_reason = ""
-    gh_outputs({"verdict": v["level"], "digest": cur["digest"], "version": ver,
+    gh_outputs({"verdict": v["level"], "digest": res["b"]["digest"], "version": to_ver,
+                "from_digest": res["a"]["digest"], "watched_digest": cur["digest"],
+                "watched_version": ver,
                 "download_bytes": res["layers"]["download_bytes"], "summary": summary,
                 "report": report,
                 # complete, not clipped: a workflow consumer must never see a
