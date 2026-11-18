@@ -3803,6 +3803,15 @@ def _is_behind(p: dict, cand_version: str, cand_release: str,
     return rpmvercmp(rel, cand_release) < 0
 
 
+def package_coverage(pkgs: dict) -> dict:
+    """What the parsed inventory can actually establish, including cache hits."""
+    issues = {"headers_rejected": getattr(pkgs, "headers_rejected", 0),
+              "fields_skipped": getattr(pkgs, "fields_skipped", 0),
+              "shadowed_packages": len(getattr(pkgs, "collisions", ())),
+              "empty_table": not bool(pkgs)}
+    return {"rpmdb_complete": not any(issues.values()), "rpmdb_issues": issues}
+
+
 def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
                      limit: int = BACKLOG_CANDIDATES) -> tuple:
     """Stable Fedora security errata whose build is newer than what the image ships.
@@ -3836,7 +3845,7 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
         base = re.sub(r"\.\d+$", "", s)
         if base != s and base in BACKLOG_POOL:
             covered.add(base)
-    cov = {"candidates": len(candidates), "checked": len(chosen),
+    cov = {**package_coverage(pkgs), "candidates": len(candidates), "checked": len(chosen),
            "skipped": len(candidates) - len(chosen),
            "skipped_names": candidates[limit:],
            "pool_size": len(BACKLOG_POOL),
@@ -3940,7 +3949,7 @@ def coverage_line(cov: dict) -> str:
           + (f", {len(cov['truncated'])} with truncated errata"
              if cov.get("truncated") else "")
           + (f"; {len(cov['pool_missing'])} BACKLOG_POOL entries are not "
-             f"in this image" if cov.get("pool_missing") else ""))
+             f"in the parsed inventory" if cov.get("pool_missing") else ""))
     zh = (f"backlog 审计覆盖率：镜像内 {cov['candidates']} 个候选源码包中查询了 {cov['checked']} 个"
           + (f"，{cov['skipped']} 个因 --backlog-candidates 上限被截断"
              f"（{clip_list(cov.get('skipped_names', []), 6, lang='zh', joiner='，')}）"
@@ -3950,8 +3959,11 @@ def coverage_line(cov: dict) -> str:
           + (f"，{cov['failed']} 个查询失败" if cov.get("failed") else "")
           + (f"，{len(cov['truncated'])} 个勘误列表被截断"
              if cov.get("truncated") else "")
-          + (f"；BACKLOG_POOL 中有 {len(cov['pool_missing'])} 个条目不在此镜像内"
+          + (f"；BACKLOG_POOL 中有 {len(cov['pool_missing'])} 个条目不在已解析的软件包表中"
              if cov.get("pool_missing") else ""))
+    if cov.get("rpmdb_complete") is False:
+        en += "; RPM inventory incomplete: missing packages or fields may hide updates"
+        zh += "；RPM 包表不完整：缺失的软件包或字段可能掩盖更新"
     return T(en, zh)
 
 
@@ -3985,7 +3997,10 @@ def cmd_backlog(args):
             _rest = f" (+{len(_lines)-1} more line(s) / 另有 {len(_lines)-1} 行)" \
                 if len(_lines) > 1 else ""
             print(f"  {'':28}{'':26}     {clip_text(_lines[0], 110)}{_rest}")
-    if not rows:
+    if not rows and (cov.get("rpmdb_complete") is False or cov.get("truncated")):
+        print(T("  no match in the available records; coverage is incomplete",
+                "  在可读取的记录中没有匹配项；审计覆盖不完整"))
+    elif not rows:
         # state the scope explicitly: this is only ever as good as `checked`
         print(f"  none among the {cov['checked']} source package(s) queried — not a claim "
               f"about the whole image / 在所查询的 {cov['checked']} 个源码包中无——"
