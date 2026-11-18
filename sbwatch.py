@@ -4398,6 +4398,20 @@ def cmd_history(args):
     cur = resolve(reg, snapshot) if snapshot else None
     rows = build_history(reg, scan=args.scan, days=args.days, to=args.to,
                          warn=hist_warnings, cur=cur)
+    snap = _clean_sha256_header(snapshot) if snapshot else None
+    if snap:
+        # build_history() names its anchor after --to. With --at-digest that holds
+        # only while the tag still points at the snapshot: once it has moved, the
+        # row is neither `latest` nor CURRENT. A tag that cannot be read counts as
+        # moved - nothing is claimed that was not seen.
+        try:
+            tag_digest = reg.index_digest(args.to)
+        except (Exception, RegistryError):
+            tag_digest = None
+        if tag_digest != snap:
+            for r in rows:
+                if r["digest"] == snap:
+                    r["tags"] = [t for t in r["tags"] if t != args.to]
     # The shared signature options apply to history too, not just to diff/check.
     if getattr(args, "cosign_pub", None) or getattr(args, "require_cosign", False):
         for row in rows:
@@ -4449,7 +4463,7 @@ def cmd_history(args):
     oldest = rows[-1]
     print("\n  every image is addressable by its (immutable) digest, e.g. / "
           "每个镜像都可以用其（不可变的）digest 定位，例如：")
-    print(f"    sbwatch.py diff sha256:{oldest['digest'].split(':')[1]} {args.to}")
+    print(f"    sbwatch.py diff sha256:{oldest['digest'].split(':')[1]} {snap or args.to}")
     print(T("  (named tags are mutable - prefer digests when you want a specific build)",
             "  （命名标签可变——想指定某次构建时请优先使用 digest）"))
     return 0

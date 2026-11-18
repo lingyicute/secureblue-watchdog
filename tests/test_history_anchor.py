@@ -46,6 +46,7 @@ class TestHistoryAtDigest(unittest.TestCase):
         with (patch.object(S.Registry, "_token", return_value=None),
               patch.object(S, "resolve", return_value=img) as resolver,
               patch.object(S, "build_history", return_value=[row]) as history,
+              patch.object(S.Registry, "index_digest", return_value=digest),
               patch("builtins.print")):
             self.assertEqual(S.main(["history", "--to", "44", "--at-digest", digest]), 0)
         self.assertEqual([c.args[1] for c in resolver.call_args_list], [digest])
