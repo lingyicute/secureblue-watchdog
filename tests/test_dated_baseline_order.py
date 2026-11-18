@@ -79,7 +79,7 @@ class TestDatedBaselineOrder(unittest.TestCase):
             state, report = Path(directory) / "state.json", Path(directory) / "report.md"
             with patch.object(S.Registry, "_token", return_value=None),                     patch.object(S, "resolve", side_effect=resolve),                     patch.object(S, "tag_exists", side_effect=tag_exists),                     patch.object(S, "load_pkglist",
                                  side_effect=lambda reg, img, ref, d, n: S.PackageTable(
-                                     {"bash": pkg("bash", f"5.3-{img['created'][8:10]}.fc45")})),                     patch("time.time", return_value=1768003200),                     contextlib.redirect_stdout(io.StringIO()),                     contextlib.redirect_stderr(io.StringIO()):
+                                     {"bash": pkg("bash", f"5.3-{img['created'][8:10]}.fc45")})),                     patch("time.time", return_value=1795000000),                     contextlib.redirect_stdout(io.StringIO()),                     contextlib.redirect_stderr(io.StringIO()):
                 rc = S.main(["check", "--image", "x/y", "--state", str(state),
                              "--report", str(report), "--cache-dir", directory,
                              "--scan", "0", "--no-fast", "--no-audit", "--no-bodhi",

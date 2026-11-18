@@ -4198,11 +4198,13 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
         "version": cur["annotations"].get("org.opencontainers.image.version"),
         "inputhash": cur["annotations"].get("rpmostree.inputhash"),
         "kernel": cur["annotations"].get("ostree.linux"), "image": cur, "tags": [to]}}
+    cur_time = _ts_order(cur.get("created"))
     sig_pool = sigs
-    if stream_maj:
-        cur_hex = (cur.get("index_digest") or "").partition(":")[2]
-        if cur_hex in sigs:
-            sig_pool = sigs[:sigs.index(cur_hex) + 1]
+    cur_hex = (cur.get("index_digest") or "").partition(":")[2]
+    if cur_hex in sigs:
+        # GHCR puts the attachment tags in push order. Anchor the scan window
+        # on the target, not on the end of the list (which may be months later).
+        sig_pool = sigs[:sigs.index(cur_hex) + 1]
     sig_window = scan * 8
     for hexdig in reversed(sig_pool[-sig_window:] if sig_window > 0 else ()):
         if len(recs) >= scan:
@@ -4241,6 +4243,11 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
             # state took the newest one as its baseline and died on "no
             # standalone rpmdb chunk" - on every later run too, as no state was
             # ever saved.
+            continue
+        candidate_time = _ts_order(img.get("created"))
+        if cur_time and (not candidate_time or candidate_time > cur_time):
+            # Signature publication and image creation can happen in different
+            # orders. A later image should never use up a slot in this history.
             continue
         recs[img["index_digest"]] = {
             # index digest names the push; platform digest names what a client of
@@ -5182,17 +5189,21 @@ def cmd_check(args):
                 label_a = _state_label(dict(r, digest=pd))
                 break
     if not ref_a:
-        now = time.time()
+        cur_time = _ts_order(cur.get("created"))
+        try:
+            anchor = datetime.date.fromisoformat(cur_time[:10])
+        except ValueError:
+            anchor = datetime.datetime.now(datetime.timezone.utc).date()
         stream_maj = _stream_major(args.to, cur)
-        for i in range(1, 22):
-            day = time.strftime("%Y%m%d", time.gmtime(now - i * 86400))
+        for i in range(22):
+            day = (anchor - datetime.timedelta(days=i)).strftime("%Y%m%d")
             probe_tags = [day, f"{day}-{stream_maj}"] if stream_maj else [day]
             for d in probe_tags:
                 dig = tag_exists(reg, d, warn=hist_warnings)
                 if not dig:
                     continue
                 if dig == cur.get("index_digest"):
-                    break
+                    continue
                 try:
                     cand = resolve(reg, d)
                 except (NoArchManifest, MalformedManifest):
@@ -5209,12 +5220,12 @@ def cmd_check(args):
                 if stream_maj and not cand_ver.startswith(stream_maj + "."):
                     continue
                 if cand.get("digest") == cur["digest"]:
-                    break
+                    continue
                 if rpmdb_chunk(cur) is not None and rpmdb_chunk(cand) is None:
                     continue
-                if _ts_order(cand.get("created")) > (_ts_order(cur.get("created")) or "9"):
-                    # Same major, just newer than `cur`: no need to re-probe `day-<maj>`.
-                    break
+                cand_time = _ts_order(cand.get("created"))
+                if cur_time and (not cand_time or cand_time > cur_time):
+                    continue
                 ref_a, label_a, prev = d, d, cand
                 break
             if ref_a:
