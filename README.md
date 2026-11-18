@@ -381,7 +381,8 @@ python3 tests/run_offline.py
 - `test_backlog_note_lines.py` / `test_evidence_before_hint.py` / `test_non_security_erratum_evidence.py` / `test_downgrade_reverted_cves.py` / `test_rollback_headline.py` / `test_rollback_reverted_errata.py` / `test_same_version_chunk_wording.py`：backlog 备注末尾的空行不计作「另有 N 行」；安全表依据列先列勘误、「不再提及」提示放最后；因高严重度或含 CVE 而判为安全相关的非 security 类勘误在依据列写明；被降级包丢失的 CVE 编号列入 `cves_reverted` 并按回退警告呈现；回滚不再以「常规更新」开头，headline 点名被回退的安全勘误（`errata_reverted`）；版本不变而 chunk 变化不再称作「重建」。
 
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
-`tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性。
+`tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性
+（共 103 条：上游实际运行的 91 条，以及它以注释形式保留、用来记录既有怪异行为的 12 条）。
 
 CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并行）——测试失败
 不会阻塞每小时的监控，但会在 Tests 作业中红牌示警。
