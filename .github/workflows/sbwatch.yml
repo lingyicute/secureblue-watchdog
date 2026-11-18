@@ -125,8 +125,13 @@ jobs:
       - name: Derive a cache namespace from the image name
         id: ns
         run: |
-          # cache keys allow only alphanumerics, '-' and '_', and SB_IMAGE has a '/'
-          ns=$(printf '%s' "$SB_IMAGE" | tr -c 'A-Za-z0-9' '-' | tr -s '-' | sed 's/^-*//;s/-*$//')
+          # Preserve the existing checkpoint of the default image. Other exact
+          # inputs get a distinct key (e.g. foo-bar, foo/bar, and foo:bar).
+          if [ "$SB_IMAGE" = 'secureblue/silverblue-main-hardened' ]; then
+            ns=secureblue-silverblue-main-hardened
+          else
+            ns=v2-$(printf '%s' "$SB_IMAGE" | sha256sum | cut -d ' ' -f1)
+          fi
           echo "ns=$ns" >> "$GITHUB_OUTPUT"
 
       - name: Restore sbwatch cache (package lists per image, Bodhi answers, last digest)
@@ -355,11 +360,11 @@ jobs:
             while (true) {
               const res = await github.rest.actions.getActionsCacheList({
                 owner: context.repo.owner, repo: context.repo.repo,
-                per_page: 100, page, key: prefix,
-                sort: 'last_accessed_at', direction: 'desc',
+                per_page: 100, page, key: prefix, ref: context.ref,
+                sort: 'created_at', direction: 'desc',
               });
               const batch = res.data.actions_caches || [];
-              all.push(...batch);
+              all.push(...batch.filter(c => c.ref === context.ref && c.key.startsWith(prefix)));
               if (batch.length < 100) break;
               page += 1;
             }

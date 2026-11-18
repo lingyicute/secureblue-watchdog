@@ -392,7 +392,7 @@ CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并�
 仓库自带 `.github/workflows/sbwatch.yml`。其内置计划是每小时 UTC 第 20 分钟（`20 * * * *`）；外部调度器也可通过 `workflow_dispatch` 额外触发，实际频率取决于外部配置：
 
 - cache `~/.cache/sbwatch` (pkglist + Bodhi + state.json)，按 image+arch 分命名空间，
-  并有一个 prune 步骤只保留最近 7 份（否则 `state.json` 会被 LRU 挤掉，`check` 就失去基线）；
+  其他 `--image` 拼写彼此隔离；prune 仅清理当前 Git 引用下本命名空间的缓存并保留最新创建的 7 份（防止 `state.json` 被 LRU 挤掉）；
   结论为 `no-update` 的运行不再重复保存缓存（该路径不往缓存目录写任何东西）
 - `check` 分析完成后会删除超过 14 天的 pkglist 缓存文件（刚对比的两个镜像除外；
   `--prune-days N` 调整，`0` 关闭）：每个分析过的构建会留下约 11 MB 的 pkglist，
