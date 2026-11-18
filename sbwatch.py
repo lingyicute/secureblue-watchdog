@@ -5414,7 +5414,7 @@ def cmd_check(args):
     # explicit --a, a forced re-check of `prev_digest`, or a baseline that had to
     # replace a pruned one - there it miscounted and misnamed what was compared.
     seen = (state.get("created") or "") \
-        if not state_lost and prev["digest"] == state.get("digest") else ""
+        if not args.a and not state_lost and prev["digest"] == state.get("digest") else ""
     if seen:
         uniq, seen_pds = [], {cur["digest"], state.get("digest")}
         seen_ord = _image_order(state)

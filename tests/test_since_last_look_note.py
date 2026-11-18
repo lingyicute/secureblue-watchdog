@@ -65,6 +65,9 @@ class TestSinceLastLookNote(unittest.TestCase):
         self.assertNotIn(NOTE_EN, md)
         self.assertNotIn(NOTE_ZH, md)
 
+    def test_explicit_baseline_matching_state_is_still_explicit(self):
+        self.assertNotIn(NOTE_EN, self._report("--a", IMAGES[0]["digest"]))
+
     def test_builds_newer_than_the_watched_target_are_not_counted_as_skipped(self):
         later = _image(5)
         with tempfile.TemporaryDirectory() as directory:
