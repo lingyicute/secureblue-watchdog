@@ -35,7 +35,12 @@ class TestDowngradeTargetErratum(unittest.TestCase):
                 "count_a": 1, "count_b": 1}
         v = S.verdict_of(diff, LD, {})
         self.assertEqual(v["level"], "consider")
-        self.assertEqual(v["secureblue_notification"]["level"], "none")
+        notice = v["secureblue_notification"]
+        self.assertEqual(notice["level"], "major")
+        self.assertEqual(notice["level_without_advisories"], "none")
+        self.assertEqual(notice["security_advisory_count"], 1)
+        self.assertEqual(v["cves"], [])
+        self.assertNotIn("escalated_by_secureblue_rule", v)
         self.assertEqual(v["already_had"], [])
 
 

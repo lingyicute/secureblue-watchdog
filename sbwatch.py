@@ -2494,7 +2494,11 @@ def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
     # Fedora advisory covering three source packages is one entry in .advisories,
     # while two advisories attached to one build are two entries.
     seen_adv: dict = {}
-    for idx, g in enumerate(groups):
+    # A rollback gains no fix, but its destination is still in
+    # ostree_modified_new. Keep that advisory out of the recommendation while
+    # preserving it for the desktop rule (rpmostreed-deployment-utils.cxx).
+    rollback_targets = [c.get("cls") or {} for c in changed if c.get("dir") == "downgrade"]
+    for idx, g in enumerate([*groups, *rollback_targets]):
         if not g.get("has_security_erratum"):
             continue
         advs = g.get("security_advisories")
@@ -2789,7 +2793,12 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     # counterpart, so no Bodhi match is possible by construction).
     # Not for the bootc branch's unconditional popup: it fires for every staged
     # update whatever it contains, so it says nothing about THIS one.
-    if (sbn["level"] == "major" and not sbn.get("unconditional")
+    # A critical advisory attached only to a rollback destination is not a
+    # reason to recommend installing that older build.
+    forward_major = sbn.get("trivalent_updated") or any(
+        g.get("has_security_erratum") and rpmostree_str2severity(g.get("erratum_severity")) == 4
+        for g in groups)
+    if (sbn["level"] == "major" and not sbn.get("unconditional") and forward_major
             and v["level"] not in ("update-now", "no-change")):
         was = v["level"]
         v["level"] = "update-now"
