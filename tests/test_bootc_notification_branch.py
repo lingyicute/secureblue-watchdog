@@ -65,6 +65,19 @@ class TestBootcNotificationBranch(unittest.TestCase):
         # trivalent is a security-sensitive source, so the pre-escalation level
         self.assertEqual(v["escalated_by_secureblue_rule"], "consider")
 
+    def test_bootc_does_not_guarantee_delivery(self):
+        d = dict(_routine_diff(), bootc_only_old=True)
+        v = S.verdict_of(d, LD, {}, {})
+        delivery = v["secureblue_notification"]["delivery"]
+        self.assertFalse(delivery["observed"])
+        self.assertEqual(delivery["suppress_if_notified_today"], ["critical"])
+        self.assertIn("may show", v["headline"])
+        self.assertIn("可能", v["headline_zh"])
+
+    def test_normal_rule_is_suppressed_by_either_daily_stamp(self):
+        pred = S.secureblue_notification({"changed": [{"name": "kernel", "dir": "upgrade"}]})
+        self.assertEqual(pred["delivery"]["suppress_if_notified_today"], ["critical", "normal"])
+
     def test_do_diff_flags_a_bootc_only_old_image(self):
         src = open(S.__file__, encoding="utf-8").read()
         self.assertIn('diff["bootc_only_old"] = "bootc" in pa and "rpm-ostree" not in pa',

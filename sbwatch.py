@@ -2437,7 +2437,7 @@ def _sev_rank_for_upstream(s) -> int:
 
 
 def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
-    """Which notification (if any) secureblue will pop after this update.
+    """Which notification this update qualifies for, not whether it is delivered.
 
     Uses the *binary package names* that actually moved, exactly as rpm-ostree's
     rpm-diff does.  The `ostree.linux` annotation is not usable for this: it is
@@ -2473,15 +2473,17 @@ def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
                 "security_advisory_count": 0,
                 "level_without_advisories": "major", "advisory_driven": False,
                 # not a judgement about this update: every staged update pops it
-                "unconditional": True,
+                "unconditional": True,  # independent of update contents, not of local state
+                "delivery": {"observed": False, "requires": "staged bootc deployment",
+                             "suppress_if_notified_today": ["critical"]},
                 "severity_basis": ("not consulted: the booted image ships no rpm-ostree, "
                                    "and the bootc branch of secureblue's script notifies "
                                    "for every staged update without reading an rpm diff "
                                    "or advisories"),
                 "why": ["the booted image has no rpm-ostree, so secureblue's script takes "
-                        "its bootc branch and notifies for every staged update"],
+                        "its bootc rule for a staged update"],
                 "why_zh": ["已启动的镜像不含 rpm-ostree，secureblue 的脚本走 bootc 分支，"
-                           "只要有已暂存的更新就一律弹窗"]}
+                           "已暂存的更新符合弹窗条件"]}
 
     # Only errata that (a) shipped a build in THIS image, (b) are type=security and
     # (c) matched this package's release string *exactly* reach .advisories, so
@@ -2542,6 +2544,9 @@ def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
             "kernel_updated": kernel_updated, "trivalent_updated": trivalent_updated,
             "security_advisory_count": len(sevs),
             "level_without_advisories": stock, "advisory_driven": stock != level,
+            "delivery": {"observed": False, "requires": "cached rpm-ostree update",
+                         "suppress_if_notified_today": ["critical", "normal"] if level == "normal"
+                         else ["critical"]},
             "severity_basis": ("rpm-ostree .advisories: released security errata whose "
                                "EVR matches a package in the new image exactly; errata "
                                "matched only after stripping .secureblue.N are excluded"),
@@ -2806,12 +2811,12 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             v["headline_zh"] = ("secureblue 将此更新上调为重大更新：" + v["headline_zh"].strip())
     if sbn["message"]:
         tag = "MAJOR" if sbn["level"] == "major" else "normal"
-        v["headline"] += (f" | secureblue will show a {tag} notification: "
+        v["headline"] += (f" | secureblue may show a {tag} notification: "
                           f"\"{sbn['message']}\" "
                           f"(because: {'; '.join(sbn['why'])})")
         tag_zh = "「重大 / major」" if sbn["level"] == "major" else "「普通 / normal」"
         reasons_zh = sbn.get("why_zh") or sbn.get("why") or []
-        v["headline_zh"] += (f" ｜ secureblue 将弹出{tag_zh}通知："
+        v["headline_zh"] += (f" ｜ secureblue 可能弹出{tag_zh}通知："
                              f"「{sbn['message']}」"
                              f"（触发原因：{'；'.join(reasons_zh)}）")
         if sbn.get("advisory_driven"):
@@ -3204,6 +3209,9 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("")
             msg_str = (f" — \"{_sbn['message']}\"") if _sbn.get("message") else ""
             W(f"- 预测弹窗: {_badge}{msg_str}")
+            if _sbn.get("delivery"):
+                W("- 仅预测触发条件：本机必须有已缓存或已暂存的更新；当天已有重大通知则不再提醒，"
+                  "普通通知也不会在当天重复。本报告未读取用户的通知记录。")
             if _sbn.get("advisory_driven") and _lvl != "unknown":
                 W("- 未叠加软件包的系统（默认安装）: "
                   + ("普通 (normal)——仅因内核升级"
@@ -3242,6 +3250,11 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                       "unknown": ("unknown (incomplete package information)" if verdict.get("package_data_complete") is False
                                   else "unknown (package versions not read)")}.get(_lvl, _lvl)
             W("## secureblue Notification Prediction")
+            if _sbn.get("delivery"):
+                W("")
+                W("Eligibility only: a cached or staged update must exist locally. A critical "
+                  "notification today suppresses all repeats; a normal one suppresses another "
+                  "normal notification today. This report did not observe the user's timestamps.")
             W("")
             msg_str = (f" — \"{_sbn['message']}\"") if _sbn.get("message") else ""
             W(f"- predicted popup: {_badge}{msg_str}")

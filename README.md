@@ -439,3 +439,9 @@ In an analysed `report.md.json`, `from_digest` identifies the comparison baselin
 chronological reordering. `watched_digest` and `watched_version` identify the
 watched tag independently; the state file and Actions `digest` output still
 track that tag, not the reordered comparison target.
+
+Notification levels describe eligibility, not observed delivery. The upstream
+script checks a per-user critical stamp before either update backend and also
+a normal stamp before a normal notification. A stamp is compared to the local
+calendar date, not to a rolling 24-hour window. Image comparisons do not read
+these stamps or establish that a deployment is already cached or staged.
