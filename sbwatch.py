@@ -2735,6 +2735,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
          "important_pkgs": sorted({p["name"] for g in imp for p in g["pkgs"]}),
          "cves": cves, "advisory_wide_cves": sorted(shared_cves),
           "cves_dropped": sorted({c for g in lost for c in g["dropped"]}),
+         "cves_reverted": sorted({c for g in lost for c in g.get("reverted") or ()}),
          "downgrades": [g["src"] for g in down], "severity_rank": sev,
          "kernel_changed": kernel_moved, "kernel_in_diff": kernel_in_diff,
          "kernel_annotation_changed": kernel_annot_moved,
@@ -2984,9 +2985,21 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                                 + "，因此“无安全修复”并未被证实"
             if v["level"] == "skip":
                 v["level"] = "consider"
-    if v["cves_dropped"]:
-        drop_txt = clip_list(v["cves_dropped"], 6)
-        drop_txt_zh = clip_list(v["cves_dropped"], 6, lang="zh", joiner="，")
+    # An id that left the changelog of a package this update *downgrades* is the
+    # real revert the note below tells the reader to look for, not a changelog
+    # edit (a rollback of dnf5 5.4.8.0-2 -> 5.4.7.0-1 loses CVE-2026-123177).
+    reverted = v["cves_reverted"]
+    edited = [c for c in v["cves_dropped"] if c not in reverted]
+    if reverted:
+        v["headline"] += (" | WARNING: the downgraded packages no longer carry the "
+                          "changelog entries for " + clip_list(reverted, 6)
+                          + " - the downgrade most likely reverts these fixes")
+        v["headline_zh"] += (" ｜ 警告：被降级的软件包不再带有以下 CVE 的更新日志条目："
+                             + clip_list(reverted, 6, lang="zh", joiner="，")
+                             + "——降级很可能回退了这些修复")
+    if edited:
+        drop_txt = clip_list(edited, 6)
+        drop_txt_zh = clip_list(edited, 6, lang="zh", joiner="，")
         # CVE ids that were in the old changelog and are not in the new one usually
         # mean the maintainer (or Fedora's changelog trimming) removed the entry -
         # the version still moved forward. Reporting it is useful; treating it as
@@ -3117,7 +3130,8 @@ def group_by_src(changed: list) -> list:
             # literal (two sets, five lists) was allocated again for every binary
             # subpackage, only to be thrown away.
             g = groups[key] = {"src": key, "pkgs": [], "security": False,
-                               "cves": set(), "dropped": set(), "aliases": [],
+                               "cves": set(), "dropped": set(), "reverted": set(),
+                               "aliases": [],
                                "advisory_wide_cves": set(),
                                "why": [], "sev_rank": 0, "sec_sev_rank": 0, "important": False,
                                "downgrade": False, "has_erratum": False,
@@ -3132,6 +3146,9 @@ def group_by_src(changed: list) -> list:
         is_down = c.get("dir") == "downgrade"
         g["important"] = g["important"] or bool(cls.get("important_src"))
         g["dropped"].update(cls.get("cves_dropped") or [])
+        if is_down:
+            # these entries are gone because the build itself went backwards
+            g["reverted"].update(cls.get("cves_dropped") or [])
         if not is_down:
             g["security"] = g["security"] or bool(cls.get("security"))
             g["cves"].update(cls.get("cves") or [])
@@ -3184,6 +3201,7 @@ def group_by_src(changed: list) -> list:
         g["cves"] = sorted(g["cves"])
         g["advisory_wide_cves"] = sorted(g["advisory_wide_cves"])
         g["dropped"] = sorted(g["dropped"])
+        g["reverted"] = sorted(g["reverted"])
         g["changelog_cves"] = sorted(g["changelog_cves"])
         rep = min(g["pkgs"], key=lambda p: (p["name"] != g["src"], p["name"]))
         o, n = rep["old"], rep["new"]
@@ -3507,8 +3525,11 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               "列出仅供核对。")
             W("")
             for g in g_lost:
+                lost_rev = (f"——该包被降级，很可能回退了："
+                            f"{clip_list(g['reverted'], 8, lang='zh', joiner='，')}"
+                            if g.get("reverted") else "")
                 W(f"- `{g['src']}`: 不再提及 "
-                  f"{clip_list(g['dropped'], 8, lang='zh', joiner='，')}")
+                  f"{clip_list(g['dropped'], 8, lang='zh', joiner='，')}{lost_rev}")
         else:
             W(f"## CVE ids the new changelogs no longer mention "
               f"({len(g_lost)} source package(s))")
@@ -3517,7 +3538,9 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               "a real revert shows up as a downgrade. Listed so that you can check.")
             W("")
             for g in g_lost:
-                W(f"- `{g['src']}`: no longer mentions {clip_list(g['dropped'], 8)}")
+                lost_rev = (f" — this package is downgraded, which most likely reverts: "
+                            f"{clip_list(g['reverted'], 8)}" if g.get("reverted") else "")
+                W(f"- `{g['src']}`: no longer mentions {clip_list(g['dropped'], 8)}{lost_rev}")
         W("")
 
     if g_sec:
