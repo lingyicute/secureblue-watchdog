@@ -5156,17 +5156,17 @@ def cmd_check(args):
     state_lost = False
     state_base_dig = None
     state_base_lbl = None
-    if not ref_a and state.get("digest") and state["digest"] != cur["digest"]:
-        state_base_dig = state["digest"]
-        state_base_lbl = _state_label(state)
-    elif (not ref_a and state.get("digest") == cur["digest"]
-          and state.get("prev_digest") and state["prev_digest"] != cur["digest"]):
-        # `check --force` on an unchanged tag re-analyses the last transition:
-        # reuse the baseline recorded in `prev_digest` instead of losing it or
-        # reversing a rollback via the history scan.
+    if (not ref_a and state.get("prev_digest") and state["prev_digest"] != cur["digest"]
+            and (state.get("digest") == cur["digest"] or state.get("last_verdict") == "unknown")):
+        # A force re-run or an incomplete check has not established a new
+        # comparison baseline. Keep the last usable one even if the tag has
+        # advanced again, so changes in the inconclusive interval are not lost.
         state_base_dig = state["prev_digest"]
         state_base_lbl = clip_text(state.get("prev_label") or state["prev_digest"],
                                    BASELINE_LABEL_CAP, lang="both")
+    elif not ref_a and state.get("digest") and state["digest"] != cur["digest"]:
+        state_base_dig = state["digest"]
+        state_base_lbl = _state_label(state)
     if state_base_dig:
         # Resolved here, before the baseline is settled: the image analysed last
         # time can be gone by now (registries prune old builds, and a schedule
