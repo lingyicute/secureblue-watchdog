@@ -379,7 +379,7 @@ CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并�
 
 ## GitHub Action
 
-仓库自带 `.github/workflows/sbwatch.yml`，由 [worker-cron](https://github.com/lingyicute/worker-cron) 驱动，每半小时就会跑一次：
+仓库自带 `.github/workflows/sbwatch.yml`。其内置计划是每小时 UTC 第 20 分钟（`20 * * * *`）；外部调度器也可通过 `workflow_dispatch` 额外触发，实际频率取决于外部配置：
 
 - cache `~/.cache/sbwatch` (pkglist + Bodhi + state.json)，按 image+arch 分命名空间，
   并有一个 prune 步骤只保留最近 7 份（否则 `state.json` 会被 LRU 挤掉，`check` 就失去基线）；
