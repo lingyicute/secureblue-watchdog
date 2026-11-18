@@ -4460,6 +4460,11 @@ def cmd_history(args):
               f"其中 {dup} 次构建与前一构建共享同一个 rpm-ostree inputhash。"
               f"该值来自 Fedora 基础镜像的 compose，看不到 secureblue 自己的重建，"
               f"因此并不能证明软件包集合没有变化——请用 `diff` 对比 digest 来确认。")
+    # The table clips an untagged row's digest to 19 characters, and a clipped digest
+    # is no ref: `diff` refuses it. Give each row's whole digest once.
+    print("\n  full digests, oldest first / 完整 digest，从旧到新：")
+    for r in reversed(rows):
+        print(f"    {ts_short(r.get('created') or '?')}  {r['digest']}")
     oldest = rows[-1]
     print("\n  every image is addressable by its (immutable) digest, e.g. / "
           "每个镜像都可以用其（不可变的）digest 定位，例如：")
