@@ -5722,6 +5722,34 @@ def add_common(p):
                         "cosign 校验失败或缺少 cosign 时直接失败退出")
 
 
+def _check_output_paths(parser, args):
+    """Fail before any network work if two outputs can overwrite each other."""
+    paths = {}
+    if args.cmd == "check":
+        report = args.report or "report.md"
+        paths = {"--report": report, "report JSON": report + ".json",
+                 "--state": args.state or os.path.expanduser("~/.cache/sbwatch/state.json"),
+                 "GITHUB_OUTPUT": os.environ.get("GITHUB_OUTPUT")}
+    elif args.cmd == "diff":
+        paths = {"--markdown": args.markdown, "--json-out": args.json_out}
+    seen = {}
+    for option, path in paths.items():
+        if not path:
+            continue
+        canonical = os.path.realpath(path)
+        try:
+            st = os.stat(path)
+            keys = (canonical, (st.st_dev, st.st_ino))
+        except OSError:
+            keys = (canonical,)
+        for key in keys:
+            if key in seen:
+                other = seen[key]
+                parser.error(T(f"{option} and {other} must use different output paths",
+                               f"{option} 与 {other} 必须使用不同的输出路径"))
+            seen[key] = option
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="sbwatch", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -5828,6 +5856,7 @@ def main(argv=None):
     if args.require_cosign and not args.cosign_pub:
         ap.error(T("--require-cosign requires --cosign-pub",
                    "--require-cosign 必须同时提供 --cosign-pub"))
+    _check_output_paths(ap, args)
     return args.func(args)
 
 
