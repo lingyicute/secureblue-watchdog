@@ -3764,7 +3764,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("已发布的 **stable** Fedora 安全更新，其构建比镜像内的更新——"
               "这些是源码构建差距，不代表镜像内的每个二进制都受影响。")
             W("")
-            W("| 软件包 | 镜像内版本 | 新 stable 构建 | 严重度 | 勘误 |")
+            W("| 软件包 | 镜像内版本 | 新 stable 构建 | 最高严重度 | 最新构建的勘误 |")
             W("|---|---|---|---|---|")
         else:
             W(f"## What your (current or new) image is still missing ({len(backlog)})")
@@ -3772,7 +3772,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("Published **stable** Fedora security updates whose build is newer than the one in "
               "the image. These are source-build gaps, not proof that every binary is affected.")
             W("")
-            W("| package | in image | newer stable build | severity | erratum |")
+            W("| package | in image | newer stable build | max severity | latest build erratum |")
             W("|---|---|---|---|---|")
         for r in backlog[:25]:
             W(f"| `{r['name']}` | {r['have']} | **{r['want']}** | {r['severity'] or '?'} | {r.get('alias') or '—'} |")
@@ -3951,6 +3951,9 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
     # `medium` erratum rank 0 - i.e. sort *below* a `low` one.
     order = {"critical": 4, "urgent": 4, "important": 3, "high": 3,
              "moderate": 2, "medium": 2, "low": 1}
+    def with_epoch(evr, epoch):
+        return f"{epoch}:{evr}" if epoch not in (None, "0", 0) else evr
+
     rows = []
     queried = audit_failed = audit_skipped = 0
     mem = getattr(bodhi, "_mem", None)
@@ -3994,31 +3997,32 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
                         best = cand
                 if best is None:
                     continue
-                # full lists: the CLI preview and the report both clip *with a
-                # stated count*, and the JSON export must stay complete
                 cves, shared = _advisory_cve_scope(u)
+                have_epoch = _comparable_epoch(p)
+                want_epoch = best.get("epoch")
+
+                build = {
+                    "name": n,
+                    "have": with_epoch(_build_evr(p) if n != src else p["evr"], have_epoch),
+                    "want": with_epoch(f"{best['version']}-{best['release']}", want_epoch),
+                    "have_epoch": have_epoch, "want_epoch": want_epoch,
+                    "alias": u["alias"], "notes": u.get("notes") or "",
+                }
+                advisory = {**build, "severity": u.get("severity"),
+                            "cves": sorted(cves), "advisory_wide_cves": sorted(shared)}
                 if row is None:
-                    row = {"name": n, "src": src,
-                           "have": _build_evr(p) if n != src else p["evr"],
-                           "want": f"{best['version']}-{best['release']}",
-                           "_best": best,
-                           "alias": u["alias"], "severity": u.get("severity"),
-                           "cves": cves, "advisory_wide_cves": shared,
-                           "notes": u.get("notes") or ""}
+                    row = {**build, "src": src, "_best": best, "severity": u.get("severity"),
+                           "cves": cves, "advisory_wide_cves": shared, "advisories": [advisory]}
                 else:
                     row["cves"].update(cves)
                     row["advisory_wide_cves"].update(shared)
+                    row["advisories"].append(advisory)
                     if evr_cmp(row["_best"], best) < 0:
                         row["_best"] = best
-                        row["want"] = f"{best['version']}-{best['release']}"
-                        row["alias"] = u["alias"]
-                        if u.get("notes"):
-                            row["notes"] = u.get("notes") or ""
+                        row.update(build)
                     if order.get((u.get("severity") or "").lower(), 0) > \
                             order.get((row["severity"] or "").lower(), 0):
                         row["severity"] = u.get("severity")
-                        if not row["notes"] and u.get("notes"):
-                            row["notes"] = u.get("notes") or ""
                 break
         if row is not None:
             row.pop("_best", None)
@@ -4093,6 +4097,9 @@ def cmd_backlog(args):
     print(f"{args.image}:{args.ref}  version 版本 {ver}  ({rel})")
     print(T(f"{len(rows)} package(s) in this image are behind a published STABLE security update",
             f"此镜像中有 {len(rows)} 个软件包落后于已发布的 STABLE 安全更新") + "\n")
+    if rows:
+        print(T("  newest candidate build and its alias; highest severity across matching errata",
+                "  显示最新候选构建及其勘误编号；严重度取匹配勘误中的最高值"))
     for r in rows:
         print(f"  {r['name']:28} {r['have']:>26}  ->  {r['want']:<26} "
               f"{(r['severity'] or '?'):9} {r['alias']}")

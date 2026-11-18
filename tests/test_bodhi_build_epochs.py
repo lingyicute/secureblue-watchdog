@@ -33,3 +33,22 @@ class TestBuildEpochs(unittest.TestCase):
         p = dict(FIXTURE["images"]["new"]["packages"]["dnf5"], name="dnf5-libs", epoch="8")
         self.assertIsNone(S._comparable_epoch(p))
         self.assertTrue(S._is_behind(dict(p, source_epoch="0"), "1", "1.fc45", candidate_epoch=1))
+
+
+class TestBacklogEpochProvenance(unittest.TestCase):
+    def test_epoch_and_severity_can_be_traced_to_their_respective_builds(self):
+        from test_sbwatch import pkg
+        old = dict(pkg("openssl", "3.5.7-1.fc43", epoch="1"), source_epoch="1")
+        latest = "openssl-3.5.9-1.fc43"
+        previous = "openssl-3.5.8-1.fc43"
+        base = {"status": "stable", "type": "security"}
+        updates = [dict(base, alias="previous", nvrs=[previous], build_epochs={previous: "1"},
+                        severity="urgent", notes="text for previous only"),
+                   dict(base, alias="FEDORA-2026-93eed17997", nvrs=[latest], build_epochs={latest: "1"},
+                        severity="high")]
+        rows, _ = S.security_backlog({"openssl": old}, "F43", FakeBodhi({"openssl": updates}))
+        row, = rows
+        self.assertEqual((row["have"], row["want"]), ("1:3.5.7-1.fc43", "1:3.5.9-1.fc43"))
+        self.assertEqual((row["alias"], row["severity"], row["notes"]),
+                         ("FEDORA-2026-93eed17997", "urgent", ""))
+        self.assertEqual([a["severity"] for a in row["advisories"]], ["urgent", "high"])
