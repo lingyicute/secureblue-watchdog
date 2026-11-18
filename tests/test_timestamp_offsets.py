@@ -16,6 +16,11 @@ class TestTimestampOffsets(unittest.TestCase):
         self.assertEqual((a2["ref"], b2["ref"]), ("old", "new"))
 
 
+    def test_utc_display_matches_the_sorted_instant_across_midnight(self):
+        self.assertEqual(S.ts_short("2026-11-18T01:32:22.123+02:00"),
+                         "2026-11-17T23:32:22")
+        self.assertEqual(S.ts_short(None), "")
+
     def test_nanosecond_and_compact_offset_timestamps_order_cleanly(self):
         earlier = "2026-11-17T03:06:51.981777100+0200"
         later = "2026-11-17T01:06:51.981777207Z"

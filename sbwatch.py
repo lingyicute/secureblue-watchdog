@@ -279,10 +279,8 @@ def clip_hash(s, n: int) -> str:
 
 
 def ts_short(s) -> str:
-    """Timestamp to whole seconds. Fractional seconds carry nothing the report
-    compares on (builds are identified by digest), so only they are dropped -
-    everything else is kept, and no marker is needed for that one loss."""
-    return str(s or "")[:19]
+    """Whole seconds in UTC for the history column and state labels."""
+    return _ts_order(s)[:19]
 
 
 _RFC3339_RE = re.compile(
