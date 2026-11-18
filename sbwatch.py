@@ -2248,6 +2248,13 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                         f"(matched Fedora's {sorted(hit_corresponding)[0]} only after "
                         f"stripping the local release marker from {new['release']} - "
                         f"rpm-ostree does not attach it to this build)")
+            elif SEV_RANK.get(sev_word, 0) >= 3 or any(_advisory_cve_scope(u)):
+                # A released erratum of another type that ranks high or lists CVE
+                # ids marks the package security-relevant below, so name it: the
+                # evidence cell of shadow-utils (bugfix, severity=high) was empty.
+                info["why"].append(
+                    f"erratum/勘误 {u['alias']}: type={u.get('type')} "
+                    f"severity={u.get('severity')} status={status}")
     # A CVE carried by the new build's pushed erratum is not a dropped fix even if
     # the RPM changelog entry that used to mention it was trimmed or reworded.
     info["cves_dropped"] -= info["cves"]
