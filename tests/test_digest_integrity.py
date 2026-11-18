@@ -63,12 +63,31 @@ class TestDigestIntegrity(unittest.TestCase):
 
         reg = S.Registry("secureblue/x", arch="amd64")
         reg._open = lambda path, accept: Resp(idx)
-        reg.get = lambda path, accept: plat if path.startswith("manifests/") else b"{}"
+        paths = []
+
+        def get(path, accept):
+            paths.append(path)
+            return plat
+
+        reg.get = get
         out = reg.resolve("latest", light=True)
         self.assertEqual(out["index_digest"], "sha256:" + idx_hex)
         self.assertEqual(out["digest"], "sha256:" + plat_hex)
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(S.MalformedManifest):
             reg.resolve("latest", light=False)
+        self.assertEqual(paths, [f"manifests/sha256:{plat_hex}"] * 2)
+
+    def test_invalid_public_digest_cannot_make_a_request(self):
+        reg = S.Registry("secureblue/x", arch="amd64")
+
+        def unexpected(*args):
+            self.fail("invalid digest reached the transport")
+
+        reg._open = unexpected
+        with self.assertRaises(S.RegistryError):
+            reg.resolve("sha256:bad")
+        with self.assertRaises(S.RegistryError):
+            reg.fetch_blob("sha256:bad", "unused")
 
     def test_fetch_blob_removes_dest_on_digest_failure(self):
         class Resp(io.BytesIO):

@@ -859,10 +859,14 @@ class Registry:
     @staticmethod
     def _validate_ref(ref: str) -> str:
         s = str(ref or "")
-        if not s or s in (".", "..") or re.search(r"[/\\?#%\s\x00-\x1f\x7f]", s):
-            raise RegistryError(T(f"invalid image tag or digest: {ref!r}",
-                                  f"无效的镜像 tag 或 digest：{ref!r}"))
-        return s
+        if ":" in s:
+            digest = _clean_sha256_header(s)
+            if digest and s == s.strip():
+                return digest
+        elif re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", s):
+            return s
+        raise RegistryError(T(f"invalid image tag or digest: {ref!r}",
+                              f"无效的镜像 tag 或 digest：{ref!r}"))
 
     def _open(self, path: str, accept: str, *, _refreshed: bool = False):
         url = f"https://{self.host}/v2/{self.repo}/{path.lstrip('/')}"
@@ -964,7 +968,7 @@ class Registry:
         # both the digest that was asked for and the one the registry announced
         # have to be the digest of the bytes that were read
         check_digest(actual, what, f"manifest {clip_hash(what, 19)}")
-        check_digest(actual, top_digest, f"manifest {what}")
+        check_digest(actual, top_digest, f"manifest {what}", required=bool(top_digest))
         top_digest = "sha256:" + actual
         man = json.loads(raw)
         if not isinstance(man, dict):
@@ -983,7 +987,9 @@ class Registry:
                 raise NoArchManifest(T(f"no {self.arch} manifest in {self.repo}:{what}",
                                        f"{self.repo}:{what} 中没有 {self.arch} 架构的 manifest"))
             ann.update(dict(pick.get("annotations") or {}))
-            pick_dig = pick.get("digest") or ""
+            pick_dig = _clean_sha256_header(pick.get("digest"))
+            if not pick_dig:
+                raise ValueError("platform descriptor requires a sha256 digest")
             raw = self.get(f"manifests/{pick_dig}", MANIFEST_ACCEPT)
             plat_hex = hashlib.sha256(raw).hexdigest()
             check_digest(plat_hex, pick_dig,
@@ -998,7 +1004,9 @@ class Registry:
         out["manifest"] = man
         cfg = {}
         if not light:
-            cfg_dig = (man.get("config") or {}).get("digest") or ""
+            cfg_dig = _clean_sha256_header((man.get("config") or {}).get("digest"))
+            if not cfg_dig:
+                raise ValueError("config descriptor requires a sha256 digest")
             raw = self.get(f"blobs/{cfg_dig}",
                            "application/vnd.oci.image.config.v1+json")
             check_digest(hashlib.sha256(raw).hexdigest(), cfg_dig,
@@ -1055,6 +1063,9 @@ class Registry:
         Nothing is ever held fully in memory: a chunk is read, decompressed and
         written 1 MiB at a time, and either cap aborts as soon as it is crossed.
         """
+        digest = _clean_sha256_header(digest)
+        if not digest:
+            raise RegistryError(T("layer requires a valid sha256 digest", "层需要有效的 sha256 摘要"))
         d = clip_hash(digest, 19)
         with self._open(f"blobs/{digest}", "application/octet-stream") as r:
             cl = r.headers.get("Content-Length")
