@@ -3842,11 +3842,6 @@ BACKLOG_POOL = {
     "wireless-regdb", "linux-firmware", "runc", "crun", "cri-o",
     "podman", "skopeo", "composefs", "cryptsetup", "keyutils",
 }
-# Default for --backlog-candidates: every pool source the image has. The former 45
-# was fewer than the live image's 55 candidates, so the same ten (keyutils, krb5,
-# openvpn, podman, python-pip, qt6-qtbase, skopeo, unbound, wireguard-tools,
-# wireless-regdb) were cut off on every run and never audited at all.
-BACKLOG_CANDIDATES = len(BACKLOG_POOL)
 
 
 def _is_behind(p: dict, cand_version: str, cand_release: str,
@@ -3884,7 +3879,7 @@ def package_coverage(pkgs: dict) -> dict:
 
 
 def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
-                     limit: int = BACKLOG_CANDIDATES) -> tuple:
+                     limit: int | None = None) -> tuple:
     """Stable Fedora security errata whose build is newer than what the image ships.
 
     Returns (rows, coverage). The coverage numbers matter: `limit` truncates the
@@ -3895,32 +3890,31 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
     visible instead of quietly shrinking the audit.
     """
     want = {}
+    present = set()
+    eligible = set()
     for n, p in pkgs.items():
-        if not _src_matches_pool(p["src"], BACKLOG_POOL):
+        src = p["src"]
+        pool_entries = {src, re.sub(r"\.\d+$", "", src)} & BACKLOG_POOL
+        if not pool_entries:
             continue
+        present.update(pool_entries)
         if _is_third_party(p) and not re.search(r"\.secureblue\.\d+", p.get("release") or ""):
             continue
-        want.setdefault(p["src"], []).append((n, p))
+        eligible.update(pool_entries)
+        want.setdefault(src, []).append((n, p))
     # Security-sensitive sources first, as in classify_order(): `limit` and
     # --max-bodhi both cut this list from its end, and in plain name order the
     # live image's 55 candidates lost systemd, webkitgtk and xdg-desktop-portal
     # to the default limit of 45 on every single run.
     candidates = sorted(want, key=lambda s: (not _src_matches_pool(s, IMPORTANT_SRC), s))
+    # Multiple installed sources can map to one pool entry (e.g. python3.13
+    # and python3.14). An omitted limit must not drop either one.
     chosen = candidates[:limit]
-    # a pool entry counts as covered when some in-image source maps onto it
-    # (directly, or via the versioned-name rule: python3.14 -> python3)
-    covered = set()
-    for s in want:
-        if s in BACKLOG_POOL:
-            covered.add(s)
-        base = re.sub(r"\.\d+$", "", s)
-        if base != s and base in BACKLOG_POOL:
-            covered.add(base)
+    skipped_names = candidates[len(chosen):]
     cov = {**package_coverage(pkgs), "candidates": len(candidates), "checked": len(chosen),
-           "skipped": len(candidates) - len(chosen),
-           "skipped_names": candidates[limit:],
-           "pool_size": len(BACKLOG_POOL),
-           "pool_missing": sorted(BACKLOG_POOL - covered)}
+           "skipped": len(skipped_names), "skipped_names": skipped_names,
+           "pool_size": len(BACKLOG_POOL), "pool_missing": sorted(BACKLOG_POOL - present),
+           "pool_ineligible": sorted(present - eligible)}
     # Both spellings of the middle rank: Bodhi's API answers with its own words
     # (unspecified/low/medium/high/urgent) while the updateinfo mapping uses the
     # RHEL ones (Low/Moderate/Important/Critical). Listing only "moderate" made a
@@ -4032,6 +4026,12 @@ def coverage_line(cov: dict) -> str:
              if cov.get("truncated") else "")
           + (f"；BACKLOG_POOL 中有 {len(cov['pool_missing'])} 个条目不在已解析的软件包表中"
              if cov.get("pool_missing") else ""))
+    if cov.get("pool_ineligible"):
+        excluded = cov["pool_ineligible"]
+        en += (f"; {len(excluded)} pool entries are installed but not eligible for Fedora "
+               f"matching (third-party RPMs: {clip_list(excluded, 6)})")
+        zh += (f"；{len(excluded)} 个候选条目已安装但不适用 Fedora 匹配"
+               f"（第三方 RPM：{clip_list(excluded, 6, lang='zh', joiner='，')}）")
     if cov.get("rpmdb_complete") is False:
         en += "; RPM inventory incomplete: missing packages or fields may hide updates"
         zh += "；RPM 包表不完整：缺失的软件包或字段可能掩盖更新"
@@ -4055,7 +4055,7 @@ def cmd_backlog(args):
     # --backlog-candidates caps how many source packages get audited, as it does
     # for `check --audit`; --max-bodhi only caps the API calls spent on them.
     rows, cov = security_backlog(pkgs, rel, bodhi,
-                                 limit=max(1, args.backlog_candidates))
+                                 limit=args.backlog_candidates)
     ver = img["annotations"].get("org.opencontainers.image.version", "?")
     print(f"{args.image}:{args.ref}  version 版本 {ver}  ({rel})")
     print(T(f"{len(rows)} package(s) in this image are behind a published STABLE security update",
@@ -4938,8 +4938,8 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
         # larger one - `--max-bodhi 10 --audit` still made up to 45 calls) and one
         # shared answer cache, so a source package already looked up for the diff
         # costs nothing here.
-        n_cand = max(1, int(getattr(args, "backlog_candidates", BACKLOG_CANDIDATES)))
-        backlog, coverage = security_backlog(pb, rel, bodhi, limit=n_cand)
+        backlog, coverage = security_backlog(pb, rel, bodhi,
+                                              limit=getattr(args, "backlog_candidates", None))
     if bodhi is not None:
         bstate = {"failed": bodhi.failed, "skipped": bodhi.skipped,
                   "truncated": sorted(bodhi.truncated_src)}
@@ -5501,9 +5501,9 @@ def add_common(p):
                         "不查询 Fedora Bodhi（仅按更新日志匹配 CVE）")
     p.add_argument("--max-bodhi", type=int, default=100,
                    help="cap on Bodhi API calls / Bodhi API 调用上限")
-    p.add_argument("--backlog-candidates", type=int, default=BACKLOG_CANDIDATES,
+    p.add_argument("--backlog-candidates", type=int, default=None,
                    help="with --audit: how many candidate source packages the "
-                        "'still behind' check may look at (it shares the --max-bodhi "
+                        "'still behind' check may look at (default: all candidates; shares the --max-bodhi "
                         "call budget) / 配合 --audit：'仍落后' 检查最多查看多少个候选源码包"
                         "（与 --max-bodhi 共用调用预算）")
     p.add_argument("--audit", action="store_true",
@@ -5615,6 +5615,8 @@ def main(argv=None):
     p.set_defaults(func=cmd_check)
 
     args = ap.parse_args(argv)
+    if args.backlog_candidates is not None and args.backlog_candidates < 1:
+        ap.error(T("--backlog-candidates must be positive", "--backlog-candidates 必须为正数"))
     if args.cmd == "backlog" and args.no_bodhi:
         ap.error(T("backlog requires Bodhi; --no-bodhi is incompatible",
                    "backlog 需要查询 Bodhi，不能与 --no-bodhi 同用"))

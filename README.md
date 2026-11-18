@@ -149,7 +149,7 @@ sbwatch layers A B            # chunk 级别 diff + 预估下载大小
 sbwatch pkgs [ref]            # 某个镜像的精确包列表
 sbwatch diff A B              # 精确包 diff + CVE 分类
 sbwatch backlog [ref]         # 这个镜像还缺哪些已发布的 stable 安全更新
-                              #   --backlog-candidates N：审计最多看多少个候选源码包（默认 64，即整个 BACKLOG_POOL）
+                              #   --backlog-candidates N：审计最多看多少个候选源码包（默认不限，仍受 --max-bodhi 限制）
 sbwatch check                 # 有状态的 digest watch，用于 CI/cron -> report.md + verdict + $GITHUB_OUTPUT
 
 # A/B/ref 可以是：
@@ -203,7 +203,7 @@ python3 sbwatch.py diff 20260916 latest --cosign-pub ./cosign.pub --require-cosi
 python3 sbwatch.py check --image secureblue/silverblue-main-hardened --to latest --report report.md
 # check 的 --audit（默认开）与 diff 共用同一个 Bodhi 调用预算和同一份答案缓存：
 # --max-bodhi 10 就是最多 10 次调用，不会再被内部悄悄放大到 45 次；候选上限用
-# --backlog-candidates 单独控制
+# --backlog-candidates 单独控制；已安装的第三方包与未安装的候选会分别披露。
 # 使用 state.json 中的上次镜像作基线时，check 保留「上次 → 当前」的实际方向；
 # tag 回滚会报告降级，不会按时间反转成安全升级。显式 --a 仍遵守 --keep-order。
 
