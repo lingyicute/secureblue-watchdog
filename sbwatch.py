@@ -1270,8 +1270,8 @@ def pick_tar_member(tf, match: str, label: str = ""):
 
     "Largest", not "first": the live rpmdb chunk carries TWO entries whose name
     contains `rpmdb.sqlite` - the real ~92 MiB database under
-    `usr/lib/sysimage/rpm-ostree-base-db/` and a 0-byte placeholder at
-    `usr/share/rpm/rpmdb.sqlite`. Tar member order is a property of whatever
+    `usr/lib/sysimage/rpm-ostree-base-db/` and a hard link to it at
+    `usr/share/rpm/rpmdb.sqlite` (0 bytes in the tar). Tar member order is a property of whatever
     tool wrote the layer, not a contract; picking by size makes the choice
     order-independent instead of silently extracting an empty database the day
     the order flips.
