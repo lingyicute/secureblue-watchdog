@@ -1036,11 +1036,9 @@ class Registry:
             if not ldig:
                 raise ValueError(f"invalid layer digest {l['digest']!r}")
             raw_sz = l["size"]
-            if isinstance(raw_sz, bool):
-                raise TypeError("layer size must not be boolean")
-            sz = int(raw_sz)
-            if sz < 0:
-                raise ValueError(f"negative layer size {sz}")
+            if type(raw_sz) is not int or not 0 <= raw_sz < 2 ** 63:
+                raise ValueError("layer size must be a non-negative 64-bit integer")
+            sz = raw_sz
             stab_raw = la.get("org.chunkah.stability", 0)
             if isinstance(stab_raw, bool):
                 raise TypeError("layer stability must not be boolean")
