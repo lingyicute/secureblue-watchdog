@@ -203,16 +203,19 @@ jobs:
       # 'unknown' run red on the promise that its report was uploaded first.
       - name: Upload report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always() && steps.check.outputs.verdict != 'no-update' && steps.check.outputs.verdict != ''
+        if: ${{ !cancelled() && steps.check.outputs.verdict != 'no-update' && steps.check.outputs.verdict != '' }}
         with:
-          name: update-watch-${{ github.run_number }}
+          name: update-watch-${{ github.run_number }}-${{ github.run_attempt }}
           path: |
             report.md
             report.md.json
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7
 
       - name: Should we notify?
+        # Cache pruning/history/artifact failures should not suppress a report
+        # produced by a successful check.
+        if: ${{ !cancelled() && steps.check.outcome == 'success' }}
         id: notify
         env:
           VERDICT: ${{ steps.check.outputs.verdict }}
@@ -229,7 +232,7 @@ jobs:
           echo "verdict=$verdict post=$post post_skip=$POST_SKIP_VERDICT fail_on_security=$FAIL_ON_SECURITY"
 
       - name: Comment on (or open) a sticky issue
-        if: steps.notify.outputs.post == 'true'
+        if: ${{ !cancelled() && steps.notify.outputs.post == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERDICT: ${{ steps.notify.outputs.verdict }}
