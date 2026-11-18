@@ -286,24 +286,32 @@ _RFC3339_RE = re.compile(
     r"(Z|[+-]\d{2}:?\d{2})$", re.I)
 
 
-def _ts_order(s) -> str:
-    """Sortable key for an RFC 3339 timestamp, normalised to UTC (Python 3.10+)."""
-    raw = str(s or "").strip()
-    if not raw:
+def _utc_timestamp(s) -> str:
+    """Canonical UTC with nine fractional digits, or empty for invalid input."""
+    match = _RFC3339_RE.fullmatch(str(s or "").strip())
+    if not match:
         return ""
-    m = _RFC3339_RE.match(raw)
-    if m:
-        day, hms, frac, zone = m.groups()
-        z = "+00:00" if zone.upper() == "Z" else (
-            zone if ":" in zone else f"{zone[:3]}:{zone[3:]}")
-        try:
-            dt = datetime.datetime.fromisoformat(f"{day}T{hms}{z}")
-            utc = dt.astimezone(datetime.timezone.utc)
-            ns = (frac or "").ljust(9, "0")[:9]
-            return utc.strftime("%Y-%m-%dT%H:%M:%S") + f".{ns}Z"
-        except ValueError:
-            pass
-    return raw
+    day, hms, frac, zone = match.groups()
+    offset = "+00:00" if zone.upper() == "Z" else zone
+    if ":" not in offset:
+        offset = f"{offset[:3]}:{offset[3:]}"
+    if int(offset[1:3]) >= 24 or int(offset[4:]) >= 60:
+        return ""
+    try:
+        dt = datetime.datetime.fromisoformat(f"{day}T{hms}{offset}")
+        utc = dt.astimezone(datetime.timezone.utc)
+        return utc.replace(tzinfo=None).isoformat(timespec="seconds") + f".{(frac or '').ljust(9, '0')[:9]}Z"
+    except (ValueError, OverflowError):
+        return ""
+
+
+def _ts_order(s) -> str:
+    """Sortable timestamp key, also accepting legacy state/report timestamps."""
+    return _utc_timestamp(s) or str(s or "").strip()
+
+
+def _image_order(img: dict) -> str:
+    return _ts_order(img.get("created_order") or img.get("created"))
 
 
 def rfc3339_seconds(s) -> str:
@@ -1037,10 +1045,18 @@ class Registry:
             ann = {**dict((cfg.get("config") or {}).get("Labels") or {}), **ann}
         out["config"] = cfg
         out["annotations"] = ann
-        # RFC3339 with nanoseconds -> whole seconds + zone. Only the fractional
-        # part goes, and nothing downstream compares finer than a second.
-        out["created"] = rfc3339_seconds(cfg.get("created")
-                                         or ann.get("org.opencontainers.image.created"))
+        # On secureblue the platform annotation can be more precise than the
+        # config. Refine the config's second only with the matching annotation,
+        # never with the inherited Labels value from an intermediate build.
+        key = "org.opencontainers.image.created"
+        config_time = _utc_timestamp(cfg.get("created"))
+        manifest_time = _utc_timestamp((man.get("annotations") or {}).get(key))
+        if (config_time and manifest_time and config_time.endswith(".000000000Z")
+                and config_time[:19] == manifest_time[:19]):
+            config_time = manifest_time
+        created = config_time or manifest_time or _utc_timestamp(ann.get(key))
+        out["created_order"] = created
+        out["created"] = created[:19] + "Z" if created else ""
         out["layers"] = []
         layers_raw = man["layers"]
         if not isinstance(layers_raw, list):
@@ -4231,7 +4247,7 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
         "version": cur["annotations"].get("org.opencontainers.image.version"),
         "inputhash": cur["annotations"].get("rpmostree.inputhash"),
         "kernel": cur["annotations"].get("ostree.linux"), "image": cur, "tags": [to]}}
-    cur_time = _ts_order(cur.get("created"))
+    cur_time = _image_order(cur)
     sig_pool = sigs
     cur_hex = (cur.get("index_digest") or "").partition(":")[2]
     if cur_hex in sigs:
@@ -4277,7 +4293,7 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
             # standalone rpmdb chunk" - on every later run too, as no state was
             # ever saved.
             continue
-        candidate_time = _ts_order(img.get("created"))
+        candidate_time = _image_order(img)
         if cur_time and (not candidate_time or candidate_time > cur_time):
             # Signature publication and image creation can happen in different
             # orders. A later image should never use up a slot in this history.
@@ -4322,7 +4338,7 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
             f"is normal and is not counted here)",
             f"遍历历史时有 {len(probe_failures)} 个构建引用无法解析：{shown}{more}"
             f"——此列表可能不完整（悬空的 .sig 标签是正常的，未计入）"))
-    out = sorted(recs.values(), key=lambda r: _ts_order(r.get("created")), reverse=True)
+    out = sorted(recs.values(), key=lambda r: _image_order(r["image"]), reverse=True)
     for i, r in enumerate(out):
         if i + 1 < len(out):
             prev = out[i + 1]
@@ -4749,7 +4765,7 @@ def orient(a: dict, b: dict, keep_order: bool = False) -> tuple:
     reversed pair reports "no CVE/erratum found" for an update that carries two
     dozen CVEs, and lists the fixes it *adds* as fixes it *removes*.
     """
-    ca, cb = _ts_order(a.get("created")), _ts_order(b.get("created"))
+    ca, cb = _image_order(a), _image_order(b)
     if keep_order or not ca or not cb or ca <= cb:
         return a, b, False
     return b, a, True
@@ -5120,6 +5136,7 @@ def cmd_check(args):
         # names the push. They are different strings and are never interchangeable.
         d = {**ident, "digest": cur["digest"], "index_digest": cur.get("index_digest"),
              "tag": args.to, "version": ver, "created": cur.get("created"),
+             "created_order": cur.get("created_order"),
              "inputhash": cur["annotations"].get("rpmostree.inputhash"),
              "ostree_commit": cur["annotations"].get("ostree.commit"),
              "checked": int(time.time())}
@@ -5218,14 +5235,14 @@ def cmd_check(args):
         # a first run then reported "no-change" with a 0-byte download.
         for r in hist:
             pd = r.get("platform_digest") or r["digest"]
-            if pd != cur["digest"] and (_ts_order(r.get("created")) or "9") <= (_ts_order(cur.get("created")) or "9"):
+            if pd != cur["digest"] and (_image_order(r.get("image") or r) or "9") <= (_image_order(cur) or "9"):
                 ref_a = pd
                 # the state file's label rule: a light resolve reads annotations
                 # only, and a build without the version one was titled `None @ ...`
                 label_a = _state_label(dict(r, digest=pd))
                 break
     if not ref_a:
-        cur_time = _ts_order(cur.get("created"))
+        cur_time = _image_order(cur)
         try:
             anchor = datetime.date.fromisoformat(cur_time[:10])
         except ValueError:
@@ -5259,7 +5276,7 @@ def cmd_check(args):
                     continue
                 if rpmdb_chunk(cur) is not None and rpmdb_chunk(cand) is None:
                     continue
-                cand_time = _ts_order(cand.get("created"))
+                cand_time = _image_order(cand)
                 if cur_time and (not cand_time or cand_time > cur_time):
                     continue
                 ref_a, label_a, prev = d, d, cand
@@ -5345,11 +5362,11 @@ def cmd_check(args):
         if not state_lost and prev["digest"] == state.get("digest") else ""
     if seen:
         uniq, seen_pds = [], {cur["digest"], state.get("digest")}
-        seen_ord = _ts_order(seen)
-        cur_ord = _ts_order(cur.get("created"))
-        for r in sorted(hist, key=lambda x: _ts_order(x.get("created"))):
+        seen_ord = _image_order(state)
+        cur_ord = _image_order(cur)
+        for r in sorted(hist, key=lambda x: _image_order(x.get("image") or x)):
             pd = r.get("platform_digest") or r["digest"]
-            r_ord = _ts_order(r.get("created"))
+            r_ord = _image_order(r.get("image") or r)
             # same digest-space as above: index vs platform never compares equal,
             # which used to count the current build as an extra new one
             if (not pd or pd in seen_pds or not r_ord or r_ord <= seen_ord

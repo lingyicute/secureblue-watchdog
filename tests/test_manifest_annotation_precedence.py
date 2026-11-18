@@ -60,6 +60,10 @@ class TestResolveManifestAnnotationsPrecedence(unittest.TestCase):
             "2026-11-16T03:44:35.27268298Z",
         )
         self.assertEqual(resolved["annotations"]["org.blue-build.build-id"], "build-123")
+        self.assertEqual(resolved["created"], "2026-11-16T03:44:35Z")
+        self.assertEqual(resolved["created_order"], "2026-11-16T03:44:35.272682980Z")
+        same_second = dict(resolved, created_order="2026-11-16T03:44:35.100000000Z")
+        self.assertTrue(S.orient(resolved, same_second)[2])
 
     def test_resolving_the_platform_through_an_index_keeps_platform_metadata(self):
         version = "org.opencontainers.image.version"

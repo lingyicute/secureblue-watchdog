@@ -26,6 +26,12 @@ class TestTimestampOffsets(unittest.TestCase):
         later = "2026-11-17T01:06:51.981777207Z"
         self.assertLess(S._ts_order(earlier), S._ts_order(later))
 
+    def test_invalid_oci_times_cannot_order_images(self):
+        for invalid in ("2026-13-18T22:00:00Z", "2026-11-18T22:00:00+02:60",
+                        "0001-01-01T00:00:00+12:00", "2026-11-18T22:00:00"):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(S._utc_timestamp(invalid), "")
+
 
 if __name__ == "__main__":
     unittest.main()
