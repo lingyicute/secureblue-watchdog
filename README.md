@@ -431,3 +431,11 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see https://www.gnu.org/licenses.
+
+### Comparison identity in `check` JSON
+
+In an analysed `report.md.json`, `from_digest` identifies the comparison baseline;
+`digest` and `version` identify its target (`to`). An explicit `--a` can cause
+chronological reordering. `watched_digest` and `watched_version` identify the
+watched tag independently; the state file and Actions `digest` output still
+track that tag, not the reordered comparison target.

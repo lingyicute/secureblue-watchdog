@@ -5295,8 +5295,9 @@ def cmd_check(args):
     print("\n" + "=" * 72, file=sys.stderr)
     print(summary, file=sys.stderr)
     _atomic_write_json(report + ".json", {"verdict": v, "from": from_lbl, "to": to_lbl,
-               "digest": cur["digest"],
-               "version": ver, "download_bytes": res["layers"]["download_bytes"],
+               "from_digest": res["a"]["digest"], "digest": res["b"]["digest"],
+               "version": to_ver, "watched_digest": cur["digest"], "watched_version": ver,
+               "download_bytes": res["layers"]["download_bytes"],
                "changed": [{"name": c["name"],
                             "old": _evr_pair(c["old"], c["new"])[0],
                             "new": _evr_pair(c["old"], c["new"])[1],
