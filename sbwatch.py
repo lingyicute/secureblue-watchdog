@@ -2351,8 +2351,11 @@ def pkg_diff(pa: dict, pb: dict) -> dict:
 
 def crosscheck_chunks(ldiff: dict, diff: dict, src_of: dict | None = None,
                       versions_known: bool = True) -> dict:
-    """Chunks moved but the NEVRA did not change => silent rebuild (kernel hardening
-    bumps, rpm macros, file ordering...). Explains '700 MB and nothing changed'.
+    """Chunks moved but the NEVRA did not change: `silent_rebuilds`, a name older than
+    what was measured. The glibc chunks of two live builds differed in etc/ld.so.cache
+    alone - a file the package owns and the image build regenerates. Fedora never
+    rebuilds one NEVRA, so only secureblue's own packages can really be rebuilt here.
+    Explains '700 MB and nothing changed'.
 
     versions_known=False means manifest-only mode: the rpmdb was never fetched, so
     there is no basis for claiming any package kept its version. In that case
@@ -2852,8 +2855,8 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             bits_zh.append("安全敏感软件包版本升级："
                            + clip_list(imp_names, 5, lang="zh", joiner="，"))
         if silent_key:
-            bits.append("rebuilt (identical version): " + clip_list(silent_key, 5))
-            bits_zh.append("重建（版本相同）："
+            bits.append("chunk changed at an identical version: " + clip_list(silent_key, 5))
+            bits_zh.append("版本相同但 chunk 变化："
                            + clip_list(silent_key, 5, lang="zh", joiner="，"))
         v["headline"] = ("no CVE/erratum found for this delta, but " + "; ".join(bits)
                          + ". Reasonable to skip if the download matters to you")
@@ -2881,13 +2884,13 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                          f"({up_bin} binary) bumped, {len(diff['added'])} added / "
                          f"{len(diff['removed'])} removed, no CVE and no security erratum"
                          + (" among the upgrades" if down else "")
-                         + (f", {len(silent)} chunk(s) rebuilt with identical versions" if silent else "")
+                         + (f", {len(silent)} chunk(s) changed at identical versions" if silent else "")
                          + tail)
         v["headline_zh"] = ((lead_zh or "常规更新：")
                             + f"{len(up_groups)} 个源码包（{up_bin} 个二进制包）升级，"
                             f"新增 {len(diff['added'])} 个 / 移除 {len(diff['removed'])} 个，"
                             + ("升级部分无 CVE、无安全勘误" if down else "无 CVE、无安全勘误")
-                            + (f"，{len(silent)} 个 chunk 以相同版本重建" if silent else "")
+                            + (f"，{len(silent)} 个 chunk 在版本不变的情况下发生变化" if silent else "")
                             + tail_zh)
     # --- what secureblue's desktop will actually do ------------------------- #
     # This is orthogonal to the levels above: `update-now`/`consider`/`skip` is
@@ -3074,7 +3077,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             if imp:
                 bits.append(f"{len(imp)} security-sensitive package(s) were bumped")
             if v["silent_important"]:
-                bits.append("security-relevant packages were rebuilt at the same version")
+                bits.append("the chunks of security-relevant packages changed at the same version")
             if v["downgrades"]:
                 bits.append(f"{len(v['downgrades'])} package(s) were downgraded")
             if coverage_gap:
@@ -3782,21 +3785,26 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
 
     if silent:
         if is_zh:
-            W(f"## 版本相同但被重建（{len(silent)}）")
+            W(f"## 版本相同但 chunk 变化（{len(silent)}）")
             W("")
-            W("这些 chunk 的字节变了，但软件包版本没变。通常是一次 secureblue 重建、工具链/macro 变化"
-              "或文件重排——会消耗下载量，却没有对应的上游更新日志。")
+            W("这些 chunk 的字节变了，但软件包版本没变。Fedora 不会以同一版本重新构建软件包，"
+              "所以对 Fedora 软件包而言，变的是其名下某个在镜像构建时生成或被改动的文件"
+              "（实测 `glibc` 的 chunk 仅 `etc/ld.so.cache` 不同）；secureblue 自有的软件包"
+              "也可能是重建。两者都会消耗下载量，却没有对应的更新日志。")
             W("")
             for n, s in silent[:20]:
                 W(f"- `{n}` — {human(s)}")
             if len(silent) > 20:
                 W(f"- ……另有 {len(silent)-20} 个")
         else:
-            W(f"## Rebuilt with the *same* version ({len(silent)})")
+            W(f"## Same version, changed chunk ({len(silent)})")
             W("")
-            W("These chunks changed byte-for-byte while the package version did not. That is "
-              "usually a secureblue rebuild, a toolchain/macro change, or file re-ordering — "
-              "it costs download bytes but carries no upstream changelog entry.")
+            W("These chunks changed byte-for-byte while the package version did not. Fedora "
+              "never rebuilds a package at one version, so for a Fedora package the cause is a "
+              "file it owns that is generated or modified while the image is built (measured: "
+              "the `glibc` chunk differed in `etc/ld.so.cache` alone); one of secureblue's own "
+              "packages may also have been rebuilt. Either way it costs download bytes and "
+              "carries no changelog entry.")
             W("")
             for n, s in silent[:20]:
                 W(f"- `{n}` — {human(s)}")

@@ -216,7 +216,7 @@ python3 sbwatch.py backlog latest --max-bodhi 80
 | level | 含义 | 建议 |
 |-------|------|------|
 | `update-now` | 含 CVE / security erratum，或 critical/high severity，**或 secureblue 会弹重大通知** | 立刻 `rpm-ostree upgrade && systemctl reboot` |
-| `consider` | kernel 变了 / 安全敏感包 bump / silent rebuild 含重要包 | 看下载量决定 |
+| `consider` | kernel 变了 / 安全敏感包 bump / 安全敏感包版本未变但 chunk 变了 | 看下载量决定 |
 | `skip` | 常规 churn，无 CVE，无 security erratum | 可跳过 |
 | `no-change` | **包集合与版本未变**（已读取版本或确认 rpmdb 摘要相同），不保证包文件内容相同；安全敏感包的同版本 chunk 变化仍判为 `consider`。不属于任何软件包的文件（`chunkah/unclaimed`，secureblue 自己的配置就在其中）不在检查范围，变了会在 headline 里注明 | 就软件包而言可跳过 |
 | `no-update` | registry digest 未变 | 无新构建 |
@@ -242,7 +242,8 @@ Bodhi 的多源码包勘误（例如依赖库更新与批量重建）中的 CVE 
   紧随其后的小节会列出**全部**编号；`--json-out` 与 GITHUB_OUTPUT 始终是完整数据（另附计数）
 - 下载量：`download_bytes / total_size_b / download_pct`
 - `secureblue_notification`：桌面会弹哪个通知 + 触发原因（见上文）
-- `silent_rebuilds`：版本没变但 chunk 变了（工具链/macro/文件重排）
+- `silent_rebuilds`：版本没变但 chunk 变了。Fedora 不会以同一版本重建软件包，所以多半是包名下
+  在镜像构建时生成的文件变了（实测 `glibc` 的 chunk 仅 `etc/ld.so.cache` 不同）；secureblue 自有的包也可能是重建
 - `downgrades`：这次更新把某个包**降级**了（真证据，会抬高级别；报告点名「回退」的是**被离开的
   那个构建**的已发布安全勘误，而不是降级目标自己的勘误）；`cves_dropped`：
   新版更新日志不再提到的 CVE 编号（通常是日志被编辑，只作提示、不再抬高级别）；`cves_reverted`：

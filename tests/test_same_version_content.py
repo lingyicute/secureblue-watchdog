@@ -17,7 +17,7 @@ class TestSameVersionContent(unittest.TestCase):
         diff, ld, xc = self.inputs("rpm/glibc")
         v = S.verdict_of(diff, ld, {}, xc)
         self.assertEqual(v["level"], "consider")
-        self.assertIn("security-relevant packages were rebuilt", v["level_basis"])
+        self.assertIn("the chunks of security-relevant packages changed", v["level_basis"])
 
     def test_equal_rpmdb_fast_path_does_not_hide_sensitive_content(self):
         diff, ld, xc = self.inputs("rpm/glibc")
