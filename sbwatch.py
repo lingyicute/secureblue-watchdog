@@ -2821,14 +2821,24 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         # `chunkah/unclaimed`, secureblue's own configuration among them, and nothing
         # here looks inside that chunk: 45.20261114.0 was rebuilt for an edit to
         # hardening.conf and its report was badged "REBUILD ONLY - SKIP".
+        # chunkah gives an unowned file too big for `chunkah/unclaimed` a
+        # `bigfiles/<path>` component instead, and secureblue's configuration is
+        # among those: the live manifest carries bigfiles/usr/share/secureblue/
+        # etc/trivalent/filter/trivalent-blocklist, .../selinux/targeted/policy/
+        # policy.35 and .../udev/hwdb.bin. Left out: the rpmdb, which was read,
+        # and the initramfs, which the image build regenerates from packages.
+        def _unowned(c):
+            return (not c.startswith("rpm/")
+                    and c.rpartition("/")[2] not in (CHUNK_MATCH, "initramfs.img"))
         loose = sum(ch["size"] for ch in ldiff.get("changed_chunks") or []
-                    if "chunkah/unclaimed" in (ch.get("components") or []))
+                    if any(_unowned(c) for c in ch.get("components") or []))
         if loose:
-            v["headline"] += (f". Not inspected: {human(loose)} of files that no package "
-                              f"owns (chunkah/unclaimed, secureblue's own configuration "
-                              f"among them) changed as well")
+            v["headline"] += (f". Not inspected: {human(loose)} of files that no package owns "
+                              f"(chunkah/unclaimed and bigfiles/* chunks, secureblue's own "
+                              f"configuration among them) changed as well")
             v["headline_zh"] += (f"。未检查：另有 {human(loose)} 不属于任何软件包的文件"
-                                 f"（chunkah/unclaimed，secureblue 自己的配置就在其中）发生了变化")
+                                 f"（chunkah/unclaimed 与 bigfiles/* chunk，secureblue 自己的配置"
+                                 f"就在其中）发生了变化")
     elif sec:
         v["level"] = "update-now"
         # Two separate renderings: the trivia (", " vs "，", the count wording)
