@@ -2056,7 +2056,8 @@ def _advisory_cve_scope(update: dict) -> tuple[set, set]:
     return (set(), ids) if len(names) > 1 else (ids, set())
 
 
-def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) -> dict:
+def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None,
+                    *, baseline_release: str | None = None) -> dict:
     info = {"security": False, "cves": set(), "cves_dropped": set(),
             "advisory_wide_cves": set(), "aliases": [],
             "severities": [], "sec_severities": [], "bodhi_type": None, "why": [], "erratum": None,
@@ -2180,7 +2181,8 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                 # the security erratum of 8.9.1) gains its fix all the same, and
                 # only a CVE id in the rpm changelog could say so before.
                 passed = (_passed_build(old, new, u["nvrs"], epochs)
-                          if (old and (not third_party or norm_new)
+                          if (old and (baseline_release is None or baseline_release == rel)
+                              and (not third_party or norm_new)
                               and (not old_third_party or old_norm)) else None)
                 if passed and u.get("type") == "security" and status in PUSHED_STATUSES:
                     info["passed_over"].append(
@@ -5091,11 +5093,14 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
     bodhi = None if (args.no_bodhi or not rel) else Bodhi(cache_dir=cache_dir,
                                                          max_calls=args.max_bodhi,
                                                          max_seconds=getattr(args, "bodhi_seconds", 0))
+    # Distless builds (shim, fedora-release) cannot establish a shared branch
+    # from their NVRs. Nor can packages carried over from an older release.
+    baseline_release = fedora_release(pa, an_a.get("org.opencontainers.image.version", ""))
     for c in classify_order(diff["changed"]):       # report order stays by name
         if c["dir"] == "arch-change":
             # An equal-EVR arch replacement is not a new version or .upgraded.
             continue
-        c["cls"] = classify_change(c["old"], c["new"], rel, bodhi)
+        c["cls"] = classify_change(c["old"], c["new"], rel, bodhi, baseline_release=baseline_release)
     # parse-quality notes: both of these used to fail silently, and both make the
     # diff look calmer than the data warrants
     tables = (pb,) if pa is pb else (pa, pb)

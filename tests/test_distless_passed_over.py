@@ -30,6 +30,15 @@ class TestDistlessPassedOver(unittest.TestCase):
         self.assertEqual([x["alias"] for x in cls["passed_over"]], ["FEDORA-2026-shim"])
         self.assertEqual(cls["cves"], ["CVE-2026-7777"])
 
+    def test_distless_build_numbers_do_not_order_different_fedora_branches(self):
+        update = _erratum("FEDORA-shim", "shim-16.1-6", "CVE-2026-7777")
+        for baseline in ("", "F44"):
+            result = S.classify_change(pkg("shim-x64", "16.1-5", src="shim"),
+                                       pkg("shim-x64", "16.1-7", src="shim"),
+                                       "F45", _Bodhi([update]), baseline_release=baseline)
+            self.assertFalse(result["passed_over"])
+            self.assertFalse(result["cves"])
+
     def test_distless_old_to_dist_tagged_new_does_not_claim_distless_erratum(self):
         cls = S.classify_change(
             pkg("foo", "1.0-1"),
