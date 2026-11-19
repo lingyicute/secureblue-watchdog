@@ -2212,7 +2212,8 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                 info["already_had"].append(
                     {"alias": u["alias"], "type": u.get("type"),
                      "severity": u.get("severity"), "status": status,
-                     "nvr": sorted(hit_old)[0]})
+                     "nvr": sorted(hit_old)[0],
+                     "also_matches_target": bool(hit_attached or hit_corresponding)})
                 continue
             attached = bool(hit_attached)
             if u.get("alias"):
@@ -2674,6 +2675,16 @@ def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
             "why": why, "why_zh": why_zh}
 
 
+def _reverted_aliases(group: dict) -> list:
+    """Only a downgraded member's old-only stable advisory can be reverted."""
+    return list(dict.fromkeys(
+        a["alias"] for c in group["pkgs"] if c.get("dir") == "downgrade"
+        for a in (c.get("cls") or {}).get("already_had") or ()
+        if a.get("alias") and a.get("type") == "security"
+        and (a.get("status") or "").lower() in PUSHED_STATUSES
+        and not a.get("also_matches_target")))
+
+
 def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                backlog: list | None = None, bodhi_state: dict | None = None,
                groups: list | None = None) -> dict:
@@ -3012,10 +3023,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         # The security errata of the builds being left, by the report's own rule
         # for its downgrade section: a push or a CI summary shows the headline
         # alone, and it never said what the rollback takes away.
-        errata = list(dict.fromkeys(
-            x["alias"] for g in down for x in g.get("already_had") or []
-            if x.get("alias") and x.get("type") == "security"
-            and (x.get("status") or "").lower() in PUSHED_STATUSES))
+        errata = list(dict.fromkeys(alias for g in down for alias in _reverted_aliases(g)))
         v["errata_reverted"] = errata
         if errata:
             v["headline"] += (" - this reverts published security errata: "
@@ -3583,10 +3591,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             # from, i.e. one that matched the old build (`already_had`). `aliases`
             # are the errata of the older build it moves back to, and naming
             # those here blamed the revert on the wrong erratum.
-            reverted = list(dict.fromkeys(
-                x["alias"] for x in g.get("already_had") or []
-                if x.get("alias") and x.get("type") == "security"
-                and (x.get("status") or "").lower() in PUSHED_STATUSES))
+            reverted = _reverted_aliases(g)
             if reverted:
                 rev = (f" — 这会*回退*已发布的勘误: "
                        f"{clip_list(reverted, 2, lang='zh', joiner='，')}" if is_zh
