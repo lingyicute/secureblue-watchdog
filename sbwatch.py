@@ -2199,6 +2199,15 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
             # the epoch changed) is a fix the user already has. Recording its
             # severity here is what produced a bogus "HIGH/CRITICAL - UPDATE NOW"
             # for a plain bugfix bump or local rebuild.
+            if status not in PUSHED_STATUSES:
+                # type=security but unpushed/testing/obsolete: report, don't escalate
+                info["not_pushed"].append(
+                    {"alias": u["alias"], "type": u.get("type"),
+                     "severity": u.get("severity"), "status": status})
+                info["why"].append(
+                    f"erratum/勘误 {u['alias']}: type={u.get('type')} status={status} "
+                    f"(not stable / 非 stable 状态 - not counted)")
+                continue
             if hit_old:
                 info["already_had"].append(
                     {"alias": u["alias"], "type": u.get("type"),
@@ -2206,16 +2215,6 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                      "nvr": sorted(hit_old)[0]})
                 continue
             attached = bool(hit_attached)
-            pushed = status in PUSHED_STATUSES
-            if not pushed:
-                # type=security but unpushed/testing/obsolete: report, don't escalate
-                info["not_pushed"].append(
-                    {"alias": u["alias"], "type": u.get("type"),
-                     "severity": u.get("severity"), "status": status})
-                info["why"].append(
-                    f"erratum/勘误 {u['alias']}: type={u.get('type')} status={status} "
-                    f"(not in a Fedora repo yet / 尚未进入 Fedora 仓库 - not counted)")
-                continue
             if u.get("alias"):
                 info["aliases"].append(u["alias"])
             add_advisory_cves(u)
@@ -3346,8 +3345,8 @@ def _why_for_lang(w: str, lang: str) -> str:
               .replace("no longer mentioned/不再提及:", "不再提及:")
               .replace("erratum/勘误 ", "勘误 ")
               .replace(", a build this update passes over / 本次更新越过的构建)", "，本次更新越过的构建)")
-              .replace("(not in a Fedora repo yet / 尚未进入 Fedora 仓库 - not counted)",
-                       "（尚未进入 Fedora 仓库——不计入）"))
+              .replace("(not stable / 非 stable 状态 - not counted)",
+                       "（非 stable 状态——不计入）"))
         s = re.sub(r" \(\+(\d+) more not shown / 另有 \1 个未显示\)", r"（另有 \1 个未显示）", s)
         s = re.sub(r"… \(\+(\d+) chars not shown / 另有 \1 个字符未显示\)", r"…（另有 \1 个字符未显示）", s)
         return s
@@ -3356,7 +3355,7 @@ def _why_for_lang(w: str, lang: str) -> str:
           .replace("no longer mentioned/不再提及:", "no longer mentioned:")
           .replace("erratum/勘误 ", "erratum ")
           .replace(" / 本次更新越过的构建)", ")")
-          .replace(" / 尚未进入 Fedora 仓库 - not counted)", " - not counted)"))
+          .replace(" / 非 stable 状态 - not counted)", " - not counted)"))
     s = re.sub(r" \(\+(\d+) more not shown / 另有 \1 个未显示\)", r" (+\1 more not shown)", s)
     s = re.sub(r"… \(\+(\d+) chars not shown / 另有 \1 个字符未显示\)", r"… (+\1 chars not shown)", s)
     return s
@@ -3750,7 +3749,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
     g_un = [g for g in groups if g.get("unreleased")]
     if g_un:
         if is_zh:
-            W(f"## 已存在但尚未推送的勘误（{len(g_un)}）")
+            W(f"## 当前并非 stable 的勘误（{len(g_un)}）")
             W("")
             W("Bodhi 中有这些记录，但其 `status` 不是 `stable`，因此在此不计权重——"
               "与 `security_backlog` 只统计已推送勘误的口径一致。")
@@ -3759,7 +3758,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                 W(f"- `{g['src']}`: "
                   f"{clip_list(g['unreleased'], 4, lang='zh', joiner='，', render=lambda x: str(x.get('alias') or '?') + ' (' + str(x.get('status') or '?') + ')')}")
         else:
-            W(f"## Errata that exist but are not pushed yet ({len(g_un)})")
+            W(f"## Errata not currently stable ({len(g_un)})")
             W("")
             W("Bodhi knows about these, but their `status` is not `stable`, so they carry no "
               "weight here - matching `security_backlog`, which only counts pushed errata.")
