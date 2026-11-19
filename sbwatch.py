@@ -1433,9 +1433,11 @@ def rpmdb_chunk(resolved: dict) -> dict | None:
     cands = [l for l in resolved["layers"]
              if any(c == CHUNK_MATCH or c.endswith("/" + CHUNK_MATCH)
                     for c in l["components"])]
-    if not cands:
+    # Chunk annotations do not identify a database's final filesystem path.
+    # In particular, its compressed size is not an overlay precedence rule.
+    if not cands or any(not l.get("digest") or l["digest"] != cands[0].get("digest")
+                        for l in cands[1:]):
         return None
-    cands.sort(key=lambda l: l["size"])
     return cands[0]
 
 
@@ -1467,9 +1469,9 @@ def package_list(reg: Registry, resolved: dict) -> dict:
     chunk = rpmdb_chunk(resolved)
     if chunk is None:
         raise SystemExit(T(
-            "no standalone rpmdb chunk in this image (needs chunkah 'bigfiles' layout); "
+            "no unambiguous standalone rpmdb chunk in this image (needs one distinct rpmdb layer); "
             "use `layers` or --exact 0 instead",
-            "此镜像中没有独立的 rpmdb chunk（需要 chunkah 'bigfiles' 布局）；"
+            "此镜像中找不到唯一的独立 rpmdb chunk（需要一个可明确识别的数据库层）；"
             "请改用 `layers` 或 --exact 0"))
     path = reg.extract_member(chunk, CHUNK_MATCH)
     con = None

@@ -1320,7 +1320,7 @@ class TestRpmdbChunkSelection(unittest.TestCase):
     def _img(self, layers):
         return {"layers": layers, "annotations": {}}
 
-    def test_picks_the_smallest_matching_layer(self):
+    def test_competing_layers_do_not_establish_database_identity(self):
         """Must match the rule package_list() fetches by, or the fast path could
         verify one layer while the diff reads another."""
         img = self._img([
@@ -1328,7 +1328,7 @@ class TestRpmdbChunkSelection(unittest.TestCase):
             {"digest": "sha256:small", "size": 40, "components": ["rpm/curl"]},
             {"digest": "sha256:zero", "size": 0, "components": ["bigfiles/rpmdb.sqlite"]},
         ])
-        self.assertEqual(S.rpmdb_chunk(img)["digest"], "sha256:zero")
+        self.assertIsNone(S.rpmdb_chunk(img))
 
     def test_none_when_no_rpmdb_chunk(self):
         self.assertIsNone(S.rpmdb_chunk(self._img([
