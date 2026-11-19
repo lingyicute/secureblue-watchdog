@@ -76,7 +76,7 @@ secureblue 更新后会弹通知，判定逻辑在一个 shell 脚本里
 }
 ```
 
-`level` 取值 `major` / `normal` / `none`，以及 `unknown`（`--exact 0` 未读版本时）。
+`level` 取值 `major` / `normal` / `none`，以及 `unknown`（包版本未知，或相关勘误覆盖不足）。未查询的勘误不是空列表：此时默认安装仍按包名预测，叠加包系统只有已确定的重大通知才给出确定级别。
 
 ### 两个容易搞错的细节
 

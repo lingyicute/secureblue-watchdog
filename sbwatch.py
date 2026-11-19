@@ -2741,6 +2741,22 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                    max_advisory_severity=None, security_advisory_count=None,
                    level_without_advisories="unknown", advisory_driven=False,
                    note="the booted image's notification backend was not read from the rpmdb")
+    # Missing Bodhi evidence cannot establish an empty local advisory list.
+    elif (not diff.get("advisory_coverage_complete", not any(
+            (bodhi_state or {}).get(k) for k in ("failed", "skipped", "truncated", "disabled", "unavailable")))
+          and not sbn.get("unconditional") and any(
+              c.get("dir") != "arch-change" and not _is_third_party(c.get("new") or {})
+              for c in diff["changed"])):
+        sbn = dict(sbn, advisory_coverage_complete=False,
+                   observed_security_advisory_count=sbn.get("security_advisory_count"),
+                   security_advisory_count=None,
+                   max_advisory_severity=("critical" if sbn.get("max_advisory_severity") == "critical" else None))
+        # A known critical advisory or trivalent upgrade already fixes the
+        # maximum. The stock-install prediction never needs advisory metadata.
+        if sbn["level"] != "major":
+            sbn.update(level="unknown", message=None, delivery=None, advisory_driven=False,
+                       why=["incomplete advisory coverage on a layered system"],
+                       why_zh=["叠加包系统的勘误覆盖不完整"])
     silent = xc.get("silent_rebuilds") or []
     # The whole list, not the first 60 entries: silent_rebuilds is sorted by chunk
     # size, and the packages that matter here (kernel, glibc, ...) are exactly the
@@ -3391,6 +3407,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                       "normal": "普通 (normal) (urgency=normal)",
                       "none": "无 (none)",
                       "unknown": ("未知（软件包信息不完整）" if verdict.get("package_data_complete") is False
+                                  else "未知（勘误覆盖不完整）" if _sbn.get("advisory_coverage_complete") is False
                                   else "未知（未读取软件包版本）")}.get(_lvl, _lvl)
             W("## secureblue 桌面通知预测")
             W("")
@@ -3401,7 +3418,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                                "rpm-ostree 必须有针对已暂存 OCI 部署的缓存更新（仅缓存 manifest 不会产生基础包差异）")
                 W(f"- 仅预测基础镜像的触发条件：{requirement}。当天已有重大通知则不再提醒，"
                   "普通通知也不会在当天重复。本报告未读取通知记录，也未检查本机叠加包。")
-            if _sbn.get("advisory_driven") and _lvl != "unknown":
+            if (_sbn.get("advisory_driven") or (_lvl == "unknown" and
+                    _sbn.get("advisory_coverage_complete") is False and verdict.get("package_data_complete") is not False)):
                 W("- 未叠加软件包的系统（默认安装）: "
                   + ("普通 (normal)——仅因内核升级"
                      if _sbn.get("level_without_advisories") == "normal" else "无 (none)"))
@@ -3424,6 +3442,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                       "normal": "normal (urgency=normal)",
                       "none": "none",
                       "unknown": ("unknown (incomplete package information)" if verdict.get("package_data_complete") is False
+                                  else "unknown (incomplete advisory coverage)" if _sbn.get("advisory_coverage_complete") is False
                                   else "unknown (package versions not read)")}.get(_lvl, _lvl)
             W("## secureblue Notification Prediction")
             if _sbn.get("delivery"):
@@ -3437,7 +3456,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("")
             msg_str = (f" — \"{_sbn['message']}\"") if _sbn.get("message") else ""
             W(f"- predicted popup: {_badge}{msg_str}")
-            if _sbn.get("advisory_driven") and _lvl != "unknown":
+            if (_sbn.get("advisory_driven") or (_lvl == "unknown" and
+                    _sbn.get("advisory_coverage_complete") is False and verdict.get("package_data_complete") is not False)):
                 W("- on a system without layered packages (a stock install): "
                   + ("normal - for the kernel upgrade alone"
                      if _sbn.get("level_without_advisories") == "normal" else "none"))
@@ -5122,6 +5142,9 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
             if n in pa:
                 src_of[n] = pa[n]["src"]
     xc = crosscheck_chunks(ld, diff, src_of)
+    # Backlog lookups for unchanged packages cannot affect this delta's popup.
+    diff["advisory_coverage_complete"] = bodhi is not None and not (
+        bodhi.failed or bodhi.skipped or getattr(bodhi, "truncated_src", ()))
     backlog, coverage = [], None
     if getattr(args, "audit", False) and bodhi is not None:
         # Same Bodhi object as the diff classification above: one shared
