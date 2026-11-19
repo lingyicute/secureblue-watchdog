@@ -19,6 +19,22 @@ class TestNegativeDays(unittest.TestCase):
             rows = S.build_history(_Reg(), scan=1, days=-3, to="latest", cur=cur)
         self.assertEqual(len(rows), 1)
 
+    def test_invalid_numeric_cli_bounds_are_rejected_before_network(self):
+        import contextlib, io
+        from unittest.mock import patch
+        bad_argvs = [
+            ["history", "--scan", "0"],
+            ["history", "--scan", "-2"],
+            ["check", "--scan", "-1"],
+            ["check", "--prune-days", "-1"],
+            ["diff", "a", "b", "--max-bodhi", "-1"],
+        ]
+        for argv in bad_argvs:
+            with self.subTest(argv=argv),                     patch.object(S.Registry, "_token", side_effect=AssertionError("network")),                     contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as ctx:
+                    S.main(argv)
+                self.assertEqual(ctx.exception.code, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5914,10 +5914,18 @@ def main(argv=None):
     if args.cmd == "history" and args.at_digest is not None:
         if not _clean_sha256_header(args.at_digest) or args.at_digest != args.at_digest.strip():
             ap.error(T("--at-digest requires sha256:<64 hex>", "--at-digest 需要 sha256:<64 位十六进制>"))
+    if args.max_bodhi < 0:
+        ap.error(T("--max-bodhi cannot be negative", "--max-bodhi 不能为负数"))
     if args.bodhi_seconds < 0:
         ap.error(T("--bodhi-seconds cannot be negative", "--bodhi-seconds 不能为负数"))
     if args.backlog_candidates is not None and args.backlog_candidates < 1:
         ap.error(T("--backlog-candidates must be positive", "--backlog-candidates 必须为正数"))
+    if args.cmd == "history" and args.scan < 1:
+        ap.error(T("--scan must be positive", "--scan 必须为正数"))
+    if args.cmd == "check" and args.scan < 0:
+        ap.error(T("--scan cannot be negative", "--scan 不能为负数"))
+    if args.cmd == "check" and args.prune_days < 0:
+        ap.error(T("--prune-days cannot be negative", "--prune-days 不能为负数"))
     if args.cmd == "backlog" and args.no_bodhi:
         ap.error(T("backlog requires Bodhi; --no-bodhi is incompatible",
                    "backlog 需要查询 Bodhi，不能与 --no-bodhi 同用"))
