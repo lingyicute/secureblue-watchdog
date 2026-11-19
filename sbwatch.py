@@ -3130,7 +3130,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                 kind = "security erratum" if has_hi_sec else "non-security erratum"
                 bits.append(f"a released {kind} ranks {v['severity_rank']}/4 "
                             f"under Fedora's scale")
-            if sbn.get("level") == "major" and not sbn.get("unconditional"):
+            if sbn.get("level") == "major" and not sbn.get("unconditional") and forward_major:
                 bits.append("secureblue's own notification rule classifies this as major")
             if kernel_moved:
                 bits.append("the kernel moved")
@@ -5693,6 +5693,9 @@ def cmd_check(args):
     # way to tell those apart.
     sbn = v.get("secureblue_notification") or {}
     sbn_lvl = sbn.get("level") if not sbn.get("unconditional") else None
+    forward_major = bool(sbn.get("trivalent_updated")) or any(
+        g.get("has_security_erratum") and rpmostree_str2severity(g.get("erratum_severity")) == 4
+        for g in (res.get("groups") or ()))
     if v["level"] == "update-now":
         reasons = []
         if v["cves"]:
@@ -5701,7 +5704,7 @@ def cmd_check(args):
         if v["security_pkgs"]:
             reasons.append(f"security packages ({len(v['security_pkgs'])}): "
                            + clip_list(v["security_pkgs"], 10, joiner=","))
-        if sbn_lvl == "major":
+        if sbn_lvl == "major" and forward_major:
             reasons.append("secureblue treats this update as major")
         fail_reason = "; ".join(reasons) or "update-now with no CVE/erratum attributed"
     else:
