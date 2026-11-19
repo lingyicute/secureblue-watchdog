@@ -2323,7 +2323,7 @@ class TestHistoryHeaderAlignment(unittest.TestCase):
         en = next(ln for ln in lines if "created (UTC)" in ln)
         zh = next(ln for ln in lines if "创建时间" in ln)
         for en_label, zh_label in (("image version", "镜像版本"), ("input", "输入哈希"),
-                                   ("chunks", "chunk"), ("kernel", "内核"), ("refs", "引用")):
+                                   ("chunks", "chunk"), ("Fedora base kernel", "Fedora 基础内核"), ("refs", "引用")):
             self.assertEqual(cells(zh[:zh.index(zh_label)]), cells(en[:en.index(en_label)]),
                              f"column {en_label!r} is misaligned")
 

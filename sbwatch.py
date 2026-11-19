@@ -4559,11 +4559,11 @@ def cmd_history(args):
     print("cost = bytes a client on the row above would download to reach this row / "
           "cost 下载量 = 上一行镜像的客户端升级到本行需下载的字节数\n")
     print(f"  {'created (UTC)':19} {'image version':15} {'input':11} "
-          f"{'chunks':8} {'cost':>9}  {'kernel':22} refs")
+          f"{'chunks':8} {'cost':>9}  {'Fedora base kernel':22} refs")
     # A CJK character fills two terminal cells, so each width is the English one
     # minus the number of CJK characters in the label.
     print(f"  {'创建时间 (UTC)':15} {'镜像版本':11} {'输入哈希':7} "
-          f"{'chunk':8} {'下载量':>6}  {'内核':20} 引用")
+          f"{'chunk':8} {'下载量':>6}  {'Fedora 基础内核':18} 引用")
     print("  " + "-" * 110)
     dup = 0
     for r in reversed(rows):
@@ -4672,7 +4672,7 @@ def cmd_tags(args):
     if cur.get("index_digest") and cur["index_digest"] != cur["digest"]:
         print(f"  platform manifest 平台 manifest: {cur['digest']}")
     print(f"  version 版本: {cur['annotations'].get('org.opencontainers.image.version')}")
-    print(f"  created 构建时间: {cur.get('created')}   kernel 内核: {cur['annotations'].get('ostree.linux')}")
+    print(f"  created 构建时间: {cur.get('created')}   Fedora base kernel 基础内核 (ostree.linux): {cur['annotations'].get('ostree.linux')}")
     print(f"  chunks 分块: {len(cur['layers'])}  total 总量: {human(sum(l['size'] for l in cur['layers']))}")
     print(f"\ndated tags, newest first (probing the last {args.days} days; a missing day "
           f"means no dated tag was found for that day): / 日期标签，从新到旧（探测最近 {args.days} 天；"
@@ -4715,7 +4715,7 @@ def cmd_layers(args):
           + ("   (auto-swapped to older -> newer / 已自动交换为 旧 -> 新)" if swapped else ""))
     print(f"  version 版本: {a['annotations'].get('org.opencontainers.image.version')}"
           f" -> {b['annotations'].get('org.opencontainers.image.version')}")
-    print(f"  kernel 内核:  {a['annotations'].get('ostree.linux')} -> {b['annotations'].get('ostree.linux')}")
+    print(f"  Fedora base kernel 基础内核 (ostree.linux):  {a['annotations'].get('ostree.linux')} -> {b['annotations'].get('ostree.linux')}")
     print(f"  chunks 分块:  {ld['chunks_a']} -> {ld['chunks_b']} | "
           f"{ld['chunks_changed']} changed 变化, {ld['chunks_reused']} reused 复用")
     print(f"  download 下载: {human(ld['download_bytes'])} ({ld['download_pct']}% of "
