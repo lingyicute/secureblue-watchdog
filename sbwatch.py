@@ -2306,7 +2306,9 @@ def layer_diff(a: dict, b: dict) -> dict:
     changed = sorted((l for d, l in db.items() if d not in da), key=lambda l: -l["size"])
     dl_bytes = sum(l["size"] for l in changed)
     pkgs = sorted({c[4:] for l in changed for c in l["components"] if c.startswith("rpm/")})
-    total_b = sum(l["size"] for l in b["layers"])
+    # A repeated descriptor references the same transferable blob. Use the
+    # same digest space for the denominator, download, and reuse counts.
+    total_b = sum(l["size"] for l in db.values())
     return {
         "chunks_a": len(da), "chunks_b": len(db), "chunks_changed": len(changed),
         "chunks_reused": len(db) - len(changed), "total_size_b": total_b,
