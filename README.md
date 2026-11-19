@@ -367,7 +367,7 @@ python3 tests/run_offline.py
 - `test_no_change_wording.py`：`no-change` 只对软件包负责；`chunkah/unclaimed` 变了就在 headline 注明未检查，徽章不再自称「仅重建」。
 - `test_tags_index_digest.py`：`tags` 首行给出 index digest（与下方日期标签同一口径），平台 digest 另起一行标明。
 - `test_layer_plain_tar.py`：解压后的层只按普通 tar 读取；层内再套一层压缩流（gzip/bz2/xz）会被拒绝，而不是绕过解压上限被透明解开。
-- `test_cve_id_boundary.py`：超过 7 位数字的编号不得被截成另一个 CVE 编号（`CVE-2026-12345678` 不是 `CVE-2026-1234567`）。
+- `test_cve_id_boundary.py`：按 CVE Record Format 接受 4 至 19 位 ASCII 序号，超过 19 位时拒绝整项，不截成另一个编号。
 - `test_third_party_vendor.py` / `test_pkglist_cache_version.py`：按 RPM `Vendor` 识别第三方仓库包（`negativo17.org` 的 `ffmpeg`/`mesa`/`libva`、`Fedora Copr`、`NVIDIA` 等），避免裸 NVR 撞上 Fedora epoch 0 勘误造成误报；旧版无 `vendor` 字段的包表缓存自动重取。
 - `test_backlog_pool_sources.py`：`BACKLOG_POOL` 移除无 Fedora 对应包的 `trivalent`，并将默认包管理器 `dnf5` 纳入 `IMPORTANT_SRC` 与 `BACKLOG_POOL`。
 - `test_distless_passed_over.py`：`shim`、`fedora-release` 这类无 `.fcNN` 后缀的 Fedora 包也能匹配被越过构建的安全勘误。
