@@ -4872,6 +4872,14 @@ def _pkglist_from_cache(data):
             return None
         if any(not isinstance(entry.get(k), str) for k in ("vendor", "srpm", "epoch")):
             return None
+        # Cached derived labels must describe the same build as the RPM fields.
+        # Otherwise the comparison, display, and advisory lookup can disagree.
+        evr = f"{entry['version']}-{entry['release']}"
+        srpm = entry["srpm"]
+        src = (srpm.rsplit("-", 2)[0] if srpm.count("-") >= 2 else "") or name
+        if (entry["evr"] != evr or entry["nvr"] != f"{name}-{evr}" or entry["src"] != src
+                or re.fullmatch(r"[0-9]*", entry["epoch"]) is None):
+            return None
         epoch = entry.get("source_epoch", "0")
         if not isinstance(epoch, str) or re.fullmatch(r"[0-9]+", epoch) is None:
             return None
