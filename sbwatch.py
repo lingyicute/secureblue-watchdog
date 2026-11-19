@@ -5248,15 +5248,19 @@ def _comparison_json(res: dict, from_label=None, to_label=None) -> dict:
     changed = []
     for c in d["changed"]:
         cls = c.get("cls") or {}
+        is_down = c.get("dir") == "downgrade"
         old, new = _evr_pair(c["old"], c["new"])
         changed.append({"name": c["name"], "old": old, "new": new, "src": c["src"],
                         "old_arch": c["old"].get("arch"), "new_arch": c["new"].get("arch"),
-                        "dir": c["dir"], "security": bool(cls.get("security")),
-                        "cves": cls.get("cves", []), "cves_dropped": cls.get("cves_dropped", []),
-                        "advisory_wide_cves": cls.get("advisory_wide_cves", []),
-                        "aliases": cls.get("aliases", []), "already_had": cls.get("already_had", []),
-                        "not_pushed": cls.get("not_pushed", []), "passed_over": cls.get("passed_over", []),
-                        "why": cls.get("why", [])})
+                        "dir": c["dir"], "security": False if is_down else bool(cls.get("security")),
+                        "cves": [] if is_down else cls.get("cves", []),
+                        "cves_dropped": cls.get("cves_dropped", []),
+                        "advisory_wide_cves": [] if is_down else cls.get("advisory_wide_cves", []),
+                        "aliases": [] if is_down else cls.get("aliases", []),
+                        "already_had": cls.get("already_had", []),
+                        "not_pushed": [] if is_down else cls.get("not_pushed", []),
+                        "passed_over": [] if is_down else cls.get("passed_over", []),
+                        "why": [] if is_down else cls.get("why", [])})
     return {"verdict": res["verdict"],
             "from": a.get("ref") if from_label is None else from_label,
             "to": b.get("ref") if to_label is None else to_label,

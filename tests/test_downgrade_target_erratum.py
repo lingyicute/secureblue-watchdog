@@ -42,6 +42,14 @@ class TestDowngradeTargetErratum(unittest.TestCase):
         self.assertEqual(v["cves"], [])
         self.assertNotIn("escalated_by_secureblue_rule", v)
         self.assertEqual(v["already_had"], [])
+        exported = S._comparison_json({"a": {"ref": "old", "digest": "d1"},
+                                       "b": {"ref": "new", "digest": "d2"},
+                                       "diff": diff, "verdict": v, "layers": LD})
+        row, = exported["changed"]
+        self.assertFalse(row["security"])
+        self.assertEqual(row["cves"], [])
+        self.assertEqual(row["aliases"], [])
+        self.assertEqual([x["alias"] for x in row["already_had"]], ["FEDORA-2026-newsec"])
 
 
 if __name__ == "__main__":
