@@ -2087,7 +2087,13 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
     def add_advisory_cves(update):
         source, shared = _advisory_cve_scope(update)
         info["cves"].update(source)
-        info["advisory_wide_cves"].update(shared)
+        # The ids of a multi-source erratum belong to whichever build brought
+        # them. Only a security erratum vouches for them as a whole: the bug list
+        # of a non-security side-tag rebuild names other packages' CVEs (the
+        # 738-build "OpenSSL 4.0 rebuild" FEDORA-2026-54c7ad647e carries three
+        # frr ones), and each of its rebuilds read as a security update.
+        if update.get("type") == "security":
+            info["advisory_wide_cves"].update(shared)
 
     # (a) changelog entries that are new in this build: Fedora writes CVE ids there.
     # The per-package caps only guard against a pathological changelog (no real
@@ -2261,7 +2267,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None) 
                         f"(matched Fedora's {sorted(hit_corresponding)[0]} only after "
                         f"stripping the local release marker from {new['release']} - "
                         f"rpm-ostree does not attach it to this build)")
-            elif SEV_RANK.get(sev_word, 0) >= 3 or any(_advisory_cve_scope(u)):
+            elif SEV_RANK.get(sev_word, 0) >= 3 or _advisory_cve_scope(u)[0]:
                 # A released erratum of another type that ranks high or lists CVE
                 # ids marks the package security-relevant below, so name it: the
                 # evidence cell of shadow-utils (bugfix, severity=high) was empty.
