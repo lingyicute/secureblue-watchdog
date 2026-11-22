@@ -16,7 +16,7 @@ class TestCheckEarlyReports(unittest.TestCase):
         state, report = Path(directory) / "state.json", Path(directory) / "nested/report.md"
         current = _image(2)
         if seen:
-            state.write_text(json.dumps({"digest": current["digest"], "last_verdict": "consider"}))
+            state.write_text(json.dumps({"digest": current["digest"], "last_verdict": "consider", "analysis_incomplete": False}))
         with patch.object(S.Registry, "_token", return_value=None), \
                 patch.object(S, "resolve", return_value=dict(current, ref="latest")), \
                 patch.object(S, "tag_exists", return_value=None), \

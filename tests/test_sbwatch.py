@@ -2820,7 +2820,7 @@ class TestExplicitFromTagRunsOnAnUnchangedDigest(unittest.TestCase):
                     contextlib.redirect_stdout(io.StringIO()):
                 state = os.path.join(d, "state.json")
                 with open(state, "w") as fh:
-                    json.dump({"digest": cur["digest"], "created": cur["created"]}, fh)
+                    json.dump({"digest": cur["digest"], "created": cur["created"], "analysis_incomplete": False}, fh)
                 args = types.SimpleNamespace(
                     image="x/y", arch="amd64", to="latest", a=a, scan=0, force=False, fast=False,
                     state=state, report=os.path.join(d, "report.md"))

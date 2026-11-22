@@ -207,6 +207,10 @@ python3 sbwatch.py check --image secureblue/silverblue-main-hardened --to latest
 # --backlog-candidates 单独控制；已安装的第三方包与未安装的候选会分别披露。
 # 使用 state.json 中的上次镜像作基线时，check 保留「上次 → 当前」的实际方向；
 # tag 回滚会报告降级，不会按时间反转成安全升级。显式 --a 仍遵守 --keep-order。
+# 查询失败、预算耗尽或分页截断时，JSON / state 的 analysis_incomplete 为 true；
+# 下次即使摘要未变也会补查，并保留上次完整分析的基线。成功查询的缓存可让小预算逐次完成审计。
+# 显式 --no-bodhi 与 --backlog-candidates 限定的范围不会导致无限重试。
+# 旧版未记录完成标记的检查点会重查一次，避免继续信任可能未查完整的历史结论。
 
 # 6. 看这个镜像还落后多少安全更新
 python3 sbwatch.py backlog latest --max-bodhi 80
