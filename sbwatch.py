@@ -2080,6 +2080,8 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None,
             # security errata of builds the update passes over (old < build <=
             # new): in neither image, yet their fixes arrive with the new build
             "passed_over": [],
+            # The reverse interval: stable security builds a rollback crosses.
+            "reverted_errata": [],
             "changelog_scan": {"new_total": 0, "new_scanned": 0,
                                "dropped_total": 0, "dropped_scanned": 0,
                                "retained_total": 0, "retained_scanned": 0}}
@@ -2180,6 +2182,17 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None,
                 # update that passes over this build (curl 8.9.0 -> 8.9.3, past
                 # the security erratum of 8.9.1) gains its fix all the same, and
                 # only a CVE id in the rpm changelog could say so before.
+                reverted = (_passed_build(new, old, u["nvrs"], epochs)
+                            if (old and evr_cmp(old, new) > 0
+                                and (baseline_release is None or baseline_release == rel)
+                                and (not third_party or norm_new)
+                                and (not old_third_party or old_norm)) else None)
+                if reverted and u.get("type") == "security" and status in PUSHED_STATUSES:
+                    source_cves, shared_cves = _advisory_cve_scope(u)
+                    info["reverted_errata"].append({
+                        "alias": u.get("alias"), "type": "security", "status": status,
+                        "severity": u.get("severity"), "nvr": reverted,
+                        "cves": sorted(source_cves), "advisory_wide_cves": sorted(shared_cves)})
                 passed = (_passed_build(old, new, u["nvrs"], epochs)
                           if (old and (baseline_release is None or baseline_release == rel)
                               and (not third_party or norm_new)
@@ -2685,10 +2698,11 @@ def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
 
 
 def _reverted_aliases(group: dict) -> list:
-    """Only a downgraded member's old-only stable advisory can be reverted."""
+    """Old-only and intermediate stable security builds lost by a rollback."""
     return list(dict.fromkeys(
         a["alias"] for c in group["pkgs"] if c.get("dir") == "downgrade"
-        for a in (c.get("cls") or {}).get("already_had") or ()
+        for a in (((c.get("cls") or {}).get("already_had") or [])
+                  + ((c.get("cls") or {}).get("reverted_errata") or []))
         if a.get("alias") and a.get("type") == "security"
         and (a.get("status") or "").lower() in PUSHED_STATUSES
         and not a.get("also_matches_target")))
@@ -5278,6 +5292,7 @@ def _comparison_json(res: dict, from_label=None, to_label=None) -> dict:
                         "advisory_wide_cves": [] if is_down else cls.get("advisory_wide_cves", []),
                         "aliases": [] if is_down else cls.get("aliases", []),
                         "already_had": cls.get("already_had", []),
+                        "reverted_errata": cls.get("reverted_errata", []),
                         "not_pushed": [] if is_down else cls.get("not_pushed", []),
                         "passed_over": [] if is_down else cls.get("passed_over", []),
                         "why": [] if is_down else cls.get("why", [])})
