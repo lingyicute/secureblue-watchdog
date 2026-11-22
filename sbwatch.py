@@ -3253,7 +3253,7 @@ def _build_evr(p: dict) -> str:
     3.131.0 and sorts first, so an nss update was reported under nspr's numbers
     (likewise device-mapper for lvm2, brlapi for brltty and libdhash for
     ding-libs on the live F45 image). `srpm` is "<src>-<version>-<release>";
-    package_list() strips `.src.rpm`, but not the `.nosrc.rpm` of a NoSource build.
+    package_list() strips both `.src.rpm` and `.nosrc.rpm` suffixes.
     """
     src, srpm = p.get("src") or "", p.get("srpm") or ""
     if src and srpm.startswith(src + "-"):
