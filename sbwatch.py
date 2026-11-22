@@ -1940,7 +1940,7 @@ def nvr_candidates_split(pkg: dict) -> tuple:
       `kernel-7.2.5-200.secureblue.1.fc44` can be matched against Fedora's
       `kernel-7.2.5-200.fc44`. That hit is genuinely informative - secureblue's
       kernel *is* a rebuild of that Fedora build (secureblue/kernel's
-      copr_script.sh clones Fedora's kernel dist-git and only sets
+      srpm_script.sh clones Fedora's kernel dist-git and only sets
       `%define buildid .secureblue.N`) - but rpm-ostree never attaches the
       advisory to this package, so it must not feed the notification prediction.
 
