@@ -255,6 +255,7 @@ Bodhi 的多源码包**安全**勘误（例如依赖库更新与批量重建）�
   两个镜像里都没有这个构建，所以它的勘误对不上任何一方，但修复随新构建一并到来——计入结论与 CVE，
   不计入通知预测（rpm-ostree 只把勘误挂在精确命中的构建上）；`security_basis` 中标为「被越过构建的安全勘误」
 - `changed[].reverted_errata`：回滚越过的中间构建所带的 stable 安全勘误（新 < 该构建 ≤ 旧，同一 Fedora 版本内）。即使两个端点都未安装该构建，也会在回滚警告和 `verdict.errata_reverted` 中点名；CVE 与勘误证据保留在该字段，不计为新增修复，也不驱动通知或 `update-now`。
+- 更新日志扫描触发上限时，`verdict.level` 为 `unknown`，不会把“未读到 CVE”当成“没有 CVE”。JSON 的 `changelog_scan_incomplete` 列出受影响的包，`changed[].changelog_scan` 保留新增、丢失与保留条目的总数和实际扫描数。
 - `same_inputhash_but_packages_moved`：inputhash 相同但包确实动了（显式告警，别拿 inputhash 当无变化的证据）
 
 ### `--exact 0` 的 verdict 语义

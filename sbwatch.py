@@ -3196,6 +3196,16 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         elif v["level"] == "skip":
             bits.append("packages changed, but no CVE, erratum or sensitive package moved")
         v["level_basis"] = "; ".join(bits)
+    scan_gaps = diff.get("changelog_scan_incomplete") or []
+    v["changelog_coverage_complete"] = None if diff.get("count_a") == "?" else not bool(scan_gaps)
+    if scan_gaps:
+        v["level"] = "unknown"
+        v["level_basis"] = "changelog coverage is incomplete; unread entries may change CVE attribution"
+        v["headline"] = (f"Changelog scans were truncated for {len(scan_gaps)} package(s). "
+                         "Unread new, dropped or retained entries may change CVE attribution; "
+                         "the partial findings do not establish an upgrade recommendation.")
+        v["headline_zh"] = (f"{len(scan_gaps)} 个软件包的更新日志扫描被截断。未读取的新增、丢失或保留"
+                            "条目可能改变 CVE 归属；部分结果不足以给出可靠升级建议。")
     v["package_data_complete"] = diff.get("rpmdb_complete", versions_known)
     if diff.get("rpmdb_complete") is False:
         v["level"] = "unknown"
@@ -5198,6 +5208,7 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
         if any(s.get(f"{kind}_total", 0) > s.get(f"{kind}_scanned", 0)
                for kind in ("new", "dropped", "retained")):
             trunc.append(c["name"])
+    diff["changelog_scan_incomplete"] = trunc
     if trunc:
         notes.append(T(
             f"changelog scan capped at {NEW_LOG_CAP} new / {OLD_LOG_CAP} dropped / "
@@ -5310,6 +5321,7 @@ def _comparison_json(res: dict, from_label=None, to_label=None) -> dict:
                         "dir": c["dir"], "security": False if is_down else bool(cls.get("security")),
                         "cves": [] if is_down else cls.get("cves", []),
                         "cves_dropped": cls.get("cves_dropped", []),
+                        "changelog_scan": cls.get("changelog_scan", {}),
                         "advisory_wide_cves": [] if is_down else cls.get("advisory_wide_cves", []),
                         "aliases": [] if is_down else cls.get("aliases", []),
                         "already_had": cls.get("already_had", []),
@@ -5327,6 +5339,7 @@ def _comparison_json(res: dict, from_label=None, to_label=None) -> dict:
             "download_bytes_is_upper_bound": True,
             "versions_known": xc.get("versions_known", d.get("count_a") != "?"),
             "rpmdb_issues": d.get("rpmdb_issues"),
+            "changelog_scan_incomplete": d.get("changelog_scan_incomplete", []),
             "changed": changed, "added": d.get("added", []), "removed": d.get("removed", []),
             "silent_rebuilds": xc.get("silent_rebuilds", []),
             "behind_stable_security": res.get("backlog") or [],
