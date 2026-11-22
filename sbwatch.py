@@ -5164,18 +5164,9 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
             if n in pa:
                 src_of[n] = pa[n]["src"]
     xc = crosscheck_chunks(ld, diff, src_of)
-    # Backlog lookups for unchanged packages cannot affect this delta's popup.
-    diff["advisory_coverage_complete"] = bodhi is not None and not (
-        bodhi.failed or bodhi.skipped or getattr(bodhi, "truncated_src", ()))
-    backlog, coverage = [], None
-    if getattr(args, "audit", False) and bodhi is not None:
-        # Same Bodhi object as the diff classification above: one shared
-        # --max-bodhi budget (an earlier revision quietly spent a *second*,
-        # larger one - `--max-bodhi 10 --audit` still made up to 45 calls) and one
-        # shared answer cache, so a source package already looked up for the diff
-        # costs nothing here.
-        backlog, coverage = security_backlog(pb, rel, bodhi,
-                                              limit=getattr(args, "backlog_candidates", None))
+    # Capture diff's own Bodhi state before security_backlog() runs: backlog
+    # lookups for unchanged packages report their own coverage in coverage_line()
+    # and must not contaminate this delta's verdict or popup prediction.
     if bodhi is not None:
         bstate = {"failed": bodhi.failed, "skipped": bodhi.skipped,
                   "truncated": sorted(bodhi.truncated_src),
@@ -5186,6 +5177,17 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
         # Not the same thing as --no-bodhi: the Fedora release could not be
         # derived from the package list, so no erratum could be queried at all.
         bstate = {"unavailable": 1}
+    diff["advisory_coverage_complete"] = bodhi is not None and not (
+        bstate["failed"] or bstate["skipped"] or bstate["truncated"])
+    backlog, coverage = [], None
+    if getattr(args, "audit", False) and bodhi is not None:
+        # Same Bodhi object as the diff classification above: one shared
+        # --max-bodhi budget (an earlier revision quietly spent a *second*,
+        # larger one - `--max-bodhi 10 --audit` still made up to 45 calls) and one
+        # shared answer cache, so a source package already looked up for the diff
+        # costs nothing here.
+        backlog, coverage = security_backlog(pb, rel, bodhi,
+                                              limit=getattr(args, "backlog_candidates", None))
     # One aggregation per run: the verdict and both halves of the report all read
     # the same source-package groups.
     groups = group_by_src(diff["changed"])
