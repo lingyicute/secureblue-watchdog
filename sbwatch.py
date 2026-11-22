@@ -811,7 +811,7 @@ class Registry:
         tok = None
         try:
             req = urllib.request.Request(f"https://{self.host}/v2/")
-            with urllib.request.urlopen(req, timeout=self.timeout):
+            with _OPENER.open(req, timeout=self.timeout):
                 # 2xx: anonymous access is enough, no token needed.
                 self._tok = ""
                 return None
@@ -851,7 +851,7 @@ class Registry:
             merged_q = f"{sp.query}&{extra_q}" if sp.query else extra_q
             url = urllib.parse.urlunsplit((sp.scheme, sp.netloc, sp.path, merged_q, ""))
             try:
-                with urllib.request.urlopen(url, timeout=self.timeout) as r:
+                with _OPENER.open(url, timeout=self.timeout) as r:
                     # The token spec allows either key ("for compatibility
                     # with OAuth 2.0"), and Azure's registry sends only
                     # `access_token` - which read as "no token" and then as 401.

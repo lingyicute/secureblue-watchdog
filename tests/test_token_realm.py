@@ -27,7 +27,7 @@ class TestTokenRealm(unittest.TestCase):
 
         reg = S.Registry("registry.example/ns/image")
         err = io.StringIO()
-        with patch.object(S.urllib.request, "urlopen", side_effect=fake_urlopen), \
+        with patch.object(S._OPENER, "open", side_effect=fake_urlopen), \
                 contextlib.redirect_stderr(err):
             tok = reg._token()
         return tok, opened, err.getvalue()
@@ -72,7 +72,7 @@ class TestTokenRealm(unittest.TestCase):
             return _R()
 
         reg = S.Registry("reg.example/ns/img")
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen),                 contextlib.redirect_stderr(io.StringIO()):
+        with patch.object(S._OPENER, "open", side_effect=fake_urlopen),                 contextlib.redirect_stderr(io.StringIO()):
             self.assertIsNone(reg._token())
         self.assertEqual(seen[1].count("?"), 1)
         self.assertIn("?v=1&service=reg", seen[1])
@@ -95,7 +95,7 @@ class TestTokenRealm(unittest.TestCase):
                         raise S.urllib.error.HTTPError(u, 401, "Unauthorized", msg, None)
                     return io.BytesIO(b'{"token": "ok"}')
                 reg = S.Registry("reg.example/ns/img")
-                with patch.object(S.urllib.request, "urlopen", side_effect=fake_urlopen):
+                with patch.object(S._OPENER, "open", side_effect=fake_urlopen):
                     self.assertEqual(reg._token(), "ok")
                 self.assertIn("https://auth.example/token?", seen[1])
                 self.assertIn("service=reg.example", seen[1])
@@ -107,6 +107,14 @@ class TestTokenRealm(unittest.TestCase):
         self.assertEqual(tok, "xyz")
         self.assertNotIn("#", opened[1])
         self.assertIn("?service=registry.example&scope=", opened[1])
+
+    def test_token_requests_do_not_bypass_safe_opener(self):
+        with patch.object(S.urllib.request, "urlopen", side_effect=AssertionError("unsafe opener")), \
+                patch.object(S._OPENER, "open", side_effect=[
+                    challenge("https://auth.example/token"),
+                    io.BytesIO(b'{"token": "safe"}'),
+                ]):
+            self.assertEqual(S.Registry("registry.example/ns/image")._token(), "safe")
 
 
 if __name__ == "__main__":

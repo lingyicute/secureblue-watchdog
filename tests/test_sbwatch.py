@@ -3734,12 +3734,12 @@ class TestTokenUnderEitherKey(unittest.TestCase):
                     None)
             return _FakeResp(json.dumps(doc).encode())
 
-        saved = S.urllib.request.urlopen
-        S.urllib.request.urlopen = fake
+        saved = S._OPENER.open
+        S._OPENER.open = fake
         try:
             return S.Registry("reg.example/ns/name")._token()
         finally:
-            S.urllib.request.urlopen = saved
+            S._OPENER.open = saved
 
     def test_access_token_is_accepted_like_token(self):
         self.assertEqual(self._token({"token": "abc"}), "abc")

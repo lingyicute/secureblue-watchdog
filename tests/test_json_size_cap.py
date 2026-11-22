@@ -20,11 +20,11 @@ class _SmallCap(unittest.TestCase):
 
     def setUp(self):
         self._saved_cap, S.MAX_JSON_BYTES = S.MAX_JSON_BYTES, 1024
-        self._saved_urlopen = S.urllib.request.urlopen
+        self._saved_urlopen = S._OPENER.open
 
     def tearDown(self):
         S.MAX_JSON_BYTES = self._saved_cap
-        S.urllib.request.urlopen = self._saved_urlopen
+        S._OPENER.open = self._saved_urlopen
 
 
 class TestRegistryDocumentCap(_SmallCap):
@@ -56,7 +56,7 @@ class TestTokenReplyCap(_SmallCap):
                 raise urllib.error.HTTPError(url, 401, "Unauthorized", hdrs, io.BytesIO(b""))
             return io.BytesIO(body)
 
-        S.urllib.request.urlopen = fake
+        S._OPENER.open = fake
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             return S.Registry("ghcr.io/x/y")._token(), err.getvalue()

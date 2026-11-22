@@ -21,7 +21,7 @@ class TestMalformedHttpReply(unittest.TestCase):
 
     def test_token_probe_continues_unauthenticated(self):
         reg = S.Registry("x/y")
-        with patch.object(S.urllib.request, "urlopen",
+        with patch.object(S._OPENER, "open",
                           side_effect=http.client.LineTooLong("header line")), \
                 contextlib.redirect_stderr(io.StringIO()) as err:
             self.assertIsNone(reg._token())
