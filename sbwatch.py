@@ -5471,7 +5471,15 @@ def cmd_check(args):
     if not ref_a:
         pending = state.get("last_verdict") == "unknown"
         previous = state.get("prev_digest")
-        if pending or (state.get("digest") == cur["digest"] and previous != cur["digest"]):
+        if (pending and not previous and state.get("baseline_missing") is True
+                and state.get("digest") and state["digest"] != cur["digest"]):
+            # No comparison existed on the first observation. It is still a
+            # valid observed image to compare with a later, distinct target;
+            # unlike an incomplete comparison it has no older usable baseline.
+            state_base_dig = state["digest"]
+            state_base_index = state.get("index_digest")
+            state_base_lbl = _state_label(state)
+        elif pending or (state.get("digest") == cur["digest"] and previous != cur["digest"]):
             # An inconclusive target is not a checkpoint. If the tag returned to
             # the last usable baseline, compare it to itself, not to the failure.
             state_base_dig = previous
@@ -5591,7 +5599,7 @@ def cmd_check(args):
                     "download_bytes": 0, "report": report, "version": ver, **watched})
         # Remember the checkpoint for a future build, not a successful analysis.
         # An unchanged digest must retry the missing baseline on the next run.
-        save_state({"last_verdict": "unknown"})
+        save_state({"last_verdict": "unknown", "baseline_missing": True})
         return 0
 
     # Resolve the baseline exactly once and hand it to do_diff. Resolving the same
