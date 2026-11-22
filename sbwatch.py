@@ -127,7 +127,7 @@ BASELINE_LABEL_CAP = 80  # characters of a baseline label read back from the sta
 #                          whole digest (71), which shortref() then abbreviates. The
 #                          former 26 cut check's own label and appended a 40-character
 #                          marker to it - once more on every --force run.
-PKGLIST_CACHE_VERSION = 6  # track all shadowed packages, even the same architecture
+PKGLIST_CACHE_VERSION = 7  # reject inventories read from executable/generated SQLite columns
 BODHI_CACHE_VERSION = 6  # v5 could cache a repeated, apparently complete page
 OLD_LOG_CAP = 1000  # changelog entries (dropped by this build) scanned for lost fixes
 RETAINED_LOG_CAP = 1000  # unchanged entries that may still mention a purportedly gained/lost CVE
@@ -1484,6 +1484,7 @@ def package_list(reg: Registry, resolved: dict) -> dict:
             # path into one that does not exist.
             uri = pathlib.Path(os.path.abspath(path)).as_uri() + "?mode=ro"
             con = sqlite3.connect(uri, uri=True)
+            con.execute("PRAGMA trusted_schema = OFF")
             # Iterated, not fetchall()ed: the blobs add up to most of the ~92 MiB
             # database, and only the one being parsed has to be in memory.
             schema = con.execute(
@@ -1494,6 +1495,15 @@ def package_list(reg: Registry, resolved: dict) -> dict:
                 # recursive query before yielding even one. RPM uses a real table.
                 raise SystemExit(T("rpmdb Packages must be an ordinary table",
                                    "rpmdb Packages 必须是普通数据表"))
+            # An ordinary table can still execute arbitrary-size expressions:
+            # a VIRTUAL generated blob = zeroblob(seed) expands an 8 KiB database
+            # before either the row cap or read_header() can protect us. RPM's
+            # SQLite backend stores real BLOBs, never generated/hidden columns.
+            columns = list(con.execute("PRAGMA table_xinfo('Packages')"))
+            if (not columns or any(column[6] != 0 for column in columns)
+                    or not any(column[1].lower() == "blob" for column in columns)):
+                raise SystemExit(T("rpmdb Packages must contain stored RPM headers, not generated columns",
+                                   "rpmdb Packages 必须存储真实 RPM 包头，不能包含生成列"))
             rows = con.execute("SELECT blob FROM Packages LIMIT ?", (MAX_RPM_HEADERS + 1,))
             pkgs = PackageTable()
             stats: dict = {}
@@ -4919,7 +4929,7 @@ def _cache_write(path: str, data, what: str) -> None:
 
 
 def _pkglist_from_cache(data):
-    """Accept only the shape emitted by package_list(), not merely version 6."""
+    """Accept only the shape emitted by package_list(), not merely a version number."""
     if not isinstance(data, dict) or data.get("cache_version") != PKGLIST_CACHE_VERSION:
         return None
     packages, collisions = data.get("packages"), data.get("collisions")
