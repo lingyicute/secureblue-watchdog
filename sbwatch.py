@@ -2688,6 +2688,15 @@ def _reverted_aliases(group: dict) -> list:
         and not a.get("also_matches_target")))
 
 
+def _unowned_chunk_bytes(ldiff: dict) -> int:
+    """Changed bytes outside rpm/ packages, excluding rpmdb.sqlite and initramfs.img."""
+    def _unowned(c):
+        return (not c.startswith("rpm/")
+                and c.rpartition("/")[2] not in (CHUNK_MATCH, "initramfs.img"))
+    return sum(ch["size"] for ch in ldiff.get("changed_chunks") or []
+               if any(_unowned(c) for c in ch.get("components") or []))
+
+
 def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                backlog: list | None = None, bodhi_state: dict | None = None,
                groups: list | None = None) -> dict:
@@ -2860,11 +2869,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         # etc/trivalent/filter/trivalent-blocklist, .../selinux/targeted/policy/
         # policy.35 and .../udev/hwdb.bin. Left out: the rpmdb, which was read,
         # and the initramfs, which the image build regenerates from packages.
-        def _unowned(c):
-            return (not c.startswith("rpm/")
-                    and c.rpartition("/")[2] not in (CHUNK_MATCH, "initramfs.img"))
-        loose = sum(ch["size"] for ch in ldiff.get("changed_chunks") or []
-                    if any(_unowned(c) for c in ch.get("components") or []))
+        loose = _unowned_chunk_bytes(ldiff)
         if loose:
             v["headline"] += (f". Not inspected: {human(loose)} of files that no package owns "
                               f"(chunkah/unclaimed and bigfiles/* chunks, secureblue's own "
@@ -3782,14 +3787,13 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
     if (not changed and not diff["added"] and not diff["removed"]
             and diff.get("rpmdb_complete", True)
             and (isinstance(diff.get("count_a"), int) or diff.get("same_rpmdb"))):
-        unowned = sum(ch["size"] for ch in ldiff.get("changed_chunks") or []
-                      if "chunkah/unclaimed" in (ch.get("components") or []))
+        unowned = _unowned_chunk_bytes(ldiff)
         if is_zh:
             W("## 没有任何软件包版本发生变化")
             W("")
             if unowned:
                 W(f"两个镜像中所有软件包的 NEVRA 完全一致；但另有 {human(unowned)} "
-                  "不属于任何软件包的文件（`chunkah/unclaimed`，含 secureblue 自身配置）"
+                  "不属于任何软件包的文件（`chunkah/unclaimed` 与 `bigfiles/*`，含 secureblue 自身配置）"
                   "发生了变化，且未在此检查。")
             else:
                 W("两个镜像中所有软件包的 NEVRA 完全一致；文件内容未检查，版本相同不能证明内容相同。")
@@ -3798,7 +3802,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("")
             if unowned:
                 W(f"Every package in both images has the same NEVRA; {human(unowned)} of "
-                  "files no package owns (`chunkah/unclaimed`, including secureblue's own "
+                  "files no package owns (`chunkah/unclaimed` and `bigfiles/*`, including secureblue's own "
                   "configuration) also changed and were not inspected here.")
             else:
                 W("Every package in both images has the same NEVRA; file contents were not inspected. "

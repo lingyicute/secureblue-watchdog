@@ -37,6 +37,18 @@ class TestUnownedBigfilesNote(unittest.TestCase):
         v = verdict(chunk("chunkah/unclaimed", 9962319))
         self.assertIn("Not inspected: 9.5 MiB", v["headline"])
 
+    def test_markdown_no_change_section_matches_headline_for_bigfiles(self):
+        ch = chunk("bigfiles/usr/share/secureblue/etc/trivalent/filter/trivalent-blocklist", 4931496)
+        diff = S.pkg_diff({}, {})
+        ldiff = {"chunks_a": 1, "chunks_b": 1, "chunks_changed": 1, "chunks_reused": 0,
+                 "total_size_b": ch["size"], "download_bytes": ch["size"], "download_pct": 100,
+                 "changed_packages_from_chunks": [], "changed_chunks": [ch]}
+        v = S.verdict_of(diff, ldiff, {}, S.crosscheck_chunks(ldiff, diff))
+        img = {"ref": "a", "digest": "sha256:" + "a" * 64, "annotations": {}, "layers": []}
+        md = S.render_markdown("s", img, img, diff, ldiff, v, [])
+        self.assertIn("4.7 MiB of files no package owns", md)
+        self.assertIn("另有 4.7 MiB 不属于任何软件包的文件", md)
+
 
 if __name__ == "__main__":
     unittest.main()
