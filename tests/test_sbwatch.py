@@ -2727,10 +2727,13 @@ class TestPackageListStreamsTheRpmdb(unittest.TestCase):
         def __init__(self, con):
             self._con, self.closed = con, False
 
-        def execute(self, sql):
-            cur = self._con.execute(sql)
+        def execute(self, sql, *parameters):
+            cur = self._con.execute(sql, *parameters)
 
             class Cur:
+                def fetchone(self_inner):
+                    return cur.fetchone()
+
                 def fetchall(self_inner):
                     raise AssertionError("package_list() must iterate, not fetchall()")
 

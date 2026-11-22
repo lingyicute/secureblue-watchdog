@@ -98,6 +98,7 @@ MAX_JSON_BYTES = 16 * 1024 * 1024           # 16 MiB for a document parsed in on
                                             # and json.loads() of one at the blob cap
                                             # takes several times that cap in memory
 MAX_TAR_MEMBERS = 10_000
+MAX_RPM_HEADERS = 100_000  # live inventories have ~2,200; bound parsed-table expansion
 MAX_TAR_FILE_SIZE = 256 * 1024 * 1024       # 256 MiB single file inside tar
 BODHI_PAGE_SIZE = 100                       # Bodhi's max rows_per_page
 MAX_BODHI_PAGES = 10                        # 1000 errata/src is far beyond any real case
@@ -1485,10 +1486,21 @@ def package_list(reg: Registry, resolved: dict) -> dict:
             con = sqlite3.connect(uri, uri=True)
             # Iterated, not fetchall()ed: the blobs add up to most of the ~92 MiB
             # database, and only the one being parsed has to be in memory.
-            rows = con.execute("select blob from Packages")
+            schema = con.execute(
+                "SELECT type, sql FROM sqlite_master WHERE name = 'Packages' COLLATE NOCASE").fetchone()
+            if (schema is None or schema[0] != "table"
+                    or re.match(r"CREATE\s+VIRTUAL\b", schema[1] or "", re.I)):
+                # A tiny view can generate infinitely many rows or run a costly
+                # recursive query before yielding even one. RPM uses a real table.
+                raise SystemExit(T("rpmdb Packages must be an ordinary table",
+                                   "rpmdb Packages 必须是普通数据表"))
+            rows = con.execute("SELECT blob FROM Packages LIMIT ?", (MAX_RPM_HEADERS + 1,))
             pkgs = PackageTable()
             stats: dict = {}
-            for (blob,) in rows:
+            for row_number, (blob,) in enumerate(rows):
+                if row_number >= MAX_RPM_HEADERS:
+                    raise SystemExit(T(f"rpmdb header count exceeds {MAX_RPM_HEADERS} limit",
+                                       f"rpmdb 包头数量超过 {MAX_RPM_HEADERS} 上限"))
                 before = stats.get("headers_rejected", 0)
                 h = read_header(blob, stats)
                 name = h.get("name")
