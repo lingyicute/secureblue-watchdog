@@ -35,6 +35,29 @@ class TestHistoryAnchor(unittest.TestCase):
         self.assertEqual([row['digest'] for row in rows],
                          [target['digest'], old['digest']])
 
+    def test_dated_tag_labels_anchor_to_snapshot_date(self):
+        prev = _img('1', '44.20261103.0', '2026-11-03T14:00:00Z')
+        target = _img('2', '44.20261104.0', '2026-11-04T16:00:00Z')
+        tags = ['sha256-' + prev['digest'][7:] + '.sig',
+                'sha256-' + target['digest'][7:] + '.sig',
+                '20261103', '20261103-44', '20261104', '20261104-44',
+                '20261120', '20261121', '20261122']
+        by_tag = {'20261103': prev['digest'], '20261103-44': prev['digest'],
+                  '20261104': target['digest'], '20261104-44': target['digest']}
+        probed = []
+
+        class _Reg:
+            def index_digest(self, t):
+                probed.append(t)
+                return by_tag.get(t, 'sha256:' + '9' * 64)
+
+        imgs = {img['digest']: img for img in (prev, target)}
+        with patch.object(S, 'list_tags', return_value=tags),                 patch.object(S, 'resolve', side_effect=lambda _, dig, **kw: imgs[dig]):
+            rows = S.build_history(_Reg(), scan=2, days=2, to='44', cur=target)
+        self.assertNotIn('20261122', probed)
+        self.assertIn('20261104-44', rows[0]['tags'])
+        self.assertIn('20261103-44', rows[1]['tags'])
+
 
 class TestHistoryAtDigest(unittest.TestCase):
     def test_watched_stream_can_be_named_without_re_resolving_tag(self):

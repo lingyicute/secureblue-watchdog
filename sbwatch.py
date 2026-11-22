@@ -4495,7 +4495,15 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
             m = DATED_RE.match(t)
             if m:
                 by_day.setdefault(m.group(1), []).append(t)
-        for day in sorted(by_day)[-days:]:
+        max_day = ""
+        if cur_time:
+            try:
+                max_day = (datetime.date.fromisoformat(cur_time[:10])
+                           + datetime.timedelta(days=1)).strftime("%Y%m%d")
+            except ValueError:
+                max_day = ""
+        eligible_days = [d for d in sorted(by_day) if not max_day or d <= max_day]
+        for day in eligible_days[-days:]:
             for t in sorted(by_day[day]):
                 try:
                     dig = reg.index_digest(t)
