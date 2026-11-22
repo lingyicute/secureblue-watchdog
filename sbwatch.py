@@ -2968,14 +2968,14 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                     f"(initramfs / ostree metadata)")
             tail_zh = (f"；下载中有 {human(v['non_package_bytes'])} 属于非软件包内容"
                        f"（initramfs / ostree 元数据）")
-        up_groups = [g for g in groups if not g["downgrade"]]
-        up_bin = sum(len(g["pkgs"]) for g in up_groups)
+        up_groups = [g for g in groups if any(p.get("dir") != "downgrade" for p in g["pkgs"])]
+        up_bin = sum(p.get("dir") != "downgrade" for g in up_groups for p in g["pkgs"])
         v["level"] = "skip"
         # A rollback is not "routine churn": that lead headed the report of a tag
         # that had moved back three builds (eight source packages downgraded).
         lead = lead_zh = ""
         if down:
-            down_bin = sum(len(g["pkgs"]) for g in down)
+            down_bin = sum(p.get("dir") == "downgrade" for g in down for p in g["pkgs"])
             lead = f"{plural(len(down), 'source package')} ({down_bin} binary) downgraded, "
             lead_zh = f"{len(down)} 个源码包（{down_bin} 个二进制包）被降级，"
         v["headline"] = ((lead or "routine churn: ")
@@ -3053,11 +3053,15 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         v["headline_zh"] += (f" ｜ 注意：两个镜像的 rpmostree.inputhash 相同，却有 {n_moved} 个"
                              "软件包发生了变化——不要拿 inputhash 当作「无变化」的证据")
     if down:
-        def _dl(g):
-            return f"{g['src']} ({g['old_evr']} → {g['new_evr']})"
+        def _dl(g, lang="en"):
+            def binary_label(p):
+                old, new = _evr_pair(p["old"], p["new"])
+                return f"{p['name']} ({old} → {new})"
+            return clip_list((p for p in g["pkgs"] if p.get("dir") == "downgrade"),
+                             2, render=binary_label, lang=lang)
 
         dl_txt = clip_list(down, 3, render=_dl)
-        dl_txt_zh = clip_list(down, 3, render=_dl, lang="zh", joiner="，")
+        dl_txt_zh = clip_list(down, 3, render=lambda g: _dl(g, "zh"), lang="zh", joiner="，")
         v["headline"] += (" | WARNING: this update downgrades " + dl_txt)
         v["headline_zh"] += (" ｜ 警告：此次更新会降级 " + dl_txt_zh)
         # The security errata of the builds being left, by the report's own rule
@@ -3179,7 +3183,8 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             if v["silent_important"]:
                 bits.append("the chunks of security-relevant packages changed at the same version")
             if v["downgrades"]:
-                bits.append(f"{len(v['downgrades'])} package(s) were downgraded")
+                count = sum(c.get("dir") == "downgrade" for c in diff["changed"])
+                bits.append(f"{count} binary package(s) were downgraded")
             if coverage_gap:
                 bits.append("errata coverage is incomplete, so 'no security fixes' is "
                             "not proven")
@@ -3626,7 +3631,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W(f"## Downgrades in this update ({len(g_down)}) — read first")
         W("")
         for g in g_down:
-            pkgs_label = f"{len(g['pkgs'])} 个包" if is_zh else f"{len(g['pkgs'])} package(s)"
+            downgraded = [p for p in g["pkgs"] if p.get("dir") == "downgrade"]
+            pkgs_label = f"{len(downgraded)} 个包" if is_zh else f"{len(downgraded)} package(s)"
             # What a downgrade reverts is the erratum of the build it moves AWAY
             # from, i.e. one that matched the old build (`already_had`). `aliases`
             # are the errata of the older build it moves back to, and naming
@@ -3639,7 +3645,10 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                             f"{clip_list(reverted, 2)}")
             else:
                 rev = ""
-            W(f"- **{g['src']}**: {g['old_evr']} → {g['new_evr']} ({pkgs_label}){rev}")
+            W(f"- **{g['src']}**: ({pkgs_label}){rev}")
+            for package in downgraded:
+                old, new = _evr_pair(package["old"], package["new"])
+                W(f"  - `{package['name']}`: {old} → {new}")
         W("")
 
     if g_lost:
