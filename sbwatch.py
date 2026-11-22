@@ -3657,9 +3657,9 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             # the first line of a changelog entry lands here verbatim, and a bare
             # `|` in it ends the cell early and shifts every column after it
             ev = _md_cell(ev)
-            cve_str = clip_list(g["cves"], CVE_CELL_CAP, lang=lang) or "—"
-            pkg_col = fmt_pkgs(g, "zh" if is_zh else "en")
-            W(f"| {pkg_col} ({g['src']}) | {g['old_evr']} → **{g['new_evr']}** | {cve_str} | {ev} |")
+            cve_str = _md_cell(clip_list(g["cves"], CVE_CELL_CAP, lang=lang) or "—")
+            pkg_col = _md_cell(fmt_pkgs(g, "zh" if is_zh else "en"))
+            W(f"| {pkg_col} ({_md_cell(g['src'])}) | {_md_cell(g['old_evr'])} → **{_md_cell(g['new_evr'])}** | {cve_str} | {ev} |")
         W("")
         shared = verdict.get("advisory_wide_cves") or []
         if shared:
@@ -3727,7 +3727,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("| source package | binary packages | old → new |")
             W("|---|---|---|")
         for g in g_other:
-            W(f"| {g['src']} | {fmt_pkgs(g, 'zh' if is_zh else 'en')} | {g['old_evr']} → {g['new_evr']} |")
+            W(f"| {_md_cell(g['src'])} | {_md_cell(fmt_pkgs(g, 'zh' if is_zh else 'en'))} | {_md_cell(g['old_evr'])} → {_md_cell(g['new_evr'])} |")
         W("")
 
     g_had = [g for g in groups if not g["downgrade"] and any(
@@ -3907,7 +3907,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("| package | in image | newer stable build | max severity | latest build erratum |")
             W("|---|---|---|---|---|")
         for r in backlog[:25]:
-            W(f"| `{r['name']}` | {r['have']} | **{r['want']}** | {r['severity'] or '?'} | {r.get('alias') or '—'} |")
+            W(f"| `{_md_cell(r['name'])}` | {_md_cell(r['have'])} | **{_md_cell(r['want'])}** | {_md_cell(r['severity'] or '?')} | {_md_cell(r.get('alias') or '—')} |")
         if len(backlog) > 25:
             # A fixed display cap: --backlog-candidates changes how many rows exist,
             # never how many fit here, so point at the complete JSON instead.

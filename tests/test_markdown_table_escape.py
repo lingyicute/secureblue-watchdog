@@ -26,5 +26,22 @@ class TestMarkdownTableEscape(unittest.TestCase):
         self.assertTrue(found)
 
 
+    def test_backlog_and_routine_tables_escape_pipes_and_newlines(self):
+        img = {"ref": "a", "digest": "sha256:" + "1" * 64, "annotations": {}, "layers": []}
+        ld = {"chunks_a": 1, "chunks_b": 1, "chunks_changed": 0, "chunks_reused": 1,
+              "total_size_b": 100, "download_bytes": 0, "download_pct": 0,
+              "changed_packages_from_chunks": [], "changed_chunks": []}
+        diff = {"added": [], "removed": [], "downgrades": [], "count_a": 1, "count_b": 1,
+                "changed": [{"name": "a|b", "src": "src|1", "dir": "upgrade",
+                             "old": {"evr": "1|0-1", "src": "src|1"},
+                             "new": {"evr": "2\n0-1", "src": "src|1"}, "cls": {}}]}
+        backlog = [{"name": "pkg|x", "have": "1-1", "want": "2-1",
+                    "severity": "high|crit", "alias": "FEDORA-2026|bad\nline"}]
+        v = S.verdict_of(diff, ld, {}, backlog=backlog)
+        md = S.render_markdown("s", img, img, diff, ld, v, [], backlog=backlog)
+        self.assertIn("src\\|1", md)
+        self.assertIn("FEDORA-2026\\|bad line", md)
+
+
 if __name__ == "__main__":
     unittest.main()
