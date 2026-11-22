@@ -54,6 +54,18 @@ class TestDowngradeTargetErratum(unittest.TestCase):
         self.assertEqual(row["aliases"], [])
         self.assertEqual([x["alias"] for x in row["already_had"]], ["FEDORA-2026-newsec"])
 
+    def test_downgrade_nonstable_errata_are_omitted_from_report_groups(self):
+        bodhi = _Bodhi([
+            {"alias": "FEDORA-2026-obs", "type": "security", "status": "obsolete",
+             "severity": "high", "title": "", "notes": "", "cves": [], "bugs": [],
+             "date_approved": None, "nvrs": ["foo-1.1-1.fc45"]},
+        ])
+        old, new = pkg("foo", "1.2-1.fc45"), pkg("foo", "1.1-1.fc45")
+        ch = [{"name": "foo", "old": old, "new": new, "src": "foo", "dir": "downgrade",
+               "cls": S.classify_change(old, new, "F45", bodhi)}]
+        g, = S.group_by_src(ch)
+        self.assertEqual(g["unreleased"], [])
+
     def test_rollback_target_critical_erratum_is_not_credited_in_level_basis_or_fail_reason(self):
         import contextlib, io, os, tempfile
         from pathlib import Path

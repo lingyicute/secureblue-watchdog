@@ -3277,15 +3277,15 @@ def group_by_src(changed: list) -> list:
                     g["why"].append(w)
             g["sev_rank"] = max(g["sev_rank"], cls.get("sev_rank") or 0)
             g["sec_sev_rank"] = max(g["sec_sev_rank"], cls.get("sec_sev_rank") or 0)
+            for a in cls.get("not_pushed") or []:
+                if a not in g["unreleased"]:
+                    g["unreleased"].append(a)
+            for a in cls.get("passed_over") or []:
+                if a not in g["passed_over"]:
+                    g["passed_over"].append(a)
         for a in cls.get("already_had") or []:
             if a not in g["already_had"]:
                 g["already_had"].append(a)
-        for a in cls.get("not_pushed") or []:
-            if a not in g["unreleased"]:
-                g["unreleased"].append(a)
-        for a in cls.get("passed_over") or []:
-            if a not in g["passed_over"]:
-                g["passed_over"].append(a)
         # `.get`, like every other consumer of this structure: a change entry
         # built without "dir" crashed here with a KeyError while
         # secureblue_notification() happily accepted the same data.
