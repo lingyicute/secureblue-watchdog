@@ -2997,8 +2997,8 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     # the popup the user will see.  A MAJOR popup (urgency=critical, Reboot
     # action) means the vendor considers this update urgent, so it must not sit
     # in `consider` or below - notably, every Trivalent bump lands here even when
-    # it carries no CVE and no Fedora erratum at all (Trivalent has no Fedora
-    # counterpart, so no Bodhi match is possible by construction).
+    # it carries no CVE and no Fedora erratum at all (Trivalent is a secureblue
+    # build, not a Fedora source build published through Bodhi).
     # Not for the bootc branch's unconditional popup: it fires for every staged
     # update whatever it contains, so it says nothing about THIS one.
     # A critical advisory attached only to a rollback destination is not a

@@ -103,8 +103,9 @@ Important=112、**Critical=13**（含 2026-09-22 的 chromium）。
 `sbwatch` 存的就是映射后的拼写再喂 `rpmostree_str2severity()`（若直接喂 Bodhi 原词：
 `urgent` 会被低估成普通、`medium` 会被高估成普通——两个方向都错）。
 
-**2. trivalent 必须硬编码，靠 CVE 匹配永远抓不到它。**
-trivalent 是 secureblue 自己的包、无 dist tag，**结构上不可能匹配到任何 Bodhi 勘误**。
+**2. trivalent 的通知必须按包名判断，不能依赖 Fedora 勘误。**
+trivalent 是 secureblue 自己的包，不是 Fedora Bodhi 发布的源码构建。无 dist tag 本身
+并不排除勘误匹配（例如 shim 也可没有 `.fcNN`）；这里不能依赖 Bodhi 的原因是构建来源不同。
 而上游把**任何** trivalent 升级都判为重大通知（secureblue FAQ：Trivalent 是在上游
 Chromium CVE 修复后才推的）。因此 `sbwatch` 直接按包名判断，不依赖勘误。
 
