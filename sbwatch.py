@@ -2430,10 +2430,16 @@ def crosscheck_chunks(ldiff: dict, diff: dict, src_of: dict | None = None,
 def fedora_release(pkgs: dict, image_version: str = "") -> str:
     """Bodhi release id ("F44") for this image.
 
-    Read from the packages themselves; the image version annotation
-    ("44.20260917.0") is only a fallback, so this stops silently going stale at
-    the next Fedora release instead of being pinned to one hard-coded value.
+    The Fedora release RPM declares the installed OS version. A rebase can
+    retain more old .fcNN builds than new ones, so their plurality is only a
+    fallback, followed by the image version annotation.
     """
+    declared = {str(p.get("version")) for p in pkgs.values()
+                if (p.get("src") == "fedora-release" or p.get("name") == "fedora-release")
+                and not _is_third_party(p)
+                and re.fullmatch(r"[1-9][0-9]*", str(p.get("version") or ""))}
+    if len(declared) == 1:
+        return "F" + next(iter(declared))
     fed_counts: dict = {}
     all_counts: dict = {}
     for p in pkgs.values():
