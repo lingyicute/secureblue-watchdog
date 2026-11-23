@@ -394,6 +394,8 @@ python3 tests/run_offline.py
 
 - `test_rollback_erratum_wording.py`：差异含降级时，headline 不得一边写「此差异未发现 CVE/勘误」一边点名被回退的安全勘误，改称「升级部分未发现」；没有降级时措辞不变。
 
+- `test_non_package_churn_wording.py`：`skip` headline 里的非软件包下载量按 chunkah 镜像的真实组成表述（initramfs、rpmdb 及其他不属于软件包的文件），不再提镜像里并不存在的「ostree 元数据」层。
+
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性
 （共 103 条：上游实际运行的 91 条，以及它以注释形式保留、用来记录既有怪异行为的 12 条）。

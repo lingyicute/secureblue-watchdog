@@ -3017,9 +3017,9 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         tail = tail_zh = ""
         if v["non_package_bytes"]:
             tail = (f"; {human(v['non_package_bytes'])} of the download is non-package churn "
-                    f"(initramfs / ostree metadata)")
+                    f"(initramfs, rpmdb and other files no package owns)")
             tail_zh = (f"；下载中有 {human(v['non_package_bytes'])} 属于非软件包内容"
-                       f"（initramfs / ostree 元数据）")
+                       f"（initramfs、rpmdb 及其他不属于软件包的文件）")
         up_groups = [g for g in groups if any(p.get("dir") != "downgrade" for p in g["pkgs"])]
         up_bin = sum(p.get("dir") != "downgrade" for g in up_groups for p in g["pkgs"])
         v["level"] = "skip"
