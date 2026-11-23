@@ -2967,10 +2967,21 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             bits.append("chunk changed at an identical version: " + clip_list(silent_key, 5))
             bits_zh.append("版本相同但 chunk 变化："
                            + clip_list(silent_key, 5, lang="zh", joiner="，"))
-        v["headline"] = ("no CVE/erratum found for this delta, but " + "; ".join(bits)
-                         + ". Reasonable to skip if the download matters to you")
-        v["headline_zh"] = ("此差异未发现 CVE/勘误，但涉及：" + "；".join(bits_zh)
-                            + "。如果下载量对你很重要，可以合理地跳过")
+        # A rollback is neither routine churn nor "reasonable to skip" advice (the
+        # routine branch below already leads with the downgrade): lead with it here
+        # too, or a tag moved back over four security errata read as skippable.
+        lead = lead_zh = ""
+        advice = ". Reasonable to skip if the download matters to you"
+        advice_zh = "。如果下载量对你很重要，可以合理地跳过"
+        if down:
+            down_bin = sum(p.get("dir") == "downgrade" for g in down for p in g["pkgs"])
+            lead = f"{plural(len(down), 'source package')} ({down_bin} binary) downgraded, "
+            lead_zh = f"{len(down)} 个源码包（{down_bin} 个二进制包）被降级，"
+            advice = advice_zh = ""
+        v["headline"] = (lead + "no CVE/erratum found for this delta, but "
+                         + "; ".join(bits) + advice)
+        v["headline_zh"] = (lead_zh + "此差异未发现 CVE/勘误，但涉及：" + "；".join(bits_zh)
+                            + advice_zh)
     else:
         tail = tail_zh = ""
         if v["non_package_bytes"]:
