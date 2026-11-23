@@ -32,6 +32,9 @@ class TestMixedDirectionGroup(unittest.TestCase):
         md = S.render_markdown("s", IMG, IMG, diff, LD, v, [])
         self.assertIn("CVE-2026-9999", md)
         self.assertIn("Downgrades in this update", md)
+        sec_section = md.split("## Security-relevant changes")[1].split("\n## ")[0]
+        self.assertIn("`kernel-tools` (kernel) | 7.3.3-300.fc45 → **7.3.4-300.fc45**", sec_section)
+        self.assertNotIn("`kernel`, `kernel-tools`", sec_section)
 
 
 if __name__ == "__main__":

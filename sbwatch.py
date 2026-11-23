@@ -3402,7 +3402,7 @@ def group_by_src(changed: list) -> list:
         g["dropped"] = sorted(g["dropped"])
         g["reverted"] = sorted(g["reverted"])
         g["changelog_cves"] = sorted(g["changelog_cves"])
-        rep = min(g["pkgs"], key=lambda p: (p["name"] != g["src"], p["name"]))
+        rep = min(g["pkgs"], key=lambda p: (p.get("dir") == "downgrade", p["name"] != g["src"], p["name"]))
         o, n = rep["old"], rep["new"]
         g["old_evr"], g["new_evr"] = _build_evr(o), _build_evr(n)
         if o.get("arch") != n.get("arch"):
@@ -3428,7 +3428,8 @@ def shortref(ref) -> str:
 
 
 def fmt_pkgs(g: dict, lang: str = "en") -> str:
-    names = [p["name"] for p in g["pkgs"]]
+    pkgs = [p for p in g["pkgs"] if p.get("dir") != "downgrade"] or g["pkgs"]
+    names = [p["name"] for p in pkgs]
     if len(names) == 1:
         return f"`{names[0]}`"
     head = ", ".join(f"`{x}`" for x in names[:3])
