@@ -3111,7 +3111,9 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                 old, new = _evr_pair(p["old"], p["new"])
                 return f"{p['name']} ({old} → {new})"
             return clip_list((p for p in g["pkgs"] if p.get("dir") == "downgrade"),
-                             2, render=binary_label, lang=lang)
+                             2, render=binary_label, lang=lang,
+                             joiner="，" if lang == "zh" else ", ",
+                             unit="二进制包" if lang == "zh" else "binary package(s)")
 
         # The entries are binary packages grouped by source package, so the
         # overflow marker has to say what it counts: a bare "(+12 more not shown)"

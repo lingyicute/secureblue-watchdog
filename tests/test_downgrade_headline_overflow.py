@@ -29,5 +29,19 @@ class TestDowngradeHeadlineOverflow(unittest.TestCase):
         self.assertNotIn("not shown", v["headline"])
 
 
+    def test_per_source_binary_overflow_names_unit_and_uses_chinese_joiner(self):
+        bins = ("kernel", "kernel-core", "kernel-modules")
+        old = {b: pkg(b, "7.3.4-300.fc45", src="kernel") for b in bins}
+        new = {b: pkg(b, "7.3.3-300.fc45", src="kernel") for b in bins}
+        d = S.pkg_diff(old, new)
+        for c in d["changed"]:
+            c["cls"] = S.classify_change(c["old"], c["new"], "F45", None)
+        v = S.verdict_of(d, LD, {}, {})
+        self.assertIn("(+1 more binary package(s) not shown)", v["headline"])
+        self.assertIn("（另有 1 个二进制包未显示）", v["headline_zh"])
+        warn_zh = v["headline_zh"].split("警告：此次更新会降级 ", 1)[1]
+        self.assertNotIn("), ", warn_zh)
+
+
 if __name__ == "__main__":
     unittest.main()
