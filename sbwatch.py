@@ -232,22 +232,23 @@ def human(nbytes) -> str:
 # shown were 2023/2024 leftovers while 107 ids - every 2026 one - vanished), and
 # how a bare "…" left the reader unable to tell 2 dropped entries from 200.
 # Nothing here may shorten output without saying how much it dropped.
-def _more_marker(extra: int, lang: str) -> str:
+def _more_marker(extra: int, lang: str, unit: str = "") -> str:
+    """`unit` names what is being counted when the list is not of plain items."""
     if lang == "zh":
-        return f"（另有 {extra} 个未显示）"
+        return f"（另有 {extra} 个{unit}未显示）"
     if lang == "both":                     # a string shown in both halves at once
         return f" (+{extra} more not shown / 另有 {extra} 个未显示)"
-    return f" (+{extra} more not shown)"
+    return f" (+{extra} more{' ' + unit if unit else ''} not shown)"
 
 
 def clip_list(items, n: int, *, lang: str = "en", joiner: str = ", ",
-              render=None) -> str:
+              render=None, unit: str = "") -> str:
     """Join at most `n` items, then state exactly how many were left out."""
     items = list(items)
     shown = [render(x) if render else str(x) for x in items[:n]]
     extra = len(items) - len(shown)
     body = joiner.join(shown)
-    return body + _more_marker(extra, lang) if extra > 0 else body
+    return body + _more_marker(extra, lang, unit) if extra > 0 else body
 
 
 def clip_text(s, n: int, *, lang: str = "en") -> str:
@@ -3081,8 +3082,12 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             return clip_list((p for p in g["pkgs"] if p.get("dir") == "downgrade"),
                              2, render=binary_label, lang=lang)
 
-        dl_txt = clip_list(down, 3, render=_dl)
-        dl_txt_zh = clip_list(down, 3, render=lambda g: _dl(g, "zh"), lang="zh", joiner="，")
+        # The entries are binary packages grouped by source package, so the
+        # overflow marker has to say what it counts: a bare "(+12 more not shown)"
+        # read as 12 binaries when 27 were left out, of 12 source packages.
+        dl_txt = clip_list(down, 3, render=_dl, unit="source package(s)")
+        dl_txt_zh = clip_list(down, 3, render=lambda g: _dl(g, "zh"), lang="zh",
+                              joiner="，", unit="源码包")
         v["headline"] += (" | WARNING: this update downgrades " + dl_txt)
         v["headline_zh"] += (" ｜ 警告：此次更新会降级 " + dl_txt_zh)
         # The security errata of the builds being left, by the report's own rule
