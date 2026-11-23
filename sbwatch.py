@@ -3005,9 +3005,13 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             lead = f"{plural(len(down), 'source package')} ({down_bin} binary) downgraded, "
             lead_zh = f"{len(down)} 个源码包（{down_bin} 个二进制包）被降级，"
             advice = advice_zh = ""
-        v["headline"] = (lead + "no CVE/erratum found for this delta, but "
+        # A rollback's errata are found, not absent: the warning further down names
+        # the ones it reverts. What came up empty is the upgraded part.
+        found_in, found_in_zh = (("among the upgrades", "升级部分") if down
+                                 else ("for this delta", "此差异"))
+        v["headline"] = (lead + f"no CVE/erratum found {found_in}, but "
                          + "; ".join(bits) + advice)
-        v["headline_zh"] = (lead_zh + "此差异未发现 CVE/勘误，但涉及：" + "；".join(bits_zh)
+        v["headline_zh"] = (lead_zh + found_in_zh + "未发现 CVE/勘误，但涉及：" + "；".join(bits_zh)
                             + advice_zh)
     else:
         tail = tail_zh = ""

@@ -392,6 +392,8 @@ python3 tests/run_offline.py
 
 - `test_unowned_bigfiles_note.py`：无归属文件与软件包共用 chunk 时（实测 `policy.kern`、`hwdb.bin` 等与数十个 rpm 组件同层），「未检查」的字节数按上限表述，并注明其中几个 chunk 还含有软件包内容；整层都是无归属文件时措辞不变。
 
+- `test_rollback_erratum_wording.py`：差异含降级时，headline 不得一边写「此差异未发现 CVE/勘误」一边点名被回退的安全勘误，改称「升级部分未发现」；没有降级时措辞不变。
+
 其中 A6 的向量取自 rpm 上游 `tests/rpmvercmp.at`，已抓取为
 `tests/rpmvercmp_vectors.json`，因此**离线也能验证**与 rpm 本体的一致性
 （共 103 条：上游实际运行的 91 条，以及它以注释形式保留、用来记录既有怪异行为的 12 条）。
