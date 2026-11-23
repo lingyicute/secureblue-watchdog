@@ -128,7 +128,7 @@ BASELINE_LABEL_CAP = 80  # characters of a baseline label read back from the sta
 #                          former 26 cut check's own label and appended a 40-character
 #                          marker to it - once more on every --force run.
 PKGLIST_CACHE_VERSION = 7  # reject inventories read from executable/generated SQLite columns
-BODHI_CACHE_VERSION = 6  # v5 could cache a repeated, apparently complete page
+BODHI_CACHE_VERSION = 7  # v6 recorded Bodhi's default epoch 0 as a build's own epoch
 OLD_LOG_CAP = 1000  # changelog entries (dropped by this build) scanned for lost fixes
 RETAINED_LOG_CAP = 1000  # unchanged entries that may still mention a purportedly gained/lost CVE
 TAG_LIST_RETRIES = 4                        # ghcr is flaky on tags/list pagination
@@ -1861,9 +1861,17 @@ class Bodhi:
                     "bugs": bugs,
                     "date_approved": u.get("date_approved"),
                     "date_stable": u.get("date_stable"),
+                    # An epoch only where Bodhi states one. Its 0 is no statement: on
+                    # 2026-11-23 the API listed re2-20251105-19.fc45,
+                    # aardvark-dns-2.1.0-1.fc45 and netavark-2.1.0-1.fc45 with
+                    # "epoch": 0 while the installed Fedora RPMs of those very builds
+                    # carry Epoch 2 (4 of the image's 43 epoch-bearing builds with an
+                    # erratum). Read as a fact, that 0 kept an installed build from
+                    # matching its own erratum and a newer one from counting as newer.
                     "build_epochs": {b["nvr"]: str(b["epoch"]) for b in u.get("builds") or []
                                      if b.get("nvr") and (b.get("type") or "rpm").lower() == "rpm"
-                                     and str(b.get("epoch")).isascii() and str(b.get("epoch")).isdigit()},
+                                     and str(b.get("epoch")).isascii() and str(b.get("epoch")).isdigit()
+                                     and int(b["epoch"]) > 0},
                     "nvrs": [b.get("nvr") for b in (u.get("builds") or [])
                              if isinstance(b, dict)
                              and (b.get("type") or "rpm").lower() == "rpm"],
@@ -4163,6 +4171,12 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
     def with_epoch(evr, epoch):
         return f"{epoch}:{evr}" if epoch not in (None, "0", 0) else evr
 
+    def newer(a, b):
+        """Is candidate build `b` newer than `a`? Epochs decide only where Bodhi stated both."""
+        if "epoch" not in a or "epoch" not in b:
+            a, b = {**a, "epoch": "0"}, {**b, "epoch": "0"}
+        return evr_cmp(a, b) < 0
+
     rows = []
     queried = audit_failed = audit_skipped = 0
     mem = getattr(bodhi, "_mem", None)
@@ -4198,7 +4212,7 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
                     if epoch is not None:
                         cand["epoch"] = str(epoch)
                     if _is_behind(p, bv, br, use_build_evr=True, candidate_epoch=epoch) and (
-                            best is None or evr_cmp(best, cand) < 0):
+                            best is None or newer(best, cand)):
                         best = cand
                 if best is None:
                     continue
@@ -4222,7 +4236,7 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
                     row["cves"].update(cves)
                     row["advisory_wide_cves"].update(shared)
                     row["advisories"].append(advisory)
-                    if evr_cmp(row["_best"], best) < 0:
+                    if newer(row["_best"], best):
                         row["_best"] = best
                         row.update(build)
                     if order.get((u.get("severity") or "").lower(), 0) > \
