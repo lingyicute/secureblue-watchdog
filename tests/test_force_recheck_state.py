@@ -90,5 +90,30 @@ class TestForceRecheckState(unittest.TestCase):
             self.assertIn(f"{label} -> latest", report.read_text(encoding="utf-8"))
 
 
+    def test_force_recheck_preserves_self_compared_baseline_without_scanning_history(self):
+        digest = "sha256:" + "1" * 64
+        cur = {"digest": digest, "index_digest": digest, "created": "2026-11-17T00:00:00Z",
+               "layers": [], "annotations": {"org.opencontainers.image.version": "45.20261117.0"}}
+        with tempfile.TemporaryDirectory() as directory:
+            state, report = Path(directory) / "state.json", Path(directory) / "report.md"
+            state.write_text(json.dumps({
+                "digest": digest, "prev_digest": digest, "prev_label": "self-base",
+                "last_verdict": "no-change", "analysis_incomplete": False,
+            }))
+            with patch.object(S.Registry, "_token", return_value=None), \
+                    patch.object(S, "resolve", side_effect=lambda reg, ref, light=False: dict(cur, ref=ref)), \
+                    patch.object(S, "build_history", side_effect=AssertionError("should not scan history")), \
+                    patch.object(S, "load_pkglist", return_value=S.PackageTable({"bash": pkg("bash", "5.3-1.fc45")})), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                rc = S.main(["check", "--image", "x/y", "--state", str(state),
+                             "--report", str(report), "--cache-dir", directory,
+                             "--scan", "0", "--force", "--no-fast", "--no-audit",
+                             "--no-bodhi", "--prune-days", "0"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(Path(str(report) + ".json").read_text())
+            self.assertEqual(payload["from"], "self-base")
+            self.assertEqual(payload["from_digest"], digest)
+
+
 if __name__ == "__main__":
     unittest.main()

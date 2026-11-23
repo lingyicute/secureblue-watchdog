@@ -5618,7 +5618,7 @@ def cmd_check(args):
             state_base_dig = state["digest"]
             state_base_index = state.get("index_digest")
             state_base_lbl = _state_label(state)
-        elif pending or (state.get("digest") == cur["digest"] and previous != cur["digest"]):
+        elif pending or state.get("digest") == cur["digest"]:
             # An inconclusive target is not a checkpoint. If the tag returned to
             # the last usable baseline, compare it to itself, not to the failure.
             state_base_dig = previous
