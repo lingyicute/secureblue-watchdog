@@ -49,6 +49,32 @@ class TestUnownedBigfilesNote(unittest.TestCase):
         self.assertIn("4.7 MiB of files no package owns", md)
         self.assertIn("另有 4.7 MiB 不属于任何软件包的文件", md)
 
+    def test_a_chunk_shared_with_packages_makes_the_figure_an_upper_bound(self):
+        # Two of the four chunks the live 45.20261123.0 moved without a package change:
+        # chunkah packs unowned files (SELinux policy, hwdb.bin) next to rpm/ components.
+        shared = {"components": ["bigfiles/policy.kern",
+                                 "bigfiles/usr/share/secureblue/etc/selinux/targeted/active/policy.linked",
+                                 "rpm/PackageKit", "rpm/SDL3", "rpm/at-spi2-core"],
+                  "size": 56197659, "stability": 0.0}
+        own = chunk("chunkah/unclaimed", 9970218)
+        v = verdict(shared, own)
+        self.assertEqual(v["level"], "no-change")
+        self.assertIn("Not inspected: up to 63.1 MiB of files that no package owns", v["headline"])
+        self.assertIn("an upper bound: package content sits in 1 of those chunks too", v["headline"])
+        self.assertIn("未检查：另有至多 63.1 MiB 不属于任何软件包的文件", v["headline_zh"])
+        self.assertIn("此为上限：其中 1 个 chunk 还含有软件包内容", v["headline_zh"])
+        diff = S.pkg_diff({}, {})
+        ldiff = {"chunks_a": 2, "chunks_b": 2, "chunks_changed": 2, "chunks_reused": 0,
+                 "total_size_b": 66167877, "download_bytes": 66167877, "download_pct": 100,
+                 "changed_packages_from_chunks": [], "changed_chunks": [shared, own]}
+        img = {"ref": "a", "digest": "sha256:" + "a" * 64, "annotations": {}, "layers": []}
+        md = S.render_markdown("s", img, img, diff, ldiff,
+                               S.verdict_of(diff, ldiff, {}, S.crosscheck_chunks(ldiff, diff)), [])
+        self.assertIn("up to 63.1 MiB of files no package owns", md)
+        self.assertIn("The figure is an upper bound: package content sits in 1 of those chunks too.", md)
+        self.assertIn("另有至多 63.1 MiB 不属于任何软件包的文件", md)
+        self.assertIn("该数字是上限：其中 1 个 chunk 还含有软件包内容。", md)
+
 
 if __name__ == "__main__":
     unittest.main()

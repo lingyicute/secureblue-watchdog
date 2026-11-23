@@ -2739,13 +2739,26 @@ def _reverted_aliases(group: dict) -> list:
         and not a.get("also_matches_target")))
 
 
-def _unowned_chunk_bytes(ldiff: dict) -> int:
-    """Changed bytes outside rpm/ packages, excluding rpmdb.sqlite and initramfs.img."""
+def _unowned_chunk_bytes(ldiff: dict) -> tuple[int, int]:
+    """(bytes, shared) of the changed chunks that hold files no rpm/ package owns.
+
+    `bytes` adds up those chunks (the rpmdb.sqlite and initramfs.img ones aside) and
+    `shared` counts how many of them hold other components as well. chunkah packs
+    unowned files next to packages: of the four chunks 45.20261123.0 moved without
+    a package change, two (53.6 and 69.9 MiB) carry `bigfiles/policy.kern`,
+    `.../udev/hwdb.bin` and the like next to 39 and 45 rpm/ components. The sum is
+    then an upper bound - it was reported as 133.0 MiB of unowned files.
+    """
     def _unowned(c):
         return (not c.startswith("rpm/")
                 and c.rpartition("/")[2] not in (CHUNK_MATCH, "initramfs.img"))
-    return sum(ch["size"] for ch in ldiff.get("changed_chunks") or []
-               if any(_unowned(c) for c in ch.get("components") or []))
+    total = shared = 0
+    for ch in ldiff.get("changed_chunks") or []:
+        comps = ch.get("components") or []
+        if any(_unowned(c) for c in comps):
+            total += ch["size"]
+            shared += not all(_unowned(c) for c in comps)
+    return total, shared
 
 
 def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
@@ -2920,14 +2933,19 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         # etc/trivalent/filter/trivalent-blocklist, .../selinux/targeted/policy/
         # policy.35 and .../udev/hwdb.bin. Left out: the rpmdb, which was read,
         # and the initramfs, which the image build regenerates from packages.
-        loose = _unowned_chunk_bytes(ldiff)
+        loose, shared = _unowned_chunk_bytes(ldiff)
         if loose:
-            v["headline"] += (f". Not inspected: {human(loose)} of files that no package owns "
+            bound, bound_zh = ("up to ", "至多") if shared else ("", "")
+            v["headline"] += (f". Not inspected: {bound}{human(loose)} of files that no package owns "
                               f"(chunkah/unclaimed and bigfiles/* chunks, secureblue's own "
                               f"configuration among them) changed as well")
-            v["headline_zh"] += (f"。未检查：另有 {human(loose)} 不属于任何软件包的文件"
+            v["headline_zh"] += (f"。未检查：另有{bound_zh} {human(loose)} 不属于任何软件包的文件"
                                  f"（chunkah/unclaimed 与 bigfiles/* chunk，secureblue 自己的配置"
                                  f"就在其中）发生了变化")
+            if shared:
+                v["headline"] += (f" - an upper bound: package content sits in {shared} of "
+                                  f"those chunks too")
+                v["headline_zh"] += f"——此为上限：其中 {shared} 个 chunk 还含有软件包内容"
     elif sec:
         v["level"] = "update-now"
         # Two separate renderings: the trivia (", " vs "，", the count wording)
@@ -3872,23 +3890,27 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
     if (not changed and not diff["added"] and not diff["removed"]
             and diff.get("rpmdb_complete", True)
             and (isinstance(diff.get("count_a"), int) or diff.get("same_rpmdb"))):
-        unowned = _unowned_chunk_bytes(ldiff)
+        unowned, shared = _unowned_chunk_bytes(ldiff)
+        bound, bound_zh = ("up to ", "至多") if shared else ("", "")
         if is_zh:
             W("## 没有任何软件包版本发生变化")
             W("")
             if unowned:
-                W(f"两个镜像中所有软件包的 NEVRA 完全一致；但另有 {human(unowned)} "
+                W(f"两个镜像中所有软件包的 NEVRA 完全一致；但另有{bound_zh} {human(unowned)} "
                   "不属于任何软件包的文件（`chunkah/unclaimed` 与 `bigfiles/*`，含 secureblue 自身配置）"
-                  "发生了变化，且未在此检查。")
+                  "发生了变化，且未在此检查。"
+                  + (f"该数字是上限：其中 {shared} 个 chunk 还含有软件包内容。" if shared else ""))
             else:
                 W("两个镜像中所有软件包的 NEVRA 完全一致；文件内容未检查，版本相同不能证明内容相同。")
         else:
             W("## No package version changed at all")
             W("")
             if unowned:
-                W(f"Every package in both images has the same NEVRA; {human(unowned)} of "
+                W(f"Every package in both images has the same NEVRA; {bound}{human(unowned)} of "
                   "files no package owns (`chunkah/unclaimed` and `bigfiles/*`, including secureblue's own "
-                  "configuration) also changed and were not inspected here.")
+                  "configuration) also changed and were not inspected here."
+                  + (f" The figure is an upper bound: package content sits in {shared} of those chunks too."
+                     if shared else ""))
             else:
                 W("Every package in both images has the same NEVRA; file contents were not inspected. "
                   "Identical versions do not prove identical contents.")
