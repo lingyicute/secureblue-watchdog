@@ -2225,7 +2225,8 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None,
                         "severity": u.get("severity"), "nvr": reverted,
                         "cves": sorted(source_cves), "advisory_wide_cves": sorted(shared_cves)})
                 passed = (_passed_build(old, new, u["nvrs"], epochs)
-                          if (old and (baseline_release is None or baseline_release == rel)
+                          if (old and evr_cmp(old, new) < 0
+                              and (baseline_release is None or baseline_release == rel)
                               and (not third_party or norm_new)
                               and (not old_third_party or old_norm)) else None)
                 if passed and u.get("type") == "security" and status in PUSHED_STATUSES:

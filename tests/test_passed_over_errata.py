@@ -117,5 +117,19 @@ class TestPassedOverErrata(unittest.TestCase):
         self.assertEqual(v["secureblue_notification"]["level"], "none")
 
 
+    def test_downgraded_subpackage_with_newer_srpm_does_not_claim_passed_over_erratum(self):
+        from test_sbwatch import pkg, FakeBodhi
+        old = dict(pkg("nspr", "4.39.0-10.fc45", src="nss"), srpm="nss-3.128.0-1.fc45")
+        new = dict(pkg("nspr", "4.38.0-1.fc45", src="nss"), srpm="nss-3.133.0-1.fc45")
+        upd = {"nss": [{"alias": "FEDORA-2026-mid", "type": "security",
+                        "severity": "high", "status": "stable",
+                        "nvrs": ["nss-3.129.0-1.fc45"], "notes": "CVE-2026-7777",
+                        "bugs": [], "title": "", "cves": ["CVE-2026-7777"]}]}
+        info = S.classify_change(old, new, "F45", FakeBodhi(upd), baseline_release="F45")
+        self.assertEqual(info["passed_over"], [])
+        self.assertFalse(info["security"])
+        self.assertEqual(info["cves"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
