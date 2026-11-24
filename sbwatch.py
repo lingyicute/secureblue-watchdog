@@ -1810,7 +1810,7 @@ class Bodhi:
         seen_aliases = set(progress["seen_aliases"]) if progress else set()
         received = len(seen_aliases)  # includes non-RPM updates
         first_page = progress["next_page"] if progress else 1
-        truncated = budget_cut = inconsistent = ok = False
+        truncated = budget_cut = inconsistent = ok = failed = False
         resumable = True
         for page in range(first_page, MAX_BODHI_PAGES + 1):
             if page > 1 and self._budget_reached():
@@ -1835,6 +1835,7 @@ class Bodhi:
                 break
             except Exception as ex:
                 self.failed += 1
+                failed = True
                 log(T(f"  ! bodhi lookup failed for {src} (page {page}): {ex}",
                       f"  ！查询 Bodhi 失败：{src}（第 {page} 页）：{ex}"))
                 self._streak += 1
@@ -1961,7 +1962,7 @@ class Bodhi:
             # Changed pagination: do not present a blend of two collections.
             res = []
         self._mem[key] = {"total": total, "truncated": truncated, "updates": res,
-                          "unqueried": None if ok else "failed"}
+                          "unqueried": "failed" if failed else None}
         return res
 
 

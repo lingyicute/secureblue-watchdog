@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
-from test_sbwatch import S, _FakeResp
+from test_sbwatch import S, _FakeResp, pkg
 
 
 class TestBodhiPageResume(unittest.TestCase):
@@ -55,3 +55,20 @@ class TestBodhiPageResume(unittest.TestCase):
                 self.assertEqual(client.truncated_src, {"kernel"})
                 self.assertFalse(list(Path(cache).glob("*.json")))
                 self.assertEqual(self.ask(cache, 1, ["a", "b"])[1], ["a", "b"])
+
+    def test_time_limited_resume_is_truncated_not_failed(self):
+        with tempfile.TemporaryDirectory() as cache:
+            self.ask(cache, 1, ["a", "b"])
+            with patch.object(S.time, "time", return_value=1100), \
+                    patch.object(S.time, "monotonic", side_effect=[10, 10, 15, 15, 15]):
+                client = S.Bodhi(cache_dir=cache, max_calls=2, max_seconds=5, sleep=0)
+                rows = client.updates_for_src("kernel", "F44")
+                _, cov = S.security_backlog({"kernel": pkg("kernel", "1.0-1.fc44")}, "F44", client)
+            self.assertEqual([row["alias"] for row in rows], ["a", "b"])
+            self.assertEqual(client.failed, 0)
+            self.assertEqual(client.truncated_src, {"kernel"})
+            self.assertIsNone(client._mem["kernel-F44"]["unqueried"])
+            self.assertEqual(cov["failed"], 0)
+            self.assertEqual(cov["truncated"], ["kernel"])
+            self.assertEqual([p.name for p in Path(cache).glob("*.json")],
+                             ["bodhi-kernel_F44.partial.json"])
