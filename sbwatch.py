@@ -4656,11 +4656,18 @@ def list_tags(reg: Registry, max_pages: int = TAG_LIST_MAX_PAGES) -> list:
             break
         pages_done += 1
         out += page.get("tags", []) or []
-        nxt = re.search(r"<([^>]+)>;\s*rel=\"next\"", hdrs.get("Link") or "")
+        nxt = None
+        for link_m in re.finditer(r"<([^>]+)>((?:\s*;[^,<]*)*)", hdrs.get("Link") or ""):
+            rel_m = re.search(r';\s*rel\s*=\s*(?:"([^"]*)"|([^\s,;]+))', link_m.group(2), re.I)
+            if rel_m:
+                rels = (rel_m.group(1) if rel_m.group(1) is not None else rel_m.group(2)).lower().split()
+                if "next" in rels:
+                    nxt = link_m.group(1)
+                    break
         if not nxt:
             break
         try:
-            next_url = urllib.parse.urljoin(url, nxt.group(1))
+            next_url = urllib.parse.urljoin(url, nxt)
             target = urllib.parse.urlsplit(next_url)
             # Each page gets a fresh bearer token header, so redirect stripping
             # alone cannot protect an attacker-controlled Link target.

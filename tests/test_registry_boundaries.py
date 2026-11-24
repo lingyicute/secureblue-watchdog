@@ -96,3 +96,20 @@ class TestRegistryBoundaries(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_list_tags_accepts_unquoted_and_case_insensitive_rel_next(self):
+        reg = S.Registry("ghcr.io/x/y")
+        pages = [
+            (b'{"tags": ["a"]}', {"Link": '</v2/x/y/tags/list?last=a>; type="application/json"; REL=NEXT'}),
+            (b'{"tags": ["b"]}', {"Link": '<https://ghcr.io/v2/x/y/tags/list?last=b>; rel="prev next"'}),
+            (b'{"tags": ["c"]}', {}),
+        ]
+        idx = iter(pages)
+        def fake_open(req, timeout=None):
+            body, headers = next(idx)
+            resp = _FakeResp(body)
+            resp.headers = headers
+            return resp
+        with patch.object(reg, "_token", return_value=None), \
+                patch.object(S._OPENER, "open", side_effect=fake_open):
+            self.assertEqual(list(S.list_tags(reg)), ["a", "b", "c"])
