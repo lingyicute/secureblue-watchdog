@@ -210,7 +210,8 @@ python3 sbwatch.py check --image secureblue/silverblue-main-hardened --to latest
 # 查询失败、预算耗尽或分页截断时，JSON / state 的 analysis_incomplete 为 true；
 # 下次即使摘要未变也会补查，并保留上次完整分析的基线。成功查询的缓存可让小预算逐次完成审计。
 # 显式 --no-bodhi 与 --backlog-candidates 限定的范围不会导致无限重试。
-# 旧版未记录完成标记的检查点会重查一次，避免继续信任可能未查完整的历史结论。
+# 在同一摘要上更改 --exact、--no-bodhi、--no-audit 或有效的 --backlog-candidates，
+# 会使用已记录的对比基线重查；旧检查点有对比基线但无覆盖信息时也会重查一次。
 
 # 6. 看这个镜像还落后多少安全更新
 python3 sbwatch.py backlog latest --max-bodhi 80

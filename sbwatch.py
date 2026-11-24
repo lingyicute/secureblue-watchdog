@@ -5488,6 +5488,15 @@ def _state_label(state: dict) -> str:
                      lang="both")
 
 
+def _watch_analysis_scope(args) -> dict:
+    """The requested coverage, before the equal-rpmdb fast path changes --exact."""
+    exact = bool(getattr(args, "exact", 1))
+    bodhi = exact and not getattr(args, "no_bodhi", False)
+    audit = bodhi and getattr(args, "audit", False)
+    return {"exact": exact, "bodhi": bodhi, "audit": audit,
+            "backlog_candidates": getattr(args, "backlog_candidates", None) if audit else None}
+
+
 def cmd_check(args):
     """Daily entry point: only do real work when the watched tag moved.
 
@@ -5535,6 +5544,10 @@ def cmd_check(args):
     maybe_verify_resolved(reg, cur, args)
     ver = cur["annotations"].get("org.opencontainers.image.version", "?")
 
+    scope = _watch_analysis_scope(args)
+    # Recheck older checkpoints with a reproducible baseline once; their prior
+    # coverage could have been intentionally narrower than this invocation's.
+    old_scope = state.get("analysis_scope", None if state.get("prev_digest") else scope)
     watched = {"watched_digest": cur["digest"], "watched_version": ver,
                "watched_index_digest": cur.get("index_digest") or cur["digest"]}
 
@@ -5547,7 +5560,7 @@ def cmd_check(args):
              "created_order": cur.get("created_order"),
              "inputhash": cur["annotations"].get("rpmostree.inputhash"),
              "ostree_commit": cur["annotations"].get("ostree.commit"),
-             "checked": int(time.time())}
+             "checked": int(time.time()), "analysis_scope": scope}
         if extra:
             d.update(extra)
         _atomic_write_json(state_path, d)      # a crash mid-write must not corrupt state
@@ -5555,7 +5568,8 @@ def cmd_check(args):
     # An explicit --a (the workflow's `from_tag`) asks for that comparison; "no
     # new build since the last look" does not answer it, so it must not skip it.
     if (state.get("digest") == cur["digest"] and not args.force and not args.a
-            and state.get("last_verdict") != "unknown" and state.get("analysis_incomplete") is False):
+            and old_scope == scope and state.get("last_verdict") != "unknown"
+            and state.get("analysis_incomplete") is False):
         msg = T(f"no new build for {args.image}:{args.to} - still {ver} "
                 f"({cur['digest'][:19]}...), nothing to download",
                 f"{args.image}:{args.to} 无新构建——仍为 {ver}"

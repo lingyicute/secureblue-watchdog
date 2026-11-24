@@ -113,3 +113,44 @@ class TestIncompleteCheckRetry(unittest.TestCase):
                 self.assertEqual(S.main(argv), 0)
                 payload = json.loads(Path(str(report) + ".json").read_text())
                 self.assertEqual(payload["verdict"]["level"], "no-update")
+    def test_unchanged_digest_is_rechecked_when_requested_scope_changes(self):
+        old, current = _image(1), _image(2)
+        with tempfile.TemporaryDirectory() as td:
+            state, report = Path(td) / "state.json", Path(td) / "report.md"
+            state.write_text(json.dumps(dict(old, version="1")))
+            argv = ["check", "--image", "x/y", "--scan", "0", "--state", str(state),
+                    "--report", str(report), "--cache-dir", td, "--prune-days", "0"]
+            images = {"latest": current, old["digest"]: old}
+
+            def packages(reg, image, *args):
+                return S.PackageTable({
+                    "nano": pkg("nano", f"8.{image['digest'][7]}-1.fc45"),
+                    "curl": pkg("curl", "8.0-1.fc45"),
+                    "openssl": pkg("openssl", "4.0-1.fc45"),
+                })
+
+            def check(*opts):
+                self.assertEqual(S.main(argv + list(opts)), 0)
+                return json.loads(Path(str(report) + ".json").read_text())
+
+            with patch.object(S.Registry, "_token", return_value=None), \
+                    patch.object(S, "resolve", side_effect=lambda reg, ref: dict(images[ref], ref=ref)), \
+                    patch.object(S, "load_pkglist", side_effect=packages), \
+                    patch.object(S.urllib.request, "urlopen", side_effect=lambda *a, **kw: _FakeResp(
+                        b'{"updates": [], "total": 0}')) as http, \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(check("--no-bodhi")["bodhi_state"], {"disabled": 1})
+                self.assertEqual(check("--no-bodhi")["verdict"]["level"], "no-update")
+                self.assertEqual(http.call_count, 0)
+                without_audit = check("--no-audit")
+                self.assertEqual(without_audit["from_digest"], old["digest"])
+                self.assertIsNone(without_audit["backlog_coverage"])
+                self.assertEqual(http.call_count, 1)
+                narrow = check("--backlog-candidates", "1")
+                self.assertEqual(narrow["backlog_coverage"]["checked"], 1)
+                self.assertEqual(narrow["backlog_coverage"]["skipped"], 1)
+                full = check()
+                self.assertEqual(full["backlog_coverage"]["checked"], 2)
+                self.assertEqual(full["backlog_coverage"]["skipped"], 0)
+                self.assertEqual(full["from_digest"], old["digest"])
+                self.assertEqual(check()["verdict"]["level"], "no-update")
