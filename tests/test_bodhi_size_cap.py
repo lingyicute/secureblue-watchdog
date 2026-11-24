@@ -31,3 +31,9 @@ class TestBodhiSizeCap(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_content_length_handles_whitespace_and_non_ascii_digits(self):
+        self.assertEqual(S._content_length({"Content-Length": " 42 "}), 42)
+        self.assertIsNone(S._content_length({"Content-Length": "\u00b2"}))
+        self.assertIsNone(S._content_length({"Content-Length": "\u0661\u0660"}))
+        self.assertIsNone(S._content_length({"Content-Length": "-1"}))

@@ -331,10 +331,19 @@ def rfc3339_seconds(s) -> str:
     return re.sub(r"[+-]00:?00$", "Z", s)
 
 
+def _content_length(headers) -> int | None:
+    """Strict ASCII decimal Content-Length, tolerating header whitespace."""
+    raw = headers.get("Content-Length") if headers else None
+    if raw is None:
+        return None
+    val = str(raw).strip()
+    return int(val) if val.isascii() and val.isdigit() else None
+
+
 def _safe_read_limited(resp, limit: int) -> bytes:
     """Read from HTTPResponse with hard limit to avoid OOM / zip-bomb."""
-    cl = resp.headers.get("Content-Length")
-    if cl and cl.isdigit() and int(cl) > limit:
+    cl = _content_length(resp.headers)
+    if cl is not None and cl > limit:
         raise RegistryError(T(f"blob Content-Length {cl} > {human(limit)} limit - aborting",
                            f"blob Content-Length {cl} 超过 {human(limit)} 限制——中止"))
     chunks = []
@@ -1099,8 +1108,8 @@ class Registry:
             raise RegistryError(T("layer requires a valid sha256 digest", "层需要有效的 sha256 摘要"))
         d = clip_hash(digest, 19)
         with self._open(f"blobs/{digest}", "application/octet-stream") as r:
-            cl = r.headers.get("Content-Length")
-            if cl and cl.isdigit() and int(cl) > MAX_BLOB_BYTES:
+            cl = _content_length(r.headers)
+            if cl is not None and cl > MAX_BLOB_BYTES:
                 raise SystemExit(T(f"blob Content-Length {cl} > {human(MAX_BLOB_BYTES)} limit",
                                    f"blob 的 Content-Length {cl} 超过 {human(MAX_BLOB_BYTES)} 限制"))
             src = _CappedReader(r, MAX_BLOB_BYTES, d)
@@ -1729,8 +1738,8 @@ class Bodhi:
             self.calls += 1
             try:
                 with urllib.request.urlopen(url, timeout=min(40, remaining)) as r:
-                    cl = r.headers.get("Content-Length") if getattr(r, "headers", None) else None
-                    if cl and str(cl).isdigit() and int(cl) > MAX_JSON_BYTES:
+                    cl = _content_length(getattr(r, "headers", None))
+                    if cl is not None and cl > MAX_JSON_BYTES:
                         raise ValueError(f"Bodhi response exceeds {human(MAX_JSON_BYTES)}")
                     raw = r.read(MAX_JSON_BYTES + 1)
                     if len(raw) > MAX_JSON_BYTES:
