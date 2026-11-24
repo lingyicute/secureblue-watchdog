@@ -43,5 +43,15 @@ class TestMarkdownTableEscape(unittest.TestCase):
         self.assertIn("FEDORA-2026\\|bad line", md)
 
 
+
+    def test_missing_inputhash_renders_placeholder_instead_of_empty_backticks(self):
+        img = {"ref": "a", "digest": "sha256:" + "1" * 64, "annotations": {}, "layers": []}
+        diff = {"added": [], "removed": [], "downgrades": [], "changed": [],
+                "count_a": 1, "count_b": 1}
+        md = S.render_markdown("s", img, img, diff, LD, S.verdict_of(diff, LD, {}), [])
+        self.assertIn("| rpm-ostree 输入哈希 | `—` | `—` |", md)
+        self.assertIn("| rpm-ostree inputhash | `—` | `—` |", md)
+        self.assertNotIn("``", md)
+
 if __name__ == "__main__":
     unittest.main()
