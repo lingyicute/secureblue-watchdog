@@ -28,3 +28,28 @@ class TestPartialPopup(unittest.TestCase):
 
     def test_trivalent_is_already_at_the_maximum(self):
         self.assertEqual(self.predict("trivalent", {"skipped": 1})["level"], "major")
+
+    def test_markdown_reports_incomplete_severity_instead_of_not_read(self):
+        a, b = [FIXTURE["images"][x]["packages"]["dnf5"] for x in ("old", "new")]
+        diff = S.pkg_diff(
+            {"dnf5": a, "trivalent": pkg("trivalent", "1-1.fc45")},
+            {"dnf5": b, "trivalent": pkg("trivalent", "2-1.fc45")},
+        )
+        for c in diff["changed"]:
+            if c["name"] == "dnf5":
+                c["cls"] = S.classify_change(
+                    c["old"], c["new"], "F45",
+                    type("B", (), {"updates_for_src": lambda self, s, r: [FIXTURE["dnf5_advisory"]]})(),
+                )
+        ldiff = {"chunks_a": 1, "chunks_b": 1, "chunks_changed": 0, "chunks_reused": 1,
+                 "total_size_b": 0, "download_bytes": 0, "download_pct": 0, "changed_chunks": []}
+        verdict = S.verdict_of(diff, ldiff, {}, bodhi_state={"skipped": 1})
+        sbn = verdict["secureblue_notification"]
+        self.assertIsNone(sbn["max_advisory_severity"])
+        self.assertEqual(sbn["observed_max_advisory_severity"], "important")
+        img = {"ref": "x", "digest": "sha256:" + "1" * 64, "annotations": {}}
+        md = S.render_markdown("s", img, img, diff, ldiff, verdict, [])
+        self.assertIn("unknown (incomplete advisory coverage; highest observed: important)", md)
+        self.assertIn("未知（勘误覆盖不完整；已读最高等级：important）", md)
+        self.assertNotIn("`not read`", md)
+        self.assertNotIn("`未读取`", md)

@@ -2898,10 +2898,12 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
           and not sbn.get("unconditional") and any(
               c.get("dir") != "arch-change" and not _is_third_party(c.get("new") or {})
               for c in diff["changed"])):
+        obs_max = sbn.get("max_advisory_severity")
         sbn = dict(sbn, advisory_coverage_complete=False,
                    observed_security_advisory_count=sbn.get("security_advisory_count"),
+                   observed_max_advisory_severity=obs_max,
                    security_advisory_count=None,
-                   max_advisory_severity=("critical" if sbn.get("max_advisory_severity") == "critical" else None))
+                   max_advisory_severity=("critical" if obs_max == "critical" else None))
         # A known critical advisory or trivalent upgrade already fixes the
         # maximum. The stock-install prediction never needs advisory metadata.
         if sbn["level"] != "major":
@@ -3615,7 +3617,16 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
                 return "未知" if x is None else ("是" if x else "否")
             k_up = _yn_zh(_sbn.get("kernel_updated"))
             t_up = _yn_zh(_sbn.get("trivalent_updated"))
-            max_sev = _sbn.get("max_advisory_severity") or "未读取"
+            max_sev = _sbn.get("max_advisory_severity")
+            if not max_sev:
+                if verdict.get("package_data_complete") is False:
+                    max_sev = "未知（软件包信息不完整）"
+                elif _sbn.get("advisory_coverage_complete") is False:
+                    obs = _sbn.get("observed_max_advisory_severity")
+                    max_sev = (f"未知（勘误覆盖不完整；已读最高等级：{obs}）"
+                               if obs and obs != "none" else "未知（勘误覆盖不完整）")
+                else:
+                    max_sev = "未读取"
             W(f"- 内核已升级: {k_up} · trivalent 已升级: {t_up} · "
               f"最高勘误等级 (rpm-ostree 体系): `{max_sev}`")
             W("")
@@ -3651,7 +3662,16 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W(f"- trigger: {', '.join(reasons) or '—'}")
             def _yn_en(x):
                 return "unknown" if x is None else str(bool(x))
-            max_sev = _sbn.get("max_advisory_severity") or "not read"
+            max_sev = _sbn.get("max_advisory_severity")
+            if not max_sev:
+                if verdict.get("package_data_complete") is False:
+                    max_sev = "unknown (incomplete package information)"
+                elif _sbn.get("advisory_coverage_complete") is False:
+                    obs = _sbn.get("observed_max_advisory_severity")
+                    max_sev = (f"unknown (incomplete advisory coverage; highest observed: {obs})"
+                               if obs and obs != "none" else "unknown (incomplete advisory coverage)")
+                else:
+                    max_sev = "not read"
             W(f"- kernel upgraded: {_yn_en(_sbn.get('kernel_updated'))} · "
               f"trivalent upgraded: {_yn_en(_sbn.get('trivalent_updated'))} · "
               f"max advisory severity (rpm-ostree scale): `{max_sev}`")
