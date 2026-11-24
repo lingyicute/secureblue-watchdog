@@ -2009,10 +2009,12 @@ def _is_third_party(pkg: dict) -> bool:
     vendor = (pkg.get("vendor") or "").strip()
     if vendor:
         return vendor != "Fedora Project"
-    # The live image's Trivalent RPM has no Vendor, but it is Secureblue's
-    # browser, not a Fedora build. Its upgrades use the name-based desktop rule.
+    # Live Secureblue images ship Trivalent, akmods-built kmod-nvidia / kmod-zfs,
+    # and OpenZFS RPMs without a Vendor header; none are Fedora Bodhi builds.
     # Other missing vendors are ambiguous, including Secureblue's rebuilt kernel.
-    return (pkg.get("src") or pkg.get("name")) == "trivalent"
+    return (pkg.get("src") or pkg.get("name")) in {
+        "trivalent", "nvidia-kmod", "zfs", "zfs-kmod"
+    }
 
 
 def nvr_candidates_split(pkg: dict) -> tuple:

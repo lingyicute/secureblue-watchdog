@@ -148,5 +148,26 @@ class TestVendorlessTrivalent(unittest.TestCase):
         self.assertFalse(S._is_third_party(pkg("kernel", "7.3.4-300.secureblue.1.fc45")))
 
 
+
+    def test_live_vendorless_nvidia_kmod_and_openzfs_skip_bodhi(self):
+        class NoBodhiQuery:
+            def updates_for_src(self, src, release):
+                raise AssertionError(f"Unexpected {src} query for {release}")
+
+        cases = [
+            ("kmod-nvidia-7.3.4-300.secureblue.1.fc45.x86_64", "nvidia-kmod",
+             "620.73.03-1.fc45", "620.73.04-1.fc45"),
+            ("libzfs7", "zfs", "2.4.3-1.fc45", "2.4.4-1.fc45"),
+            ("kmod-zfs-7.2.15-300.secureblue.1.fc45.x86_64", "zfs-kmod",
+             "2.4.3-1.fc45", "2.4.4-1.fc45"),
+        ]
+        for name, src, old_evr, new_evr in cases:
+            with self.subTest(name=name, src=src):
+                old = dict(pkg(name, old_evr, src=src), vendor="")
+                new = dict(pkg(name, new_evr, src=src), vendor="")
+                self.assertTrue(S._is_third_party(new))
+                cls = S.classify_change(old, new, "F45", NoBodhiQuery())
+                self.assertFalse(cls["security"])
+
 if __name__ == "__main__":
     unittest.main()
