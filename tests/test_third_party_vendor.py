@@ -130,5 +130,23 @@ class TestThirdPartyVendor(unittest.TestCase):
         self.assertEqual(cov["candidates"], 1)
 
 
+
+class TestVendorlessTrivalent(unittest.TestCase):
+    def test_live_trivalent_skips_bodhi_without_losing_major_notification(self):
+        old = pkg("trivalent", "158.0.8127.36-448738")
+        new = pkg("trivalent", "158.0.8127.88-448874")
+        old["vendor"] = new["vendor"] = ""
+
+        class NoBodhiQuery:
+            def updates_for_src(self, src, release):
+                raise AssertionError(f"Unexpected {src} query for {release}")
+
+        diff = S.pkg_diff({"trivalent": old}, {"trivalent": new})
+        diff["changed"][0]["cls"] = S.classify_change(old, new, "F45", NoBodhiQuery())
+        self.assertEqual(S.secureblue_notification(diff)["level_without_advisories"], "major")
+        self.assertFalse(S._is_third_party({**new, "vendor": "Fedora Project"}))
+        self.assertFalse(S._is_third_party(pkg("kernel", "7.3.4-300.secureblue.1.fc45")))
+
+
 if __name__ == "__main__":
     unittest.main()

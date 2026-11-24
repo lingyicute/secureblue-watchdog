@@ -1978,7 +1978,7 @@ PUSHED_STATUSES = {"stable"}
 
 
 def _is_third_party(pkg: dict) -> bool:
-    """True when the RPM Vendor header proves the package is not a Fedora build.
+    """True for a known non-Fedora build.
 
     Fedora Koji sets Vendor to `Fedora Project` on every package it builds.
     secureblue also layers third-party repos (`negativo17.org` ships `ffmpeg`,
@@ -1986,12 +1986,17 @@ def _is_third_party(pkg: dict) -> bool:
     secureblue`, `NVIDIA CORPORATION` and `secureblue` ship their own packages).
     Their bare NVRs can equal epoch-0 Fedora builds in Bodhi (`ffmpeg-9.0.2-2.fc45`
     matched `FEDORA-2026-91259c13b9` and its 40 libxml2 CVEs), yet rpm-ostree
-    never attaches those advisories and Fedora did not build the package. An
-    empty Vendor is left eligible: secureblue's rebuilt `kernel` carries none
+    never attaches those advisories and Fedora did not build the package. Apart
+    from known Secureblue sources, an empty Vendor is left eligible: `kernel` carries none
     and still maps to its upstream Fedora build via `.secureblue.N` stripping.
     """
     vendor = (pkg.get("vendor") or "").strip()
-    return bool(vendor and vendor != "Fedora Project")
+    if vendor:
+        return vendor != "Fedora Project"
+    # The live image's Trivalent RPM has no Vendor, but it is Secureblue's
+    # browser, not a Fedora build. Its upgrades use the name-based desktop rule.
+    # Other missing vendors are ambiguous, including Secureblue's rebuilt kernel.
+    return (pkg.get("src") or pkg.get("name")) == "trivalent"
 
 
 def nvr_candidates_split(pkg: dict) -> tuple:

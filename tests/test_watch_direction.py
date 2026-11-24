@@ -58,9 +58,10 @@ class TestWatchDirection(unittest.TestCase):
         self.assertEqual(result["verdict"]["level"], "consider")
         popup = result["verdict"]["secureblue_notification"]
         self.assertEqual(popup["level_without_advisories"], "none")
-        # This fixture supplies no third-party vendor and disables all lookups.
-        self.assertEqual(popup["level"], "unknown")
-        self.assertIn("incomplete advisory coverage", markdown)
+        # The sole changed package is Secureblue's browser, so disabling Fedora
+        # lookups does not hide any advisory that could affect this notification.
+        self.assertEqual(popup["level"], "none")
+        self.assertIn("Bodhi lookups were disabled", markdown)
         self.assertEqual(result["verdict"]["cves"], [])
         self.assertEqual(result["verdict"]["cves_dropped"], ["CVE-2026-12345"])
         self.assertIn("Downgrades in this update", markdown)

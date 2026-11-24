@@ -107,7 +107,7 @@ Important=112、**Critical=13**（含 2026-09-22 的 chromium）。
 trivalent 是 secureblue 自己的包，不是 Fedora Bodhi 发布的源码构建。无 dist tag 本身
 并不排除勘误匹配（例如 shim 也可没有 `.fcNN`）；这里不能依赖 Bodhi 的原因是构建来源不同。
 而上游把**任何** trivalent 升级都判为重大通知（secureblue FAQ：Trivalent 是在上游
-Chromium CVE 修复后才推的）。因此 `sbwatch` 直接按包名判断，不依赖勘误。
+Chromium CVE 修复后才推的）。因此 `sbwatch` 直接按包名判断，不依赖勘误。 实镜像中的 Trivalent RPM 即使未写入 `Vendor`，也不占用 Fedora 勘误查询预算。
 
 > 预测为 `major` 时，verdict 会被强制抬到 `update-now`——厂商用 critical 紧急度 +
 > Reboot 动作提示的东西，不该停留在 `consider`。
