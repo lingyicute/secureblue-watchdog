@@ -3856,15 +3856,18 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
     changed = diff["changed"]
     if groups is None:
         groups = group_by_src(changed)
+    def _has_forward(g: dict) -> bool:
+        return any(p.get("dir") != "downgrade" for p in g["pkgs"])
+
     g_down = [g for g in groups if g["downgrade"]]
     g_lost = [g for g in groups if g["dropped"]]
     g_sec = [g for g in groups if g["security"]]
-    g_imp = [g for g in groups if g["important"] and not g["security"] and not g["downgrade"]]
+    g_imp = [g for g in groups if g["important"] and not g["security"] and _has_forward(g)]
     # identity, not equality: two source groups can compare == and silently drop out.
-    # g_lost is deliberately absent: its section names the dropped CVE ids only, so
-    # a group that is nothing but "lost" had no old -> new line anywhere.
-    _tagged = {id(g) for g in g_sec + g_imp + g_down}
-    g_other = [g for g in groups if id(g) not in _tagged]
+    # Mixed-direction groups also stay eligible for g_imp/g_other so upgraded siblings
+    # remain visible; fmt_pkgs() lists only their non-downgraded members.
+    _tagged = {id(g) for g in g_sec + g_imp}
+    g_other = [g for g in groups if id(g) not in _tagged and _has_forward(g)]
 
     if g_down:
         if is_zh:
@@ -3998,7 +4001,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W("")
 
     if g_other:
-        tot_bin = sum(len(g['pkgs']) for g in g_other)
+        tot_bin = sum(sum(p.get("dir") != "downgrade" for p in g["pkgs"]) for g in g_other)
         if is_zh:
             W(f"## 常规版本升级（{len(g_other)} 个源码包，{tot_bin} 个二进制包）")
             W("")
