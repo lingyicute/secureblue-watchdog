@@ -16,8 +16,8 @@ class TestNoChangeWording(unittest.TestCase):
     def test_changed_unowned_files_are_named_as_not_inspected(self):
         v = _verdict("bigfiles/initramfs.img", "chunkah/unclaimed")
         self.assertEqual(v["level"], "no-change")
-        self.assertIn("Not inspected: 4.0 KiB of files that no package owns", v["headline"])
-        self.assertIn("未检查：另有 4.0 KiB 不属于任何软件包的文件", v["headline_zh"])
+        self.assertIn("Not inspected: 4.0 KiB in changed compressed layers", v["headline"])
+        self.assertIn("未检查：含无归属组件的变化压缩层共 4.0 KiB", v["headline_zh"])
 
     def test_nothing_is_added_when_that_chunk_did_not_move(self):
         v = _verdict("bigfiles/initramfs.img")

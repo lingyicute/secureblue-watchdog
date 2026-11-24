@@ -252,8 +252,8 @@ Bodhi 的多源码包**安全**勘误（例如依赖库更新与批量重建）�
   紧随其后的小节会列出**全部**编号；`--json-out` 与 GITHUB_OUTPUT 始终是完整数据（另附计数）
 - 下载量：`download_bytes / total_size_b / download_pct`
 - `secureblue_notification`：桌面会弹哪个通知 + 触发原因（见上文）
-- `silent_rebuilds`：版本没变但 chunk 变了。Fedora 不会以同一版本重建软件包，所以多半是包名下
-  在镜像构建时生成的文件变了（实测 `glibc` 的 chunk 仅 `etc/ld.so.cache` 不同）；secureblue 自有的包也可能是重建
+- `silent_rebuilds`：版本没变但压缩层摘要变了。可能是文件在镜像构建时生成（曾实测 `glibc` 层内
+  的 `etc/ld.so.cache` 不同）、归档或压缩有变化，或第三方 RPM 重建。工具不判断具体原因。
 - `downgrades`：这次更新把某个包**降级**了（真证据，会抬高级别；报告点名「回退」的是**被离开的构建**或**回滚越过的中间构建**
   的已发布安全勘误，而不是降级目标自己的勘误。跨 Fedora 版本或源码包的降级也查离开的构建，
   但不在不同版本分支之间推算中间构建）；`cves_dropped`：
@@ -395,7 +395,7 @@ python3 tests/run_offline.py
 
 - `test_bodhi_build_epochs.py`：Bodhi 的 `builds[].epoch` 为 0 不代表该构建没有 epoch（实测 `re2-20251105-19.fc45`、`netavark-2.1.0-1.fc45` 等已安装构建实为 Epoch 2，Bodhi 却给出 0），因此只记录 Bodhi 明确给出的非零 epoch；0 不得让已安装构建匹配不上自己的勘误，也不得让 backlog 看不到更新的构建。
 
-- `test_unowned_bigfiles_note.py`：无归属文件与软件包共用 chunk 时（实测 `policy.kern`、`hwdb.bin` 等与数十个 rpm 组件同层），「未检查」的字节数按上限表述，并注明其中几个 chunk 还含有软件包内容；整层都是无归属文件时措辞不变。
+- `test_unowned_bigfiles_note.py`：无归属文件与软件包共用 chunk 时（实测 `policy.kern`、`hwdb.bin` 等与数十个 rpm 组件同层），「未检查」的字节数明确指有无归属组件的压缩层总量，不是变更文件的大小。
 
 - `test_rollback_erratum_wording.py`：差异含降级时，headline 不得一边写「此差异未发现 CVE/勘误」一边点名被回退的安全勘误，改称「升级部分未发现」；没有降级时措辞不变。
 

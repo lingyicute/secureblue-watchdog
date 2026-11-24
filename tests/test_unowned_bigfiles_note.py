@@ -46,10 +46,10 @@ class TestUnownedBigfilesNote(unittest.TestCase):
         v = S.verdict_of(diff, ldiff, {}, S.crosscheck_chunks(ldiff, diff))
         img = {"ref": "a", "digest": "sha256:" + "a" * 64, "annotations": {}, "layers": []}
         md = S.render_markdown("s", img, img, diff, ldiff, v, [])
-        self.assertIn("4.7 MiB of files no package owns", md)
-        self.assertIn("另有 4.7 MiB 不属于任何软件包的文件", md)
+        self.assertIn("4.7 MiB in changed compressed layers containing unowned", md)
+        self.assertIn("含无归属组件的变化压缩层共 4.7 MiB", md)
 
-    def test_a_chunk_shared_with_packages_makes_the_figure_an_upper_bound(self):
+    def test_mixed_chunk_total_is_for_compressed_blobs_not_changed_files(self):
         # Two of the four chunks the live 45.20261123.0 moved without a package change:
         # chunkah packs unowned files (SELinux policy, hwdb.bin) next to rpm/ components.
         shared = {"components": ["bigfiles/policy.kern",
@@ -59,10 +59,10 @@ class TestUnownedBigfilesNote(unittest.TestCase):
         own = chunk("chunkah/unclaimed", 9970218)
         v = verdict(shared, own)
         self.assertEqual(v["level"], "no-change")
-        self.assertIn("Not inspected: up to 63.1 MiB of files that no package owns", v["headline"])
-        self.assertIn("an upper bound: package content sits in 1 of those chunks too", v["headline"])
-        self.assertIn("未检查：另有至多 63.1 MiB 不属于任何软件包的文件", v["headline_zh"])
-        self.assertIn("此为上限：其中 1 个 chunk 还含有软件包内容", v["headline_zh"])
+        self.assertIn("Not inspected: 63.1 MiB in changed compressed layers", v["headline"])
+        self.assertIn("1 of these layers also carry other components", v["headline"])
+        self.assertIn("未检查：含无归属组件的变化压缩层共 63.1 MiB", v["headline_zh"])
+        self.assertIn("其中 1 层还含有其他组件", v["headline_zh"])
         diff = S.pkg_diff({}, {})
         ldiff = {"chunks_a": 2, "chunks_b": 2, "chunks_changed": 2, "chunks_reused": 0,
                  "total_size_b": 66167877, "download_bytes": 66167877, "download_pct": 100,
@@ -70,10 +70,10 @@ class TestUnownedBigfilesNote(unittest.TestCase):
         img = {"ref": "a", "digest": "sha256:" + "a" * 64, "annotations": {}, "layers": []}
         md = S.render_markdown("s", img, img, diff, ldiff,
                                S.verdict_of(diff, ldiff, {}, S.crosscheck_chunks(ldiff, diff)), [])
-        self.assertIn("up to 63.1 MiB of files no package owns", md)
-        self.assertIn("The figure is an upper bound: package content sits in 1 of those chunks too.", md)
-        self.assertIn("另有至多 63.1 MiB 不属于任何软件包的文件", md)
-        self.assertIn("该数字是上限：其中 1 个 chunk 还含有软件包内容。", md)
+        self.assertIn("63.1 MiB in changed compressed layers", md)
+        self.assertIn("This is not a measure of changed files.", md)
+        self.assertIn("含无归属组件的变化压缩层共 63.1 MiB", md)
+        self.assertIn("这不是文件变化量。", md)
 
 
 if __name__ == "__main__":

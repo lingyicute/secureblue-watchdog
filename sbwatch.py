@@ -2878,9 +2878,9 @@ def _unowned_chunk_bytes(ldiff: dict) -> tuple[int, int]:
     `bytes` adds up those chunks (the rpmdb.sqlite and initramfs.img ones aside) and
     `shared` counts how many of them hold other components as well. chunkah packs
     unowned files next to packages: of the four chunks 45.20261123.0 moved without
-    a package change, two (53.6 and 69.9 MiB) carry `bigfiles/policy.kern`,
-    `.../udev/hwdb.bin` and the like next to 39 and 45 rpm/ components. The sum is
-    then an upper bound - it was reported as 133.0 MiB of unowned files.
+    a package change, two carry `bigfiles/policy.kern`, `.../udev/hwdb.bin` and
+    similar components next to RPMs. The sum measures compressed blobs, not
+    bytes of changed files, even when all the layer components are unowned.
     """
     def _unowned(c):
         return (not c.startswith("rpm/")
@@ -2892,6 +2892,19 @@ def _unowned_chunk_bytes(ldiff: dict) -> tuple[int, int]:
             total += ch["size"]
             shared += not all(_unowned(c) for c in comps)
     return total, shared
+
+
+def _unowned_chunk_note(ldiff: dict) -> BiText | None:
+    size, mixed = _unowned_chunk_bytes(ldiff)
+    if not size:
+        return None
+    return T(f"Not inspected: {human(size)} in changed compressed layers containing unowned "
+             "components (chunkah/unclaimed and bigfiles/*). This is not a measure of "
+             "changed files."
+             + (f" {mixed} of these layers also carry other components." if mixed else ""),
+             f"未检查：含无归属组件的变化压缩层共 {human(size)}"
+             "（chunkah/unclaimed 与 bigfiles/*）。这不是文件变化量。"
+             + (f"其中 {mixed} 层还含有其他组件。" if mixed else ""))
 
 
 def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
@@ -3068,19 +3081,10 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
         # etc/trivalent/filter/trivalent-blocklist, .../selinux/targeted/policy/
         # policy.35 and .../udev/hwdb.bin. Left out: the rpmdb, which was read,
         # and the initramfs, which the image build regenerates from packages.
-        loose, shared = _unowned_chunk_bytes(ldiff)
-        if loose:
-            bound, bound_zh = ("up to ", "至多") if shared else ("", "")
-            v["headline"] += (f". Not inspected: {bound}{human(loose)} of files that no package owns "
-                              f"(chunkah/unclaimed and bigfiles/* chunks, secureblue's own "
-                              f"configuration among them) changed as well")
-            v["headline_zh"] += (f"。未检查：另有{bound_zh} {human(loose)} 不属于任何软件包的文件"
-                                 f"（chunkah/unclaimed 与 bigfiles/* chunk，secureblue 自己的配置"
-                                 f"就在其中）发生了变化")
-            if shared:
-                v["headline"] += (f" - an upper bound: package content sits in {shared} of "
-                                  f"those chunks too")
-                v["headline_zh"] += f"——此为上限：其中 {shared} 个 chunk 还含有软件包内容"
+        unowned = _unowned_chunk_note(ldiff)
+        if unowned:
+            v["headline"] += ". " + unowned.en
+            v["headline_zh"] += "。" + unowned.zh
     elif sec:
         v["level"] = "update-now"
         # Two separate renderings: the trivia (", " vs "，", the count wording)
@@ -4050,30 +4054,19 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
     if (not changed and not diff["added"] and not diff["removed"]
             and diff.get("rpmdb_complete", True)
             and (isinstance(diff.get("count_a"), int) or diff.get("same_rpmdb"))):
-        unowned, shared = _unowned_chunk_bytes(ldiff)
-        bound, bound_zh = ("up to ", "至多") if shared else ("", "")
         if is_zh:
             W("## 没有任何软件包版本发生变化")
             W("")
-            if unowned:
-                W(f"两个镜像中所有软件包的 NEVRA 完全一致；但另有{bound_zh} {human(unowned)} "
-                  "不属于任何软件包的文件（`chunkah/unclaimed` 与 `bigfiles/*`，含 secureblue 自身配置）"
-                  "发生了变化，且未在此检查。"
-                  + (f"该数字是上限：其中 {shared} 个 chunk 还含有软件包内容。" if shared else ""))
-            else:
-                W("两个镜像中所有软件包的 NEVRA 完全一致；文件内容未检查，版本相同不能证明内容相同。")
+            W("两个镜像中所有软件包的 NEVRA 完全一致；文件内容未检查，版本相同不能证明内容相同。")
         else:
             W("## No package version changed at all")
             W("")
-            if unowned:
-                W(f"Every package in both images has the same NEVRA; {bound}{human(unowned)} of "
-                  "files no package owns (`chunkah/unclaimed` and `bigfiles/*`, including secureblue's own "
-                  "configuration) also changed and were not inspected here."
-                  + (f" The figure is an upper bound: package content sits in {shared} of those chunks too."
-                     if shared else ""))
-            else:
-                W("Every package in both images has the same NEVRA; file contents were not inspected. "
-                  "Identical versions do not prove identical contents.")
+            W("Every package in both images has the same NEVRA; file contents were not inspected. "
+              "Identical versions do not prove identical contents.")
+        unowned = _unowned_chunk_note(ldiff)
+        if unowned:
+            W("")
+            W(unowned.zh if is_zh else unowned.en)
         W("")
 
     if diff["added"] or diff["removed"]:
@@ -4122,10 +4115,9 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         if is_zh:
             W(f"## 版本相同但 chunk 变化（{len(silent)}）")
             W("")
-            W("这些 chunk 的字节变了，但软件包版本没变。Fedora 不会以同一版本重新构建软件包，"
-              "所以对 Fedora 软件包而言，变的是其名下某个在镜像构建时生成或被改动的文件"
-              "（实测 `glibc` 的 chunk 仅 `etc/ld.so.cache` 不同）；secureblue 自有的软件包"
-              "也可能是重建。两者都会消耗下载量，却没有对应的更新日志。")
+            W("这些压缩层的摘要变了，但软件包版本没变。原因可能是归档或压缩差异，"
+              "也可能是在镜像构建时生成的文件（例如 `glibc` 层内的 `etc/ld.so.cache`）"
+              "或第三方 RPM 重建。此处未检查层内文件，无法判断具体原因。")
             W("")
             for n, s in silent[:20]:
                 W(f"- `{n}` — {human(s)}")
@@ -4134,12 +4126,10 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         else:
             W(f"## Same version, changed chunk ({len(silent)})")
             W("")
-            W("These chunks changed byte-for-byte while the package version did not. Fedora "
-              "never rebuilds a package at one version, so for a Fedora package the cause is a "
-              "file it owns that is generated or modified while the image is built (measured: "
-              "the `glibc` chunk differed in `etc/ld.so.cache` alone); one of secureblue's own "
-              "packages may also have been rebuilt. Either way it costs download bytes and "
-              "carries no changelog entry.")
+            W("These compressed layer digests changed without a package version change. "
+              "Possible causes include archive or compression differences, generated files "
+              "such as `etc/ld.so.cache` in a `glibc` layer, and third-party RPM rebuilds. "
+              "The files in these layers were not compared, so the cause is unknown.")
             W("")
             for n, s in silent[:20]:
                 W(f"- `{n}` — {human(s)}")
