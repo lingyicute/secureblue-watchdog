@@ -2398,6 +2398,46 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None,
     return info
 
 
+def _add_rollback_baseline_errata(changed: list, baseline_release: str, release: str,
+                                  bodhi: Bodhi) -> None:
+    """Look in the old build's own scope for security errata left by a rollback."""
+    if not baseline_release:
+        return
+
+    def eligible_nvrs(p):
+        exact, normalized = nvr_candidates_split(p)
+        return set(normalized if _is_third_party(p) else exact + normalized)
+
+    for c in classify_order(changed):
+        if c["dir"] != "downgrade":
+            continue
+        old, new = c["old"], c["new"]
+        if (old["src"], baseline_release) == (new["src"], release):
+            continue  # classify_change already searched this scope
+        old_nvrs, new_nvrs = eligible_nvrs(old), eligible_nvrs(new)
+        if not old_nvrs:
+            continue
+        cls = c["cls"]
+        seen = {x.get("alias") for x in cls["already_had"] if x.get("alias")}
+        for u in bodhi.updates_for_src(old["src"], baseline_release):
+            status = (u.get("status") or "").lower()
+            alias = u.get("alias")
+            if not alias or alias in seen or u.get("type") != "security" or status not in PUSHED_STATUSES:
+                continue
+            nvrs = set(u.get("nvrs") or ())
+            epochs = u.get("build_epochs") or {}
+            hits = sorted(b for b in old_nvrs & nvrs if _epoch_matches(old, b, epochs))
+            if not hits:
+                continue
+            seen.add(alias)
+            cls["already_had"].append({
+                "alias": alias, "type": "security", "status": status,
+                "severity": u.get("severity"), "nvr": hits[0], "release": baseline_release,
+                "also_matches_target": (alias in cls["aliases"] or any(
+                    _epoch_matches(new, b, epochs) for b in new_nvrs & nvrs)),
+            })
+
+
 # --------------------------------------------------------------------------- #
 # analyses
 # --------------------------------------------------------------------------- #
@@ -5450,7 +5490,12 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
     # Capture diff's own Bodhi state before security_backlog() runs: backlog
     # lookups for unchanged packages report their own coverage in coverage_line()
     # and must not contaminate this delta's verdict or popup prediction.
+    diff["advisory_coverage_complete"] = False
     if bodhi is not None:
+        # Old-scope rollback lookups are evidence about what the image left,
+        # not inputs to the desktop's advisory check on the destination.
+        diff["advisory_coverage_complete"] = not (bodhi.failed or bodhi.skipped or bodhi.truncated_src)
+        _add_rollback_baseline_errata(diff["changed"], baseline_release, rel, bodhi)
         bstate = {"failed": bodhi.failed, "skipped": bodhi.skipped,
                   "truncated": sorted(bodhi.truncated_src),
                   "time_limited": getattr(bodhi, "time_limited", False)}
@@ -5460,8 +5505,6 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
         # Not the same thing as --no-bodhi: the Fedora release could not be
         # derived from the package list, so no erratum could be queried at all.
         bstate = {"unavailable": 1}
-    diff["advisory_coverage_complete"] = bodhi is not None and not (
-        bstate["failed"] or bstate["skipped"] or bstate["truncated"])
     backlog, coverage = [], None
     if getattr(args, "audit", False) and bodhi is not None:
         # Same Bodhi object as the diff classification above: one shared
@@ -5481,10 +5524,9 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
     if getattr(args, "audit", False) and bodhi is not None:
         notes.append(coverage_line(coverage))
     if bstate.get("failed"):
-        notes.append(T(f"WARNING: {bstate['failed']} Bodhi errata query(ies) failed; those "
-                       f"packages were judged from changelog CVEs only",
-                       f"警告：{bstate['failed']} 次 Bodhi 勘误查询失败；"
-                       f"这些软件包仅依据更新日志中的 CVE 判断"))
+        notes.append(T(f"WARNING: {bstate['failed']} Bodhi errata query(ies) failed; some "
+                       "advisory evidence is unavailable",
+                       f"警告：{bstate['failed']} 次 Bodhi 勘误查询失败；部分勘误证据不可用"))
     if bstate.get("truncated"):
         tr_en = clip_list(bstate["truncated"], 8)
         tr_zh = clip_list(bstate["truncated"], 8, lang="zh", joiner="，")
