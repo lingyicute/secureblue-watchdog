@@ -3001,6 +3001,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
             (bodhi_state or {}).get(k) for k in ("failed", "skipped", "truncated", "disabled", "unavailable")))
           and not sbn.get("unconditional") and any(
               c.get("dir") != "arch-change" and not _is_third_party(c.get("new") or {})
+              and not re.search(r"\.secureblue\.\d+", _build_evr(c.get("new") or {}))
               for c in diff["changed"])):
         obs_max = sbn.get("max_advisory_severity")
         sbn = dict(sbn, advisory_coverage_complete=False,

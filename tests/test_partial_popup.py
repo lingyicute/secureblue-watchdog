@@ -53,3 +53,13 @@ class TestPartialPopup(unittest.TestCase):
         self.assertIn("未知（勘误覆盖不完整；已读最高等级：important）", md)
         self.assertNotIn("`not read`", md)
         self.assertNotIn("`未读取`", md)
+
+    def test_secureblue_kernel_rebuild_never_attaches_fedora_advisory_even_without_bodhi(self):
+        old = dict(pkg("kernel", "7.3.3-300.secureblue.1.fc45"), vendor="")
+        new = dict(pkg("kernel", "7.3.4-300.secureblue.1.fc45"), vendor="")
+        diff = S.pkg_diff({"kernel": old}, {"kernel": new})
+        result = S.verdict_of(diff, {"download_bytes": 0}, {},
+                              bodhi_state={"disabled": 1})["secureblue_notification"]
+        self.assertEqual((result["level"], result["level_without_advisories"]),
+                         ("normal", "normal"))
+        self.assertEqual(result["max_advisory_severity"], "none")
