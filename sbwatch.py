@@ -5427,7 +5427,8 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
     meta["kernel_pkg_unchanged"] = same_rpmdb or bool(
         _ka and _kb and _evr_tuple(_ka) == _evr_tuple(_kb))
     # for the report's header table: the kernel that is really installed
-    diff["kernel_evr"] = [(_ka or {}).get("evr"), (_kb or {}).get("evr")]
+    diff["kernel_evr"] = (list(_evr_pair(_ka, _kb)) if (_ka and _kb)
+                          else [(_ka or {}).get("evr"), (_kb or {}).get("evr")])
     rel = fedora_release(pb, an_b.get("org.opencontainers.image.version", ""))
     if not rel:
         notes.append(T("WARNING: could not determine the Fedora release from the package "

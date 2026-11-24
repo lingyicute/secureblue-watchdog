@@ -1,5 +1,6 @@
 """A missing epoch and an explicit epoch 0 are the same epoch."""
 import unittest
+import unittest.mock
 
 from test_sbwatch import S, pkg
 
@@ -97,6 +98,21 @@ class TestChangedEpochIsShown(unittest.TestCase):
         self.assertEqual(lines[0], "bind-libs\t32:9.18.51-1.fc45\tx86_64\tbind")
         self.assertEqual(lines[1], "curl\t8.9.0-1.fc45\tx86_64\tcurl")
 
+
+
+    def test_metadata_table_shows_changed_kernel_epoch(self):
+        a = {"ref": "old", "digest": "sha256:" + "1" * 64, "annotations": {}, "created": "", "layers": []}
+        b = {"ref": "new", "digest": "sha256:" + "2" * 64, "annotations": {}, "created": "", "layers": []}
+        pa = S.PackageTable({"kernel": pkg("kernel", "7.3.4-300.fc45", epoch="")})
+        pb = S.PackageTable({"kernel": pkg("kernel", "7.3.4-300.fc45", epoch="1")})
+        args = type("A", (), {"exact": 1, "keep_order": True, "no_bodhi": True,
+                              "max_bodhi": 0, "bodhi_seconds": 0, "audit": False,
+                              "cache_dir": None, "cosign_pub": None, "require_cosign": False})()
+        reg = S.Registry("x/y")
+        reg._tok = ""
+        with unittest.mock.patch.object(S, "load_pkglist", side_effect=[pa, pb]):
+            res = S.do_diff(args, "old", "new", images=(a, b), reg=reg)
+        self.assertEqual(res["diff"]["kernel_evr"], ["0:7.3.4-300.fc45", "1:7.3.4-300.fc45"])
 
 if __name__ == "__main__":
     unittest.main()
