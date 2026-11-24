@@ -4437,6 +4437,12 @@ def cmd_backlog(args):
     rows, cov = security_backlog(pkgs, rel, bodhi,
                                  limit=args.backlog_candidates)
     ver = img["annotations"].get("org.opencontainers.image.version", "?")
+    if args.json_out:
+        _write_json_output(args.json_out, {"ref": args.ref, "digest": img["digest"],
+                                           "version": ver, "behind": rows, "coverage": cov},
+                           indent=1)
+        if _json_to_stdout(args.json_out):
+            return 0
     print(f"{args.image}:{args.ref}  version 版本 {ver}  ({rel})")
     print(T(f"{len(rows)} package(s) in this image are behind a published STABLE security update",
             f"此镜像中有 {len(rows)} 个软件包落后于已发布的 STABLE 安全更新") + "\n")
@@ -4472,10 +4478,6 @@ def cmd_backlog(args):
         tr_zh = clip_list(cov["truncated"], 8, lang="zh", joiner="，")
         print(T(f"  ! errata list truncated for: {tr_en} - their audit is INCOMPLETE",
                 f"  ！以下软件包的勘误列表被截断：{tr_zh}——其审计不完整"))
-    if args.json_out:
-        _atomic_write_json(args.json_out, {"ref": args.ref, "digest": img["digest"],
-                                           "version": ver, "behind": rows, "coverage": cov},
-                           indent=1)
     # Exit status reflects *execution*, not the verdict: a successful run is 0
     # even when packages are behind. Machines read the verdict from --json-out
     # (`behind`) or stdout; only real errors exit non-zero. (The one deliberate
@@ -4939,7 +4941,9 @@ def cmd_layers(args):
     maybe_verify_resolved(reg, b, args)
     ld = layer_diff(a, b)
     if args.json:
-        _atomic_write_json(args.json, ld, indent=1)
+        _write_json_output(args.json, ld, indent=1)
+        if _json_to_stdout(args.json):
+            return 0
     # print the *compared* direction (post-swap), not the raw argv order - printing
     # "latest -> 20260916" right below a note saying the pair was swapped to
     # "20260916 -> latest" contradicted itself.
@@ -4983,7 +4987,7 @@ def cmd_pkgs(args):
               f"  ！RPM 包表不完整：{coverage['rpmdb_issues']}"))
     if args.json:
         slim = {k: {a: b for a, b in v.items() if a != "changelog"} for k, v in pkgs.items()}
-        _atomic_write_json(args.json, {"ref": args.ref, "digest": r["digest"],
+        _write_json_output(args.json, {"ref": args.ref, "digest": r["digest"],
                                        "annotations": r["annotations"], "packages": slim,
                                        "coverage": coverage},
                            indent=1)
@@ -4996,6 +5000,21 @@ def cmd_pkgs(args):
         evr = f"{ep}:{p['evr']}" if ep != "0" else p["evr"]
         print(f"{n}\t{evr}\t{p['arch']}\t{p['src']}")
     return 0
+
+
+def _is_stdout_path(path) -> bool:
+    return bool(path) and os.path.abspath(path) in ("/dev/stdout", "/dev/fd/1", "/proc/self/fd/1")
+
+
+def _json_to_stdout(path) -> bool:
+    return path == "-" or _is_stdout_path(path)
+
+
+def _write_json_output(path: str, data, indent=None) -> None:
+    if _json_to_stdout(path):
+        print(json.dumps(data, indent=indent, allow_nan=False))
+    else:
+        _atomic_write_json(path, data, indent=indent)
 
 
 def _swap_target(path: str):
@@ -5539,12 +5558,15 @@ def cmd_diff(args):
                          res["diff"], res["layers"], res["verdict"], res["notes"],
                          res.get("xc"), res.get("backlog"), res.get("groups"))
     if args.markdown:
-        _atomic_write_text(args.markdown, md)
-        log(T(f"wrote {args.markdown}", f"已写入 {args.markdown}"))
-    else:
+        if _is_stdout_path(args.markdown):
+            sys.stdout.write(md)
+        else:
+            _atomic_write_text(args.markdown, md)
+            log(T(f"wrote {args.markdown}", f"已写入 {args.markdown}"))
+    elif not _json_to_stdout(args.json_out):
         print(md)
     if args.json_out:
-        _atomic_write_json(args.json_out, _comparison_json(res), indent=1)
+        _write_json_output(args.json_out, _comparison_json(res), indent=1)
     # Exit status reflects *execution*, not the verdict. This used to return
     # 1 for "consider" and 2 for "update-now", which turned an informational
     # recommendation into what every shell reads as an error (and broke any
@@ -6088,7 +6110,11 @@ def _check_output_paths(parser, args):
                  "--state": args.state or os.path.expanduser("~/.cache/sbwatch/state.json"),
                  "GITHUB_OUTPUT": os.environ.get("GITHUB_OUTPUT")}
     elif args.cmd == "diff":
-        paths = {"--markdown": args.markdown, "--json-out": args.json_out}
+        if _is_stdout_path(args.markdown) and _json_to_stdout(args.json_out):
+            parser.error(T("Markdown and JSON cannot both be written to stdout",
+                           "Markdown 与 JSON 不能同时写入标准输出"))
+        paths = {"--markdown": args.markdown,
+                 "--json-out": None if args.json_out == "-" else args.json_out}
     seen = {}
     for option, path in paths.items():
         if not path:
@@ -6125,14 +6151,14 @@ def main(argv=None):
     add_common(p)
     p.add_argument("a")
     p.add_argument("b")
-    p.add_argument("--json")
+    p.add_argument("--json", help="write JSON to a file (use - for stdout)")
     p.set_defaults(func=cmd_layers)
 
     p = sub.add_parser("pkgs", help="exact package list (NEVRA) of one image / 单个镜像的精确软件包列表（NEVRA）")
     add_common(p)
     p.add_argument("ref", nargs="?", default=None,
                    help="image ref (default: the tag in --image, else latest) / 镜像引用（默认：--image 中的标签，否则 latest）")
-    p.add_argument("--json", help="write machine-readable package list / 输出机器可读的软件包列表")
+    p.add_argument("--json", help="write machine-readable package list (- for stdout) / 输出机器可读的软件包列表（- 写到标准输出）")
     p.set_defaults(func=cmd_pkgs)
 
     p = sub.add_parser("diff", help="exact package diff + security classification / 精确软件包差异 + 安全分类")
@@ -6140,14 +6166,14 @@ def main(argv=None):
     p.add_argument("a")
     p.add_argument("b")
     p.add_argument("--markdown")
-    p.add_argument("--json-out")
+    p.add_argument("--json-out", help="write JSON to a file (- for stdout) / 输出 JSON（- 写到标准输出）")
     p.set_defaults(func=cmd_diff)
 
     p = sub.add_parser("backlog", help="what security updates THIS image is still missing / 此镜像仍缺少哪些安全更新")
     add_common(p)
     p.add_argument("ref", nargs="?", default=None,
                    help="image ref (default: the tag in --image, else latest) / 镜像引用（默认：--image 中的标签，否则 latest）")
-    p.add_argument("--json-out")
+    p.add_argument("--json-out", help="write JSON to a file (- for stdout) / 输出 JSON（- 写到标准输出）")
     p.set_defaults(func=cmd_backlog)
 
     p = sub.add_parser("history", help="list recent builds (handles several per day) / 列出近期构建（支持一天多次）")

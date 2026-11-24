@@ -172,6 +172,8 @@ sbwatch check                 # 有状态的 digest watch，用于 CI/cron -> re
 >[!tip]
 > 先用 `sbwatch.py history` 或 `sbwatch.py tags` 确认哪个 tag 更新。
 
+`layers` / `pkgs` 的 `--json -` 与 `diff` / `backlog` 的 `--json-out -` 会向标准输出写入单独的 JSON 文档；也支持 `/dev/stdout`。诊断仍发往标准错误。
+
 ### 示例
 
 ```bash
