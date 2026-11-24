@@ -234,6 +234,9 @@ jobs:
           # silent when nothing changed: no-update, no-change, unknown, empty
           if [ "$verdict" = "no-update" ] || [ "$verdict" = "no-change" ] || [ "$verdict" = "unknown" ] || [ -z "$verdict" ]; then post=false; fi
           if [ "$verdict" = "skip" ] && [ "$POST_SKIP_VERDICT" != "true" ]; then post=false; fi
+          # A one-off diff can be auto-oriented against a newer --a. It is an
+          # artifact for the requester, not an alert about the watched tag.
+          if [ -n "${SB_FROM:-}" ]; then post=false; fi
           {
             echo "post=$post"
             echo "verdict=$verdict"

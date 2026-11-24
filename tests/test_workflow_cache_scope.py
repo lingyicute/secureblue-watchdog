@@ -61,6 +61,25 @@ class TestWorkflowCacheScope(unittest.TestCase):
             self.assertTrue(state.parent.name.startswith("sbwatch-comparison."))
             self.assertEqual(state.name, "state.json")
 
+    def test_manual_comparisons_do_not_broadcast_as_watch_alerts(self):
+        step = WORKFLOW.split("- name: Should we notify?", 1)[1].split("run: |\n", 1)[1]
+        script = textwrap.dedent(step.split("\n      - name:", 1)[0])
+        cases = [("", "update-now", "false", "true"),
+                 ("20261124", "update-now", "true", "false"),
+                 ("20261124", "consider", "false", "false"),
+                 ("20261124", "skip", "true", "false"),
+                 ("", "skip", "true", "true"), ("", "skip", "false", "false")]
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "output"
+            for tag, verdict, opt_in, post in cases:
+                with self.subTest(tag=tag, verdict=verdict, opt_in=opt_in):
+                    out.write_text("")
+                    subprocess.run(["bash", "-e", "-c", script], check=True, capture_output=True,
+                                   env={**os.environ, "SB_FROM": tag, "VERDICT": verdict,
+                                        "POST_SKIP_VERDICT": opt_in, "FAIL_ON_SECURITY": "false",
+                                        "GITHUB_OUTPUT": str(out)})
+                    self.assertIn(f"post={post}\n", out.read_text())
+
     def test_summary_history_is_only_published_after_required_verification(self):
         step = WORKFLOW.split("- name: Append build history", 1)[1].split("run: |\n", 1)[1]
         script = textwrap.dedent(step.split("\n\n", 1)[0])
