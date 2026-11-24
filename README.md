@@ -40,7 +40,7 @@ secureblue 更新后会弹通知，判定逻辑在一个 shell 脚本里
 否则：不弹任何通知
 ```
 
-`sbwatch` 按同一条规则预测，结果放在 `verdict.secureblue_notification`（报告里是「secureblue notification 桌面通知预测」小节）：
+`sbwatch` 按同一条规则预测，结果放在 `verdict.secureblue_notification`（报告里是「secureblue 桌面通知预测」/「secureblue Notification Prediction」小节）：
 
 > [!important]
 > **勘误这一支只对叠加了软件包的系统成立。** rpm-ostree 只有在持有本次更新的 rpm-md
