@@ -410,7 +410,8 @@ CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并�
 
 - cache `~/.cache/sbwatch` (pkglist + Bodhi + state.json)，按 image+arch 分命名空间，
   其他 `--image` 拼写彼此隔离；prune 仅清理当前 Git 引用下本命名空间的缓存并保留最新创建的 7 份（防止 `state.json` 被 LRU 挤掉）；
-  结论为 `no-update` 的运行不再重复保存缓存（该路径不往缓存目录写任何东西）
+  结论为 `no-update` 的运行不再重复保存缓存（该路径不往缓存目录写任何东西）。手动指定
+  `from_tag` 只复用包表与 Bodhi 缓存，不会覆盖定时监控的基线
 - `check` 分析完成后会删除超过 14 天的 pkglist 缓存文件（刚对比的两个镜像除外；
   `--prune-days N` 调整，`0` 关闭）：每个分析过的构建会留下约 11 MB 的 pkglist，
   而整个缓存目录每次运行都会被整体恢复、保存；Bodhi 应答过了 6 小时 TTL 就再也不会

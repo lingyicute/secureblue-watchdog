@@ -152,7 +152,12 @@ jobs:
         run: |
           set -uo pipefail
           args=(--image "$SB_IMAGE" --arch "$SB_ARCH" --max-bodhi 100 --bodhi-seconds 600 --report report.md)
-          [ -n "${SB_FROM:-}" ] && args+=(--a "$SB_FROM")
+          if [ -n "${SB_FROM:-}" ]; then
+            # Keep one-off comparisons from replacing the scheduled watch's
+            # baseline in the shared package/Bodhi cache.
+            comparison_dir=$(mktemp -d "$RUNNER_TEMP/sbwatch-comparison.XXXXXX") || exit 1
+            args+=(--a "$SB_FROM" --state "$comparison_dir/state.json")
+          fi
           [ "${SB_FORCE:-}" = "true" ] && args+=(--force)
           if [ -f cosign.pub ]; then
             args+=(--cosign-pub cosign.pub --require-cosign)
