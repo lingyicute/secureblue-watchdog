@@ -25,9 +25,6 @@ class TestNonPackageChurnWording(unittest.TestCase):
         self.assertNotIn("ostree 元数据", v["headline_zh"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
     def test_embedded_rpm_or_bigfiles_segments_are_preserved_in_chunk_paths(self):
         img = {"ref": "a", "digest": "sha256:" + "1" * 64, "annotations": {}, "created": ""}
         ld = {"chunks_a": 1, "chunks_b": 1, "chunks_changed": 1, "chunks_reused": 0,
@@ -40,3 +37,7 @@ if __name__ == "__main__":
         md = S.render_markdown("s", img, img, diff, ld, v, [], xc)
         self.assertIn("usr/share/rpm/bigfiles/db", md)
         self.assertIn("≈usr/share/rpm/bigfiles/db", md)
+
+
+if __name__ == "__main__":
+    unittest.main()

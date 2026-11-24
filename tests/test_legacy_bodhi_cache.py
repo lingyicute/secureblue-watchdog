@@ -52,9 +52,6 @@ class TestLegacyBodhiCache(unittest.TestCase):
             self.assertIsNone(bodhi._read_cache_entry(str(path)))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
     def test_invalid_cached_build_epochs_or_total_are_refetched(self):
         base = {"cache_version": S.BODHI_CACHE_VERSION, "fetched_at": 10**9,
                 "total": 1, "truncated": False, "updates": [{
@@ -82,3 +79,7 @@ if __name__ == "__main__":
                 with open(cf, "w", encoding="utf-8") as fh:
                     json.dump(entry, fh)
                 self.assertIsNone(client._read_cache_entry(cf))
+
+
+if __name__ == "__main__":
+    unittest.main()
