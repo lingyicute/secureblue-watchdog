@@ -827,7 +827,8 @@ class Registry:
                 self._tok = ""
                 return None
         except urllib.error.HTTPError as e:
-            h = e.headers.get("Www-Authenticate") or ""
+            all_h = e.headers.get_all("Www-Authenticate") if hasattr(e.headers, "get_all") else None
+            h = ", ".join(all_h) if all_h else (e.headers.get("Www-Authenticate") or "")
             m = re.search(r"(?:^|,\s*)Bearer\s+(.+)", h, re.I | re.S)
             if not m:
                 log(T(f"  ! {self.host}/v2/ answered {e.code} without a Bearer challenge "

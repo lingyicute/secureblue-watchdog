@@ -117,5 +117,25 @@ class TestTokenRealm(unittest.TestCase):
             self.assertEqual(S.Registry("registry.example/ns/image")._token(), "safe")
 
 
+
+    def test_multiple_www_authenticate_header_lines_find_bearer_challenge(self):
+        seen = []
+
+        def fake_urlopen(req, timeout=None):
+            u = req.full_url if hasattr(req, "full_url") else req
+            seen.append(u)
+            if len(seen) == 1:
+                msg = email.message.Message()
+                msg["Www-Authenticate"] = 'Basic realm="fallback"'
+                msg["Www-Authenticate"] = 'Bearer realm="https://auth.example/token",service="reg.example"'
+                raise S.urllib.error.HTTPError(u, 401, "Unauthorized", msg, None)
+            return io.BytesIO(b'{"token": "multi-header"}')
+
+        reg = S.Registry("reg.example/ns/img")
+        with patch.object(S._OPENER, "open", side_effect=fake_urlopen):
+            self.assertEqual(reg._token(), "multi-header")
+        self.assertIn("https://auth.example/token?", seen[1])
+        self.assertIn("service=reg.example", seen[1])
+
 if __name__ == "__main__":
     unittest.main()
