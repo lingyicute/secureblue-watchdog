@@ -25,7 +25,7 @@ secureblue 镜像由 blue-build + `chunkah` 构建，每层都有注解：
 }
 ```
 
-1. **manifest 是包→chunk 的映射**：对比两个 manifest 就知道哪些包内容变了，哪些 chunk 要重下 → 真实下载量。
+1. **manifest 是包→chunk 的映射**：对比两个 manifest 就知道哪些包内容变了，哪些 chunk 要重下 → 以 blob digest 按唯一的新增压缩层估算下载量。删除、重排或重复引用旧层可改变最终文件，即使不增加下载；`layers` 和 diff JSON 分别记录 `chunks_removed` 与 `reused_layer_sequence_changed`。
 2. **RPM 数据库是独立 chunk** (`bigfiles/rpmdb.sqlite`)：只拉这一个 blob (~33MB 代替 ~4GB) 就能拿到 2200+ 包的精确 NEVRA + changelog (Fedora 会在 changelog 写 `Fix CVE-YYYY-NNNNN`)，结合 Fedora Bodhi API 就能做安全分类。
 
 ## secureblue 通知预测

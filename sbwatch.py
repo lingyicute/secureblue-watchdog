@@ -2402,8 +2402,16 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None,
 # analyses
 # --------------------------------------------------------------------------- #
 def layer_diff(a: dict, b: dict) -> dict:
-    da = {l["digest"] for l in a["layers"]}
+    order_a = [l["digest"] for l in a["layers"]]
+    order_b = [l["digest"] for l in b["layers"]]
+    da = set(order_a)
     db = {l["digest"]: l for l in b["layers"]}
+    shared = da & db.keys()
+    # Download accounting is set-based. OCI applies layer descriptors in order,
+    # so dropping, moving or repeating an otherwise reusable layer can still
+    # change the filesystem without downloading a byte of that layer.
+    reused_layer_sequence_changed = ([d for d in order_a if d in shared]
+                                     != [d for d in order_b if d in shared])
     changed = sorted((l for d, l in db.items() if d not in da), key=lambda l: -l["size"])
     dl_bytes = sum(l["size"] for l in changed)
     pkgs = sorted({c[4:] for l in changed for c in l["components"] if c.startswith("rpm/")})
@@ -2412,12 +2420,31 @@ def layer_diff(a: dict, b: dict) -> dict:
     total_b = sum(l["size"] for l in db.values())
     return {
         "chunks_a": len(da), "chunks_b": len(db), "chunks_changed": len(changed),
-        "chunks_reused": len(db) - len(changed), "total_size_b": total_b,
+        "chunks_reused": len(shared), "chunks_removed": len(da - db.keys()),
+        "reused_layer_sequence_changed": reused_layer_sequence_changed,
+        "total_size_b": total_b,
         "download_bytes": dl_bytes, "download_pct": round(100 * dl_bytes / max(1, total_b)),
         "changed_packages_from_chunks": pkgs,
         "changed_chunks": [{"components": l["components"], "size": l["size"],
                             "stability": l["stability"]} for l in changed],
     }
+
+
+def _layer_layout_note(ldiff: dict) -> BiText | None:
+    removed = ldiff.get("chunks_removed", 0)
+    reordered = ldiff.get("reused_layer_sequence_changed", False)
+    if not (removed or reordered):
+        return None
+    en, zh = [], []
+    if removed:
+        en.append(f"{removed} old layer blob(s) are no longer referenced")
+        zh.append(f"不再引用 {removed} 个旧层 blob")
+    if reordered:
+        en.append("reused layer order or multiplicity changed")
+        zh.append("复用层的顺序或重复次数变化")
+    return T("Layer layout: " + "; ".join(en) + ". The layer download estimate does not "
+             "measure these filesystem effects.",
+             "层布局：" + "；".join(zh) + "。层下载量估算不反映这些变化对文件系统的影响。")
 
 
 def _epoch(e: dict) -> str:
@@ -4158,6 +4185,9 @@ def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog
     # the caller hands over the groups verdict_of() was already given.
     if groups is None:
         groups = group_by_src(diff["changed"])
+    layout_note = _layer_layout_note(ldiff)
+    if layout_note:
+        notes = [*notes, layout_note]
     zh_part = _render_markdown_lang("zh", subject, a, b, diff, ldiff, verdict, notes, xc, backlog,
                                     groups)
     en_part = _render_markdown_lang("en", subject, a, b, diff, ldiff, verdict, notes, xc, backlog,
@@ -4790,8 +4820,8 @@ def cmd_history(args):
     print(" dated tag only points at the newest one, so compare by digest)")
     print("（命名标签是可变的：一天内多次构建共用同一个版本字符串，")
     print(" 日期标签只指向最新一次构建，因此请用 digest 来对比）")
-    print("cost = bytes a client on the row above would download to reach this row / "
-          "cost 下载量 = 上一行镜像的客户端升级到本行需下载的字节数\n")
+    print("cost = compressed layer bytes present in this row but not the previous row / "
+          "cost 下载量 = 本行有而上一行没有的压缩层字节数（不反映层的删除、重排与文件内容）\n")
     print(f"  {'created (UTC)':19} {'image version':15} {'input':11} "
           f"{'chunks':8} {'cost':>9}  {'Fedora base kernel':22} refs")
     # A CJK character fills two terminal cells, so each width is the English one
@@ -4956,6 +4986,9 @@ def cmd_layers(args):
           f"{ld['chunks_changed']} changed 变化, {ld['chunks_reused']} reused 复用")
     print(f"  download 下载: {human(ld['download_bytes'])} ({ld['download_pct']}% of "
           f"{human(ld['total_size_b'])})")
+    layout_note = _layer_layout_note(ld)
+    if layout_note:
+        print(f"  {layout_note}")
     pk = ld["changed_packages_from_chunks"]
     print(f"  packages whose chunk changed / 所在 chunk 发生变化的软件包: {len(pk)}")
     for p in pk:
@@ -5541,6 +5574,8 @@ def _comparison_json(res: dict, from_label=None, to_label=None) -> dict:
             "version": (b.get("annotations") or {}).get("org.opencontainers.image.version", "?"),
             "download_bytes": res["layers"]["download_bytes"],
             "download_bytes_is_upper_bound": True,
+            "chunks_removed": res["layers"].get("chunks_removed", 0),
+            "reused_layer_sequence_changed": res["layers"].get("reused_layer_sequence_changed", False),
             "versions_known": xc.get("versions_known", d.get("count_a") != "?"),
             "rpmdb_issues": d.get("rpmdb_issues"),
             "changelog_scan_incomplete": d.get("changelog_scan_incomplete", []),
