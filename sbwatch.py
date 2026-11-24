@@ -5649,7 +5649,7 @@ def cmd_check(args):
         _atomic_write_text(report, f"# No new build 无新构建\n\n{msg}\n")
         _atomic_write_json(report + ".json", {
             "verdict": {"level": "no-update", "headline": msg}, "version": ver,
-            "digest": cur["digest"], "download_bytes": 0, **watched})
+            "digest": cur["digest"], "download_bytes": 0, "analysis_incomplete": False, **watched})
         gh_outputs({"verdict": "no-update", "digest": cur["digest"], "summary": msg,
                     "download_bytes": 0, "report": report, "version": ver,
                     "inputhash": cur["annotations"].get("rpmostree.inputhash") or "", **watched})
@@ -5809,17 +5809,21 @@ def cmd_check(args):
                 f"有新构建（{ver}），但没有可用于对比的更早镜像")
         log(msg)
         report = args.report or "report.md"
-        _atomic_write_text(report, f"# {msg}\n\nNo baseline image found to diff "
-                                  f"against / 未找到可用于对比的基线镜像. "
-                                  f"Current 当前: {ver} {cur['digest'][:19]}...\n")
+        md = (f"# {msg}\n\nNo baseline image found to diff against / 未找到可用于对比的基线镜像. "
+              f"Current 当前: {ver} {cur['digest'][:19]}...\n")
+        if hist_warnings:
+            md += "\n## Baseline discovery warnings / 基线探测警告\n\n"
+            md += "".join(f"- {warning}\n" for warning in hist_warnings)
+        _atomic_write_text(report, md)
         _atomic_write_json(report + ".json", {
             "verdict": {"level": "unknown", "headline": msg},
-            "version": ver, "digest": cur["digest"], **watched})
+            "version": ver, "digest": cur["digest"], "download_bytes": None,
+            "analysis_incomplete": True, "baseline_warnings": hist_warnings, **watched})
         gh_outputs({"verdict": "unknown", "digest": cur["digest"], "summary": msg,
-                    "download_bytes": 0, "report": report, "version": ver, **watched})
+                    "download_bytes": "", "report": report, "version": ver, **watched})
         # Remember the checkpoint for a future build, not a successful analysis.
         # An unchanged digest must retry the missing baseline on the next run.
-        save_state({"last_verdict": "unknown", "baseline_missing": True})
+        save_state({"last_verdict": "unknown", "baseline_missing": True, "analysis_incomplete": True})
         return 0
 
     # Resolve the baseline exactly once and hand it to do_diff. Resolving the same

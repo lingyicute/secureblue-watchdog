@@ -12,14 +12,14 @@ from test_check_state import _image
 
 
 class TestCheckEarlyReports(unittest.TestCase):
-    def run_check(self, directory, seen=False):
+    def run_check(self, directory, seen=False, probe=None):
         state, report = Path(directory) / "state.json", Path(directory) / "nested/report.md"
         current = _image(2)
         if seen:
             state.write_text(json.dumps({"digest": current["digest"], "last_verdict": "consider", "analysis_incomplete": False}))
         with patch.object(S.Registry, "_token", return_value=None), \
                 patch.object(S, "resolve", return_value=dict(current, ref="latest")), \
-                patch.object(S, "tag_exists", return_value=None), \
+                patch.object(S, "tag_exists", side_effect=probe, return_value=None), \
                 patch.dict(os.environ, {}, clear=True), \
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             S.main(["check", "--image", "x/y", "--scan", "0", "--state", str(state),
@@ -28,15 +28,34 @@ class TestCheckEarlyReports(unittest.TestCase):
 
     def test_local_unknown_report_and_json_are_written(self):
         with tempfile.TemporaryDirectory() as directory:
-            _, report = self.run_check(directory)
+            state, report = self.run_check(directory)
             self.assertIn("No baseline", report.read_text())
-            self.assertEqual(json.loads(Path(str(report) + ".json").read_text())["verdict"]["level"], "unknown")
+            data = json.loads(Path(str(report) + ".json").read_text())
+            self.assertEqual(data["verdict"]["level"], "unknown")
+            self.assertIsNone(data["download_bytes"])
+            self.assertTrue(data["analysis_incomplete"])
+            self.assertTrue(json.loads(state.read_text())["analysis_incomplete"])
+
+    def test_baseline_probe_failure_is_reported_in_markdown_and_json(self):
+        def probe(reg, tag, warn):
+            if not warn:
+                warn.append(S.T("registry unavailable", "registry 暂时不可用"))
+
+        with tempfile.TemporaryDirectory() as directory:
+            _, report = self.run_check(directory, probe=probe)
+            self.assertIn("registry unavailable", report.read_text())
+            data = json.loads(Path(str(report) + ".json").read_text())
+            self.assertEqual(len(data["baseline_warnings"]), 1)
+            self.assertIn("registry unavailable", data["baseline_warnings"][0])
 
     def test_no_update_replaces_the_previous_report(self):
         with tempfile.TemporaryDirectory() as directory:
             _, report = self.run_check(directory, seen=True)
             self.assertIn("No new build", report.read_text())
-            self.assertEqual(json.loads(Path(str(report) + ".json").read_text())["verdict"]["level"], "no-update")
+            data = json.loads(Path(str(report) + ".json").read_text())
+            self.assertEqual(data["verdict"]["level"], "no-update")
+            self.assertEqual(data["download_bytes"], 0)
+            self.assertFalse(data["analysis_incomplete"])
 
     def test_failed_report_write_is_fatal_and_does_not_advance_state(self):
         with tempfile.TemporaryDirectory() as directory:
