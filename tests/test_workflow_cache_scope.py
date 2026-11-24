@@ -60,3 +60,30 @@ class TestWorkflowCacheScope(unittest.TestCase):
             self.assertEqual(state.parent.parent, root)
             self.assertTrue(state.parent.name.startswith("sbwatch-comparison."))
             self.assertEqual(state.name, "state.json")
+
+    def test_summary_history_is_only_published_after_required_verification(self):
+        step = WORKFLOW.split("- name: Append build history", 1)[1].split("run: |\n", 1)[1]
+        script = textwrap.dedent(step.split("\n\n", 1)[0])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            summary = root / "summary"
+            capture = root / "args"
+            python = root / "python3"
+            python.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$CAPTURE"\n'
+                              'echo history-row\nexit "$STATUS"\n')
+            python.chmod(0o755)
+            env = {**os.environ, "PATH": f"{root}:{os.environ['PATH']}",
+                   "CAPTURE": str(capture), "GITHUB_STEP_SUMMARY": str(summary),
+                   "SB_IMAGE": "example/image", "SB_ARCH": "arm64", "WATCHED_INDEX": "sha256:example"}
+            for rc in ("0", "1"):
+                with self.subTest(status=rc):
+                    summary.write_text("")
+                    subprocess.run(["bash", "-e", "-c", script], cwd=tmp, check=True,
+                                   env={**env, "STATUS": rc}, capture_output=True)
+                    args = capture.read_text().splitlines()
+                    self.assertIn("--require-cosign", args)
+                    self.assertEqual(args[args.index("--cosign-pub") + 1], "cosign.pub")
+                    self.assertEqual(args[args.index("--at-digest") + 1], env["WATCHED_INDEX"])
+                    body = summary.read_text()
+                    self.assertEqual("    history-row" in body, rc == "0")
+                    self.assertEqual("Verified history unavailable" in body, rc != "0")

@@ -151,7 +151,8 @@ jobs:
         id: check
         run: |
           set -uo pipefail
-          args=(--image "$SB_IMAGE" --arch "$SB_ARCH" --max-bodhi 100 --bodhi-seconds 600 --report report.md)
+          args=(--image "$SB_IMAGE" --arch "$SB_ARCH" --max-bodhi 100 --bodhi-seconds 600
+                --report report.md --cosign-pub cosign.pub --require-cosign)
           if [ -n "${SB_FROM:-}" ]; then
             # Keep one-off comparisons from replacing the scheduled watch's
             # baseline in the shared package/Bodhi cache.
@@ -159,9 +160,6 @@ jobs:
             args+=(--a "$SB_FROM" --state "$comparison_dir/state.json")
           fi
           [ "${SB_FORCE:-}" = "true" ] && args+=(--force)
-          if [ -f cosign.pub ]; then
-            args+=(--cosign-pub cosign.pub --require-cosign)
-          fi
           # Ask sbwatch to signal "security fixes waiting" as exit code 10. Without
           # this flag the rc=10 branch below was dead code.
           [ "$FAIL_ON_SECURITY" = "true" ] && args+=(--fail-on security)
@@ -198,10 +196,14 @@ jobs:
           {
             echo ""
             echo "## Builds through the watched snapshot, newest last"
-            echo '```'
-            python3 sbwatch.py history --image "$SB_IMAGE" --arch "$SB_ARCH" \
-              --at-digest "$WATCHED_INDEX" --scan 10 --days 7 2>&1 || echo "(history scan failed)"
-            echo '```'
+            if history=$(timeout 180s python3 sbwatch.py history --image "$SB_IMAGE" --arch "$SB_ARCH" \
+                --at-digest "$WATCHED_INDEX" --scan 10 --days 7 --cosign-pub cosign.pub --require-cosign); then
+              echo
+              printf '%s\n' "$history" | sed 's/^/    /'
+            else
+              echo
+              echo "(Verified history unavailable; see the run log.)"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       # NOTE: deliberately NOT the same condition as the history step above:
