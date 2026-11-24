@@ -27,3 +27,16 @@ class TestNonPackageChurnWording(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_embedded_rpm_or_bigfiles_segments_are_preserved_in_chunk_paths(self):
+        img = {"ref": "a", "digest": "sha256:" + "1" * 64, "annotations": {}, "created": ""}
+        ld = {"chunks_a": 1, "chunks_b": 1, "chunks_changed": 1, "chunks_reused": 0,
+              "total_size_b": 100, "download_bytes": 100, "download_pct": 100,
+              "changed_packages_from_chunks": [],
+              "changed_chunks": [{"components": ["bigfiles/usr/share/rpm/bigfiles/db"], "size": 100, "stability": 0}]}
+        diff = {"changed": [], "added": [], "removed": [], "downgrades": [], "count_a": 1, "count_b": 1}
+        xc = S.crosscheck_chunks(ld, diff)
+        v = S.verdict_of(diff, ld, {}, xc)
+        md = S.render_markdown("s", img, img, diff, ld, v, [], xc)
+        self.assertIn("usr/share/rpm/bigfiles/db", md)
+        self.assertIn("≈usr/share/rpm/bigfiles/db", md)

@@ -4162,7 +4162,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W("")
         for ch in xc["non_package_chunks"]:
             W(f"- {human(ch['size'])} — "
-              f"{clip_text(', '.join(c.replace('bigfiles/', '') for c in ch['components']), 120, lang=lang)}")
+              f"{clip_text(', '.join(c.removeprefix('bigfiles/') for c in ch['components']), 120, lang=lang)}")
         W("")
 
     if backlog:
@@ -4200,7 +4200,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W(f"## 需要重新下载的 chunk（{ch_cnt}）")
             W("")
             for ch in ldiff["changed_chunks"][:15]:
-                comps = [c.replace("rpm/", "").replace("bigfiles/", "≈") for c in ch["components"][:5]]
+                comps = [("≈" + c[9:] if c.startswith("bigfiles/") else c.removeprefix("rpm/")) for c in ch["components"][:5]]
                 more = len(ch["components"]) - len(comps)
                 more_label = f" +{more} 个包" if more > 0 else ""
                 W(f"- {human(ch['size'])} — {', '.join(comps)}{more_label}")
@@ -4210,7 +4210,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W(f"## Chunks you would re-download ({ch_cnt})")
             W("")
             for ch in ldiff["changed_chunks"][:15]:
-                comps = [c.replace("rpm/", "").replace("bigfiles/", "≈") for c in ch["components"][:5]]
+                comps = [("≈" + c[9:] if c.startswith("bigfiles/") else c.removeprefix("rpm/")) for c in ch["components"][:5]]
                 more = len(ch["components"]) - len(comps)
                 more_label = f" +{more} pkgs" if more > 0 else ""
                 W(f"- {human(ch['size'])} — {', '.join(comps)}{more_label}")
