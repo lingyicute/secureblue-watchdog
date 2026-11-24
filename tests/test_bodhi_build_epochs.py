@@ -28,6 +28,16 @@ def _security(nvr, epoch, alias="FEDORA-2026-0000000000"):
 
 
 class TestBuildEpochs(unittest.TestCase):
+    def test_leading_zeros_in_bodhi_epoch_are_normalized(self):
+        data = json.dumps({"updates": [{
+            "alias": "FEDORA-2026-z", "type": "security", "status": "stable",
+            "severity": "high", "builds": [{"nvr": "re2-20251105-19.fc45", "epoch": "02"}],
+        }], "total": 1}).encode()
+        client = S.Bodhi(cache_dir=None, sleep=0)
+        with patch.object(S.urllib.request, "urlopen", return_value=_FakeResp(data)):
+            updates = client.updates_for_src("re2", "F45")
+        self.assertEqual(updates[0]["build_epochs"], {"re2-20251105-19.fc45": "2"})
+
     def test_only_an_epoch_bodhi_states_is_recorded(self):
         builds = [{"nvr": "dnf5-5.4.8.0-2.fc45", "type": "rpm", "epoch": 0},
                   {"nvr": "vim-9.2.127-1.fc45", "type": "rpm", "epoch": 2}]

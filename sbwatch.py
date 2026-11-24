@@ -1907,7 +1907,7 @@ class Bodhi:
                     # carry Epoch 2 (4 of the image's 43 epoch-bearing builds with an
                     # erratum). Read as a fact, that 0 kept an installed build from
                     # matching its own erratum and a newer one from counting as newer.
-                    "build_epochs": {b["nvr"]: str(b["epoch"]) for b in u.get("builds") or []
+                    "build_epochs": {b["nvr"]: str(int(b["epoch"])) for b in u.get("builds") or []
                                      if b.get("nvr") and (b.get("type") or "rpm").lower() == "rpm"
                                      and str(b.get("epoch")).isascii() and str(b.get("epoch")).isdigit()
                                      and int(b["epoch"]) > 0},
