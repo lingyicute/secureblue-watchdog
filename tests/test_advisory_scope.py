@@ -65,3 +65,11 @@ class TestNonSecuritySideTag(unittest.TestCase):
         v = S.verdict_of(diff, {"download_bytes": 0}, {})
         self.assertEqual(v["level"], "skip")
         self.assertEqual(v["cves"], [])
+
+
+class TestAdvisoryCveNormalization(unittest.TestCase):
+    def test_mixed_case_cached_cves_are_canonicalized_without_duplicates(self):
+        update = {"alias": "FEDORA-2026-case", "type": "security", "status": "stable",
+                  "nvrs": ["curl-8.10.0-1.fc45"], "cves": ["cve-2026-1234", "CVE 2026-1234"],
+                  "title": "Fix CVE-2026-1234", "notes": "", "bugs": []}
+        self.assertEqual(S._advisory_cve_scope(update), ({"CVE-2026-1234"}, set()))

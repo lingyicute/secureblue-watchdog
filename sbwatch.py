@@ -2148,7 +2148,7 @@ def classify_order(changed: list) -> list:
 
 def _advisory_cve_scope(update: dict) -> tuple[set, set]:
     """Return (source-level, advisory-wide) CVE IDs, not per-binary proof."""
-    ids = set(update.get("cves") or ())
+    ids = {cve for entry in update.get("cves") or () for cve in find_cves(entry)}
     for text in (update.get("title"), update.get("notes"),
                  *(bug.get("title") for bug in update.get("bugs") or ())):
         ids.update(find_cves(text))
