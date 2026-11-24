@@ -93,5 +93,28 @@ class TestCheckState(unittest.TestCase):
         self.assertEqual(saved["tag"], "latest")
 
 
+
+    def test_invalid_saved_baseline_digest_falls_back_with_warning(self):
+        cur = _image(2)
+        with tempfile.TemporaryDirectory() as td:
+            sp = Path(td) / "state.json"
+            rp = Path(td) / "report.md"
+            sp.write_text(json.dumps({
+                "image": "ghcr.io/x/y", "arch": "amd64", "tag": "latest",
+                "digest": "not-a-sha256-digest", "last_verdict": "skip",
+                "analysis_incomplete": False,
+            }), encoding="utf-8")
+            with patch.object(S.Registry, "_token", return_value=None), \
+                    patch.object(S, "resolve", return_value=dict(cur, ref="latest")), \
+                    patch.object(S, "tag_exists", return_value=None), \
+                    contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                rc = S.main(["check", "--image", "x/y", "--scan", "0", "--state", str(sp),
+                             "--report", str(rp), "--cache-dir", td, "--prune-days", "0"])
+            self.assertEqual(rc, 0)
+            payload = json.loads(Path(str(rp) + ".json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["verdict"]["level"], "unknown")
+            self.assertTrue(any("invalid" in str(w) for w in payload["baseline_warnings"]))
+
 if __name__ == "__main__":
     unittest.main()

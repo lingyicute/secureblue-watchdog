@@ -5857,6 +5857,19 @@ def cmd_check(args):
             state_base_index = state.get("index_digest")
             state_base_lbl = _state_label(state)
     if state_base_dig:
+        cleaned_base = _clean_sha256_header(state_base_dig)
+        if not cleaned_base:
+            state_lost = True
+            msg = T(f"the saved baseline digest ({clip_text(state_base_dig, 32)}) is invalid, "
+                    f"so it was ignored and the baseline was chosen from build history / dated tags",
+                    f"状态文件中保存的基线 digest（{clip_text(state_base_dig, 32, lang='zh')}）无效，"
+                    f"已忽略并改由构建历史 / 日期标签选出基线")
+            log("  ! " + msg)
+            hist_warnings.append(msg)
+            state_base_dig = None
+        else:
+            state_base_dig = cleaned_base
+    if state_base_dig:
         # Resolved here, before the baseline is settled: the image analysed last
         # time can be gone by now (registries prune old builds, and a schedule
         # that was paused long enough comes back to exactly that). Its 404 used
