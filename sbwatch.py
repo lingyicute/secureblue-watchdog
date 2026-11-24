@@ -1671,6 +1671,39 @@ class Bodhi:
                 pass
             return None
 
+    def _fresh_entry(self, path):
+        if not path:
+            return None
+        try:
+            modified = os.path.getmtime(path)
+        except OSError:
+            return None
+        now = time.time()
+        if now - modified >= self.ttl:
+            return None
+        data = self._read_cache_entry(path)
+        if data is None:
+            return None
+        fetched = data.get("fetched_at", modified)
+        # The TTL starts with page 1, not the last retry that wrote the answer.
+        if type(fetched) not in (int, float) or not 0 <= now - fetched < self.ttl:
+            return None
+        return data
+
+    def _cached_progress(self, path):
+        data = self._fresh_entry(path)
+        if not data or data.get("truncated") is not True or "fetched_at" not in data:
+            return None
+        page, pages, total = (data.get(k) for k in ("next_page", "pages", "total"))
+        aliases = data.get("seen_aliases")
+        if (type(page) is not int or type(pages) is not int or type(total) is not int
+                or not 1 < page <= min(pages, MAX_BODHI_PAGES)
+                or not isinstance(aliases, list) or not 0 < len(aliases) < total
+                or any(not isinstance(a, str) or not a for a in aliases)
+                or len(set(aliases)) != len(aliases)):
+            return None
+        return data
+
     def _fetch_page(self, url: str, src: str, expected_page: int) -> tuple:
         """One page of /updates/ as (document, updates), validated.
 
@@ -1752,17 +1785,13 @@ class Bodhi:
             ent = self._mem[key]
             return ent["updates"] if isinstance(ent, dict) else ent
         cf = self._cf(key)
-        try:
-            fresh = cf and time.time() - os.path.getmtime(cf) < self.ttl
-        except OSError:
-            fresh = False
-        if fresh:
-            cached = self._read_cache_entry(cf)
-            if cached is not None:
-                self._mem[key] = cached
-                if cached.get("truncated"):
-                    self.truncated_src.add(src)
-                return cached["updates"]
+        partial_path = cf.removesuffix(".json") + ".partial.json" if cf else None
+        cached = self._fresh_entry(cf)
+        if cached is not None:
+            self._mem[key] = cached
+            if cached.get("truncated"):
+                self.truncated_src.add(src)
+            return cached["updates"]
         if self.down:
             # Not attempted, but counted as failed (once per source package): the
             # verdict must still say that the errata coverage is incomplete.
@@ -1773,24 +1802,25 @@ class Bodhi:
             # Cache hits still count even when no further requests may be made.
             return self._memo_budget_miss(key)
 
-        res: list = []
-        total = None
-        truncated = False
-        budget_cut = False
-        received = 0  # total counts all content types, not just the RPMs we keep
-        seen_aliases = set()
-        page_count = None
-        inconsistent = False
-        ok = False
-        for page in range(1, MAX_BODHI_PAGES + 1):
+        progress = self._cached_progress(partial_path)
+        started = progress["fetched_at"] if progress else time.time()
+        res = progress["updates"] if progress else []
+        total = progress["total"] if progress else None
+        page_count = progress["pages"] if progress else None
+        seen_aliases = set(progress["seen_aliases"]) if progress else set()
+        received = len(seen_aliases)  # includes non-RPM updates
+        first_page = progress["next_page"] if progress else 1
+        truncated = budget_cut = inconsistent = ok = False
+        resumable = True
+        for page in range(first_page, MAX_BODHI_PAGES + 1):
             if page > 1 and self._budget_reached():
                 # --max-bodhi caps API calls, and every page is one call: the
                 # guard above only ran before page 1, so a 127-erratum package
                 # walked past the budget. Stop here and say the audit is partial.
                 truncated = budget_cut = True
-                log(T(f"  ! bodhi: query budget reached after {len(res)} of {total} errata "
+                log(T(f"  ! bodhi: query budget reached after {received} of {total} updates "
                       f"for {src} - this package's audit is INCOMPLETE",
-                      f"  ！Bodhi：{src} 只取到 {total} 条勘误中的 {len(res)} 条时查询预算"
+                      f"  ！Bodhi：{src} 只取到 {total} 条更新中的 {received} 条时查询预算"
                       f"已用尽——该包的审计不完整"))
                 break
             url = f"{self.BASE}/updates/?" + urllib.parse.urlencode(
@@ -1822,6 +1852,10 @@ class Bodhi:
             ok = True
             self._streak = 0
             pages = data.get("pages")
+            numbered = data.get("page") == page and pages is not None and "total" in data
+            resumable &= numbered
+            if progress and not numbered:
+                inconsistent = True
             if ((total is not None and data.get("total", total) != total)
                     or (page_count is not None and pages is not None and pages != page_count)):
                 inconsistent = True
@@ -1835,6 +1869,10 @@ class Bodhi:
                         inconsistent = True
                         continue
                     seen_aliases.add(alias)
+                else:
+                    resumable = False
+                    if progress:
+                        inconsistent = True
                 ctype = (u.get("content_type") or "").strip().lower()
                 if ctype and ctype != "rpm":
                     continue
@@ -1904,12 +1942,24 @@ class Bodhi:
                   f"  ！读取 {src} 时 Bodhi 分页发生变化，审计不完整"))
         if truncated:
             self.truncated_src.add(src)
-        # never cache a failed query: an empty answer would blind later runs. A
-        # budget-cut one is not cached either - the next run may have the budget.
+        answer = {"cache_version": BODHI_CACHE_VERSION, "fetched_at": started,
+                  "total": total, "truncated": truncated, "updates": res}
         if cf and ok and not budget_cut and not inconsistent:
-            _cache_write(cf, {"cache_version": BODHI_CACHE_VERSION,
-                              "total": total, "truncated": truncated,
-                              "updates": res}, "Bodhi")
+            _cache_write(cf, answer, "Bodhi")
+        # Keep a budget-cut prefix separate from usable answers. Otherwise a
+        # source that has more pages than the per-run budget can never finish.
+        if (partial_path and budget_cut and ok and resumable and not inconsistent
+                and len(seen_aliases) == received < total):
+            _cache_write(partial_path, {**answer, "next_page": page, "pages": page_count,
+                                        "seen_aliases": sorted(seen_aliases)}, "Bodhi progress")
+        elif progress and (ok or inconsistent):
+            try:
+                os.unlink(partial_path)
+            except OSError:
+                pass
+        if progress and inconsistent:
+            # Changed pagination: do not present a blend of two collections.
+            res = []
         self._mem[key] = {"total": total, "truncated": truncated, "updates": res,
                           "unqueried": None if ok else "failed"}
         return res
