@@ -1647,10 +1647,17 @@ class Bodhi:
                 # one request; trusting it costs a wrong verdict.
                 if data.get("cache_version") != BODHI_CACHE_VERSION:
                     return None
-                if type(data.get("truncated")) is not bool or any(
+                total = data.get("total")
+                if (type(data.get("truncated")) is not bool
+                        or (total is not None and (type(total) is not int or total < 0))
+                        or any(
                         not isinstance(u, dict) or not isinstance(u.get("nvrs"), list)
                         or not isinstance(u.get("cves"), list)
                         or not isinstance(u.get("build_epochs"), dict)
+                        or any(not isinstance(k, str) or not k
+                               or not isinstance(val, str)
+                               or not re.fullmatch(r"[1-9][0-9]*", val)
+                               for k, val in u["build_epochs"].items())
                         or any(u.get(k) is not None and not isinstance(u[k], str)
                                for k in ("alias", "type", "status", "severity", "title", "notes"))
                         or not isinstance(u.get("bugs", []), list)
@@ -1658,7 +1665,7 @@ class Bodhi:
                                for b in u.get("bugs", []))
                         or any(n is not None and not isinstance(n, str) for n in u["nvrs"])
                         or any(not isinstance(c, str) for c in u["cves"])
-                        for u in data["updates"]):
+                        for u in data["updates"])):
                     return None
                 return data
             return None

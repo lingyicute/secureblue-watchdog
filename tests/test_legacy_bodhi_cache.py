@@ -54,3 +54,31 @@ class TestLegacyBodhiCache(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_invalid_cached_build_epochs_or_total_are_refetched(self):
+        base = {"cache_version": S.BODHI_CACHE_VERSION, "fetched_at": 10**9,
+                "total": 1, "truncated": False, "updates": [{
+                    "alias": "FEDORA-2026-1", "type": "security", "status": "stable",
+                    "severity": "high", "title": "", "notes": "", "cves": [],
+                    "bugs": [], "nvrs": ["re2-1-1.fc45"], "build_epochs": {"re2-1-1.fc45": "2"}}]}
+        cases = [
+            {"build_epochs": {"re2-1-1.fc45": "0"}},
+            {"build_epochs": {"re2-1-1.fc45": 2}},
+            {"build_epochs": {"re2-1-1.fc45": "abc"}},
+            {"build_epochs": {"re2-1-1.fc45": "02"}},
+            {"build_epochs": {"": "2"}},
+            {"total": True},
+            {"total": -1},
+        ]
+        for bad in cases:
+            with self.subTest(bad=bad), tempfile.TemporaryDirectory() as cache:
+                entry = json.loads(json.dumps(base))
+                if "total" in bad:
+                    entry["total"] = bad["total"]
+                else:
+                    entry["updates"][0]["build_epochs"] = bad["build_epochs"]
+                client = S.Bodhi(cache_dir=cache, max_calls=1, sleep=0)
+                cf = client._cf("re2-F45")
+                with open(cf, "w", encoding="utf-8") as fh:
+                    json.dump(entry, fh)
+                self.assertIsNone(client._read_cache_entry(cf))
