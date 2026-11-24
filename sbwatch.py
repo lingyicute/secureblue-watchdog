@@ -4753,28 +4753,30 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
         d = "sha256:" + hexdig
         if d in recs or d in branch_digests:
             continue
-        try:
-            img = resolve(reg, d, light=True)
-        except NoArchManifest:
-            # a push without this architecture (e.g. before arm64 was built) is
-            # no build of it; as a bare SystemExit it killed the whole scan
-            continue
-        except MalformedManifest:
-            probe_failures.append((d[:19] + "…", "malformed manifest"))
-            continue
-        except RegistryError as e:
-            if e.http_code != 404:   # a dangling .sig tag (404) is normal
-                probe_failures.append((d[:19] + "…", e.http_code or "network error"))
-            continue
-        except Exception as e:       # malformed manifest, JSON error, ...
-            probe_failures.append((d[:19] + "…", type(e).__name__))
+        def _hist_resolve(ref, *, light):
+            try:
+                return resolve(reg, ref, light=light)
+            except NoArchManifest:
+                # a push without this architecture (e.g. before arm64 was built) is
+                # no build of it; as a bare SystemExit it killed the whole scan
+                return None
+            except MalformedManifest:
+                probe_failures.append((ref[:19] + "…", "malformed manifest"))
+                return None
+            except RegistryError as e:
+                if e.http_code != 404:   # a dangling .sig tag (404) is normal
+                    probe_failures.append((ref[:19] + "…", e.http_code or "network error"))
+                return None
+            except Exception as e:       # malformed manifest, JSON error, ...
+                probe_failures.append((ref[:19] + "…", type(e).__name__))
+                return None
+
+        img = _hist_resolve(d, light=True)
+        if img is None:
             continue
         if not img.get("is_index"):
             # secureblue also publishes single-arch UKI images into this same repo
             # (latest-uki, 20260917-uki, ...); they are not builds of this image
-            continue
-        if stream_maj and not str((img.get("annotations") or {}).get(
-                "org.opencontainers.image.version") or "").startswith(stream_maj + "."):
             continue
         if chunked and rpmdb_chunk(img) is None:
             # ...and its integration-test images (`integrationtest-<sha>` tags):
@@ -4786,6 +4788,19 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
             # ever saved.
             continue
         candidate_time = _image_order(img)
+        if cur_time and candidate_time and candidate_time > cur_time:
+            continue
+        # Fedora CoreOS-based securecore manifests keep version in config Labels.
+        if ((not (img.get("annotations") or {}).get("org.opencontainers.image.version")
+                or (cur_time and not candidate_time))
+                and ((img.get("manifest") or {}).get("config") or {}).get("digest")):
+            img = _hist_resolve(d, light=False)
+            if img is None:
+                continue
+            candidate_time = _image_order(img)
+        if stream_maj and not str((img.get("annotations") or {}).get(
+                "org.opencontainers.image.version") or "").startswith(stream_maj + "."):
+            continue
         if cur_time and (not candidate_time or candidate_time > cur_time):
             # Signature publication and image creation can happen in different
             # orders. A later image should never use up a slot in this history.

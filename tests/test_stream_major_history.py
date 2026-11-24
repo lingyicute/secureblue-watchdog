@@ -65,5 +65,29 @@ class TestStreamMajorHistory(unittest.TestCase):
             self.assertEqual(doc["from"], "20260108-44")
 
 
+
+    def test_history_reads_config_when_manifest_omits_version_annotation(self):
+        # Live secureblue/securecore-main-hardened manifests omit
+        # org.opencontainers.image.version and carry it only in config Labels.
+        cur45 = _img("a", "45.20261118.2.1", "2026-11-24T07:10:24Z")
+        prev45_full = _img("b", "45.20261118.2.0", "2026-11-23T18:38:37Z")
+        prev44_full = _img("c", "44.20261104.2.0", "2026-11-22T12:00:00Z")
+        by_dig = {}
+        for full in (prev45_full, prev44_full):
+            light = {**full, "annotations": {},
+                     "manifest": {"config": {"digest": "sha256:" + "9" * 64}}}
+            by_dig[(full["digest"], True)] = light
+            by_dig[(full["digest"], False)] = full
+        tags = ["sha256-" + full["digest"][7:] + ".sig"
+                for full in (prev44_full, prev45_full)]
+        with patch.object(S, "list_tags", return_value=tags), \
+                patch.object(S, "resolve",
+                             side_effect=lambda reg, ref, light=False:
+                             dict(by_dig[(ref, light)], ref=ref)):
+            rows45 = S.build_history(None, scan=5, days=0, to="45", cur=cur45)
+        self.assertEqual([r["digest"] for r in rows45],
+                         [cur45["digest"], prev45_full["digest"]])
+        self.assertEqual(rows45[1]["version"], "45.20261118.2.0")
+
 if __name__ == "__main__":
     unittest.main()
