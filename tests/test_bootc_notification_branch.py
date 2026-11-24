@@ -8,6 +8,7 @@ of a diff - and that popup must not escalate the verdict, since it carries no
 information about the update itself. A table with neither package (a stripped
 fixture) stays on the rpm-ostree model.
 """
+from pathlib import Path
 import unittest
 
 from test_sbwatch import S, pkg
@@ -79,7 +80,7 @@ class TestBootcNotificationBranch(unittest.TestCase):
         self.assertEqual(pred["delivery"]["suppress_if_notified_today"], ["critical", "normal"])
 
     def test_do_diff_flags_a_bootc_only_old_image(self):
-        src = open(S.__file__, encoding="utf-8").read()
+        src = Path(S.__file__).read_text(encoding="utf-8")
         self.assertIn('diff["bootc_only_old"] = "bootc" in pa and "rpm-ostree" not in pa',
                       src)
 
