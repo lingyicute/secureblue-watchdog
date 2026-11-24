@@ -2615,7 +2615,7 @@ def crosscheck_chunks(ldiff: dict, diff: dict, src_of: dict | None = None,
         n = pk[0]
         if n in changed_versions or n in changed_src or src_of.get(n) in changed_src:
             continue
-        by_size[n] = max(by_size.get(n, 0), ch["size"])
+        by_size[n] = by_size.get(n, 0) + ch["size"]
     out["silent_rebuilds"] = sorted(by_size.items(), key=lambda kv: -kv[1])
     return out
 

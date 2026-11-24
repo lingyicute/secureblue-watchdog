@@ -18,5 +18,14 @@ class TestSilentRebuildMovedSrc(unittest.TestCase):
         self.assertEqual(xc["silent_rebuilds"], [])
 
 
+
+    def test_multiple_changed_single_package_chunks_sum_their_sizes(self):
+        ldiff = {"changed_chunks": [
+            {"components": ["rpm/glibc"], "size": 300, "stability": 0},
+            {"components": ["rpm/glibc"], "size": 200, "stability": 0},
+        ]}
+        xc = S.crosscheck_chunks(ldiff, {"changed": [], "added": [], "removed": []})
+        self.assertEqual(xc["silent_rebuilds"], [("glibc", 500)])
+
 if __name__ == "__main__":
     unittest.main()
