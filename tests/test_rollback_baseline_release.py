@@ -63,3 +63,20 @@ class TestRollbackBaselineRelease(unittest.TestCase):
         res = compare(Bodhi(None))
         self.assertTrue(S._analysis_needs_retry(res))
         self.assertEqual(res["verdict"]["secureblue_notification"]["level"], "none")
+
+    def test_same_release_downgrade_to_third_party_keeps_left_erratum(self):
+        old_pkg = {**pkg("bubblewrap", "0.14.0-1.fc45"), "vendor": "Fedora Project"}
+        new_pkg = {**pkg("bubblewrap", "0.13.1-1.restricted"), "vendor": "Fedora Copr - user secureblue"}
+        adv = {"alias": "FEDORA-2026-bwrap01", "type": "security", "status": "stable",
+               "severity": "high", "title": "bubblewrap security update", "notes": "",
+               "cves": [], "bugs": [], "build_epochs": {}, "nvrs": ["bubblewrap-0.14.0-1.fc45"]}
+        bodhi = Bodhi([adv])
+        a = {"ref": "F45-old", "annotations": {"org.opencontainers.image.version": "45.20261123.0"}, "digest": "old", "layers": []}
+        b = {"ref": "F45-new", "annotations": {"org.opencontainers.image.version": "45.20261124.0"}, "digest": "new", "layers": []}
+        args = SimpleNamespace(exact=1, keep_order=True, no_bodhi=False, max_bodhi=2, cache_dir=None)
+        with patch.object(S, "load_pkglist", side_effect=[{"bubblewrap": old_pkg}, {"bubblewrap": new_pkg}]), \
+                patch.object(S, "Bodhi", return_value=bodhi):
+            res = S.do_diff(args, "F45-old", "F45-new", images=(a, b), reg=SimpleNamespace(_token=lambda: None))
+        self.assertEqual(bodhi.queries, [("bubblewrap", "F45")])
+        self.assertEqual(res["verdict"]["errata_reverted"], ["FEDORA-2026-bwrap01"])
+        self.assertEqual(res["diff"]["changed"][0]["cls"]["already_had"][0]["alias"], "FEDORA-2026-bwrap01")

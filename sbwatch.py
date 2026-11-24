@@ -2433,7 +2433,8 @@ def _add_rollback_baseline_errata(changed: list, baseline_release: str, release:
         if c["dir"] != "downgrade":
             continue
         old, new = c["old"], c["new"]
-        if (old["src"], baseline_release) == (new["src"], release):
+        new_searched = not _is_third_party(new) or bool(nvr_candidates_split(new)[1])
+        if new_searched and (old["src"], baseline_release) == (new["src"], release):
             continue  # classify_change already searched this scope
         old_nvrs, new_nvrs = eligible_nvrs(old), eligible_nvrs(new)
         if not old_nvrs:
