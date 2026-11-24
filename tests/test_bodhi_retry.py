@@ -18,13 +18,13 @@ def _ask(outcomes, **kwargs):
             {"total": 1, "updates": [{"alias": "FEDORA-2026-1", "builds": []}]}).encode())
 
     bodhi = S.Bodhi(cache_dir=None, sleep=0, **kwargs)
-    saved = S.urllib.request.urlopen
-    S.urllib.request.urlopen = fake
+    saved = S._OPENER.open
+    S._OPENER.open = fake
     try:
         with contextlib.redirect_stderr(io.StringIO()):
             updates = bodhi.updates_for_src("curl", "F45")
     finally:
-        S.urllib.request.urlopen = saved
+        S._OPENER.open = saved
     return bodhi, updates, calls
 
 

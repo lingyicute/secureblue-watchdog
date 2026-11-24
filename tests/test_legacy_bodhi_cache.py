@@ -25,7 +25,7 @@ class TestLegacyBodhiCache(unittest.TestCase):
             doc = {"total": 1, "updates": [{"alias": "FEDORA-2026-test", "type": "security",
                     "status": "stable", "severity": "high", "builds": [],
                     "notes": "x" * 1600 + " CVE-2026-12345", "bugs": []}]}
-            with patch.object(S.urllib.request, "urlopen",
+            with patch.object(S._OPENER, "open",
                               return_value=io.BytesIO(json.dumps(doc).encode())) as request:
                 updates = bodhi.updates_for_src("webkitgtk", "F45")
                 self.assertEqual(updates[0]["cves"], ["CVE-2026-12345"])
@@ -39,7 +39,7 @@ class TestLegacyBodhiCache(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             self._legacy(directory)
             bodhi = S.Bodhi(cache_dir=directory, max_calls=0)
-            with patch.object(S.urllib.request, "urlopen", side_effect=AssertionError("network")):
+            with patch.object(S._OPENER, "open", side_effect=AssertionError("network")):
                 self.assertEqual(bodhi.updates_for_src("webkitgtk", "F45"), [])
             self.assertEqual(bodhi.skipped, 1)
 

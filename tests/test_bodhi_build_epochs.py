@@ -19,7 +19,7 @@ RE2 = {"name": "re2", "version": "20251105", "release": "19.fc45", "epoch": "2",
 def _bodhi(*updates):
     """Serve `updates` as Bodhi's /updates/ answer to the real client."""
     data = json.dumps({"updates": list(updates), "total": len(updates)}).encode()
-    return patch.object(S.urllib.request, "urlopen", return_value=_FakeResp(data))
+    return patch.object(S._OPENER, "open", return_value=_FakeResp(data))
 
 
 def _security(nvr, epoch, alias="FEDORA-2026-0000000000"):
@@ -34,7 +34,7 @@ class TestBuildEpochs(unittest.TestCase):
             "severity": "high", "builds": [{"nvr": "re2-20251105-19.fc45", "epoch": "02"}],
         }], "total": 1}).encode()
         client = S.Bodhi(cache_dir=None, sleep=0)
-        with patch.object(S.urllib.request, "urlopen", return_value=_FakeResp(data)):
+        with patch.object(S._OPENER, "open", return_value=_FakeResp(data)):
             updates = client.updates_for_src("re2", "F45")
         self.assertEqual(updates[0]["build_epochs"], {"re2-20251105-19.fc45": "2"})
 

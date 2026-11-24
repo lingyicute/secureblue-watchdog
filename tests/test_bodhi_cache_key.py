@@ -33,7 +33,7 @@ class TestBodhiCacheKey(unittest.TestCase):
             return io.BytesIO(json.dumps(answers.pop(0)).encode())
 
         with tempfile.TemporaryDirectory() as directory, \
-                patch.object(S.urllib.request, "urlopen", side_effect=urlopen):
+                patch.object(S._OPENER, "open", side_effect=urlopen):
             first = S.Bodhi(cache_dir=directory, sleep=0).updates_for_src("foo-bar", "F45")
             second = S.Bodhi(cache_dir=directory, sleep=0).updates_for_src("foo_bar", "F45")
         self.assertEqual([u["alias"] for u in first], ["FEDORA-2026-foobar"])

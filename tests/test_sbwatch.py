@@ -678,15 +678,15 @@ class TestBodhiPagination(unittest.TestCase):
 
     def _run(self, total, max_pages=None, max_calls=99, cache_dir=None):
         b = S.Bodhi(cache_dir=cache_dir, max_calls=max_calls, sleep=0)
-        orig_open, orig_max = S.urllib.request.urlopen, S.MAX_BODHI_PAGES
+        orig_open, orig_max = S._OPENER.open, S.MAX_BODHI_PAGES
         fake = self.FakeHTTP(total)
-        S.urllib.request.urlopen = fake
+        S._OPENER.open = fake
         if max_pages:
             S.MAX_BODHI_PAGES = max_pages
         try:
             ups = b.updates_for_src("kernel", "F44")
         finally:
-            S.urllib.request.urlopen = orig_open
+            S._OPENER.open = orig_open
             S.MAX_BODHI_PAGES = orig_max
         return ups, b, fake
 
@@ -707,12 +707,12 @@ class TestBodhiPagination(unittest.TestCase):
             "alias": "FEDORA-2026-titlecve", "type": "security", "severity": "high",
             "status": "stable", "title": "foo: fix CVE-2026-4242", "notes": "",
             "bugs": [], "builds": [{"nvr": "foo-1.0-1.fc44"}]}]}).encode()
-        orig = S.urllib.request.urlopen
-        S.urllib.request.urlopen = lambda url, timeout=None: _FakeResp(body)
+        orig = S._OPENER.open
+        S._OPENER.open = lambda url, timeout=None: _FakeResp(body)
         try:
             ups = b.updates_for_src("foo", "F44")
         finally:
-            S.urllib.request.urlopen = orig
+            S._OPENER.open = orig
         self.assertEqual(ups[0]["cves"], ["CVE-2026-4242"])
 
     def test_hitting_the_page_bound_is_reported_not_hidden(self):
@@ -3516,14 +3516,14 @@ class TestBodhiGivesUpWhenItIsDown(unittest.TestCase):
 
     def _ask(self, b, fake, n):
         import contextlib
-        saved = S.urllib.request.urlopen
-        S.urllib.request.urlopen = fake
+        saved = S._OPENER.open
+        S._OPENER.open = fake
         try:
             with contextlib.redirect_stderr(io.StringIO()):
                 for i in range(n):
                     self.assertEqual(b.updates_for_src(f"src{i}", "F44"), [])
         finally:
-            S.urllib.request.urlopen = saved
+            S._OPENER.open = saved
 
     def test_stops_asking_after_consecutive_failures_but_counts_them(self):
         b, calls, fake = self._bodhi([False])

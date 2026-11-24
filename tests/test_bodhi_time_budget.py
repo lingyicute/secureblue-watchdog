@@ -36,7 +36,7 @@ class TestBodhiTimeBudget(unittest.TestCase):
                 clock.return_value = 15
                 raise TimeoutError
 
-            with patch.object(S.urllib.request, "urlopen", side_effect=timeout) as request:
+            with patch.object(S._OPENER, "open", side_effect=timeout) as request:
                 self.assertEqual(client.updates_for_src("curl", "F45"), [])
             self.assertEqual(request.call_count, 1)
             self.assertEqual(client.failed, 1)

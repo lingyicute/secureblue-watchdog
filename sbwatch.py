@@ -1737,7 +1737,7 @@ class Bodhi:
                 raise BodhiTimeLimit
             self.calls += 1
             try:
-                with urllib.request.urlopen(url, timeout=min(40, remaining)) as r:
+                with _OPENER.open(url, timeout=min(40, remaining)) as r:
                     cl = _content_length(getattr(r, "headers", None))
                     if cl is not None and cl > MAX_JSON_BYTES:
                         raise ValueError(f"Bodhi response exceeds {human(MAX_JSON_BYTES)}")

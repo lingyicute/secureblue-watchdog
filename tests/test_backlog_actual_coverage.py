@@ -22,7 +22,7 @@ class TestBacklogActualCoverage(unittest.TestCase):
     def test_budget_skipped_candidates_are_not_counted_as_queried(self):
         bodhi = S.Bodhi(cache_dir=None, sleep=0, max_calls=2)
         pkgs = {s: pkg(s, "1.0-1.fc45") for s in ("curl", "glibc", "kernel", "nss", "openssl")}
-        with patch("urllib.request.urlopen", side_effect=_empty_page):
+        with patch.object(S._OPENER, "open", side_effect=_empty_page):
             _rows, cov = S.security_backlog(pkgs, "F45", bodhi, limit=10)
         self.assertEqual((cov["candidates"], cov["checked"], cov["skipped_queries"]), (5, 2, 3))
         line = S.coverage_line(cov)
@@ -32,7 +32,7 @@ class TestBacklogActualCoverage(unittest.TestCase):
 
     def test_failed_lookups_are_excluded_and_diff_failures_stay_separate(self):
         bodhi = S.Bodhi(cache_dir=None, sleep=0, max_calls=10)
-        with patch("urllib.request.urlopen", side_effect=OSError("down")), \
+        with patch.object(S._OPENER, "open", side_effect=OSError("down")), \
                 contextlib.redirect_stderr(io.StringIO()):
             bodhi.updates_for_src("adw-gtk3-theme", "F45")
             _rows, cov = S.security_backlog({"curl": pkg("curl", "8.9-1.fc45")}, "F45", bodhi)

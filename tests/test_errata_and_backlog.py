@@ -42,7 +42,7 @@ class TestErrataAndBacklog(unittest.TestCase):
 
     def test_bodhi_malformed_json_payload_counts_as_failed_lookup(self):
         bodhi = S.Bodhi(cache_dir=None, sleep=0, max_calls=3)
-        with patch.object(S.urllib.request, "urlopen",
+        with patch.object(S._OPENER, "open",
                           return_value=io.BytesIO(b'["not", "a", "dict"]')),                 contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(bodhi.updates_for_src("kernel", "F45"), [])
         self.assertEqual(bodhi.failed, 1)

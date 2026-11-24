@@ -18,7 +18,7 @@ class TestBodhiResponseContract(unittest.TestCase):
         for doc in cases:
             with self.subTest(doc=doc), tempfile.TemporaryDirectory() as td:
                 api = S.Bodhi(cache_dir=td, sleep=0, max_calls=1)
-                with patch.object(S.urllib.request, "urlopen", return_value=_FakeResp(json.dumps(doc).encode())):
+                with patch.object(S._OPENER, "open", return_value=_FakeResp(json.dumps(doc).encode())):
                     self.assertEqual(api.updates_for_src("dnf5", "F45"), [])
                 self.assertEqual(api.failed, 1)
                 self.assertFalse(list(Path(td).glob("*.json")))
@@ -26,7 +26,7 @@ class TestBodhiResponseContract(unittest.TestCase):
     def test_valid_empty_response_is_cacheable(self):
         with tempfile.TemporaryDirectory() as td:
             api = S.Bodhi(cache_dir=td, sleep=0, max_calls=1)
-            with patch.object(S.urllib.request, "urlopen", return_value=_FakeResp(b'{"updates": [], "total": 0}')):
+            with patch.object(S._OPENER, "open", return_value=_FakeResp(b'{"updates": [], "total": 0}')):
                 self.assertEqual(api.updates_for_src("dnf5", "F45"), [])
             self.assertEqual(api.failed, 0)
             self.assertTrue(list(Path(td).glob("*.json")))

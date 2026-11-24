@@ -36,7 +36,7 @@ class TestWatchDirection(unittest.TestCase):
             with patch.object(S.Registry, "_token", return_value=None), \
                     patch.object(S, "resolve", side_effect=resolve), \
                     patch.object(S, "load_pkglist", side_effect=packages), \
-                    patch.object(S.urllib.request, "urlopen", side_effect=AssertionError("network")), \
+                    patch.object(S._OPENER, "open", side_effect=AssertionError("network")), \
                     patch.object(S._OPENER, "open", side_effect=AssertionError("network")), \
                     patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}), \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):

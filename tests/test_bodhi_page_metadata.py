@@ -11,7 +11,7 @@ class TestBodhiPageMetadata(unittest.TestCase):
     def ask(self, documents, directory=None):
         client = S.Bodhi(cache_dir=directory, sleep=0, max_calls=len(documents))
         responses = [_FakeResp(json.dumps(d).encode()) for d in documents]
-        with patch.object(S.urllib.request, "urlopen", side_effect=responses):
+        with patch.object(S._OPENER, "open", side_effect=responses):
             result = client.updates_for_src("dnf5", "F45")
         return client, result
 

@@ -36,7 +36,7 @@ class TestIncompleteCheckRetry(unittest.TestCase):
                     patch.object(S, "resolve", side_effect=resolve), \
                     patch.object(S, "load_pkglist", side_effect=packages), \
                     patch.object(S.time, "sleep"), \
-                    patch.object(S.urllib.request, "urlopen", side_effect=lambda *a, **kw: _FakeResp(
+                    patch.object(S._OPENER, "open", side_effect=lambda *a, **kw: _FakeResp(
                         b'{"updates": [], "total": 0}')) as http, \
                     patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}), \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -136,7 +136,7 @@ class TestIncompleteCheckRetry(unittest.TestCase):
             with patch.object(S.Registry, "_token", return_value=None), \
                     patch.object(S, "resolve", side_effect=lambda reg, ref: dict(images[ref], ref=ref)), \
                     patch.object(S, "load_pkglist", side_effect=packages), \
-                    patch.object(S.urllib.request, "urlopen", side_effect=lambda *a, **kw: _FakeResp(
+                    patch.object(S._OPENER, "open", side_effect=lambda *a, **kw: _FakeResp(
                         b'{"updates": [], "total": 0}')) as http, \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(check("--no-bodhi")["bodhi_state"], {"disabled": 1})

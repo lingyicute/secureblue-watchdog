@@ -23,7 +23,7 @@ class TestBodhiSizeCap(unittest.TestCase):
 
         bodhi = S.Bodhi(cache_dir=None, max_calls=2, sleep=0)
         with patch.object(S, "MAX_JSON_BYTES", 64), \
-                patch.object(S.urllib.request, "urlopen", return_value=_Huge()), \
+                patch.object(S._OPENER, "open", return_value=_Huge()), \
                 contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(bodhi.updates_for_src("kernel", "F45"), [])
         self.assertEqual(bodhi.failed, 1)

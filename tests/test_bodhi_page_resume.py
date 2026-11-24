@@ -19,7 +19,7 @@ class TestBodhiPageResume(unittest.TestCase):
 
         client = S.Bodhi(cache_dir=cache, max_calls=1, sleep=0)
         with patch.object(S.time, "time", return_value=now), \
-                patch.object(S.urllib.request, "urlopen", side_effect=respond):
+                patch.object(S._OPENER, "open", side_effect=respond):
             rows = client.updates_for_src("kernel", "F44")
         return client, [row["alias"] for row in rows]
 

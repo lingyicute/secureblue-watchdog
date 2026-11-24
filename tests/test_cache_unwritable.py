@@ -47,7 +47,7 @@ class TestUnwritableCache(unittest.TestCase):
 
     def test_bodhi_answers_without_a_usable_cache_directory(self):
         with tempfile.TemporaryDirectory() as d, \
-                patch.object(S.urllib.request, "urlopen", return_value=_bodhi_answer()), \
+                patch.object(S._OPENER, "open", return_value=_bodhi_answer()), \
                 contextlib.redirect_stderr(io.StringIO()) as err:
             bodhi = S.Bodhi(cache_dir=_blocked(d), sleep=0)
             self.assertEqual(bodhi.updates_for_src("curl", "F45"), [])
@@ -56,7 +56,7 @@ class TestUnwritableCache(unittest.TestCase):
 
     def test_bodhi_answers_when_its_cache_file_cannot_be_written(self):
         with tempfile.TemporaryDirectory() as d, \
-                patch.object(S.urllib.request, "urlopen", return_value=_bodhi_answer()), \
+                patch.object(S._OPENER, "open", return_value=_bodhi_answer()), \
                 patch.object(S, "_atomic_write_json", side_effect=OSError(30, "Read-only")), \
                 contextlib.redirect_stderr(io.StringIO()) as err:
             bodhi = S.Bodhi(cache_dir=d, sleep=0)
