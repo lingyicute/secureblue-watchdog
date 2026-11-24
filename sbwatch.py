@@ -3806,8 +3806,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W(f"| 内核（`ostree.linux` 注解，来自 Fedora 基础镜像） | {_md_cell(a['annotations'].get('ostree.linux', '?'))} | {_md_cell(b['annotations'].get('ostree.linux', '?'))} |")
         if any(kernel_evr):
             W(f"| `kernel` 软件包（rpmdb，实际安装的内核） | {_md_cell(kernel_evr[0] or '—')} | {_md_cell(kernel_evr[1] or '—')} |")
-        W(f"| rpm-ostree 输入哈希 | `{clip_hash(a['annotations'].get('rpmostree.inputhash') or '—', 12)}` | `{clip_hash(b['annotations'].get('rpmostree.inputhash') or '—', 12)}` |")
-        W(f"| ostree 提交 | `{clip_hash(a['annotations'].get('ostree.commit') or '—', 12)}` | `{clip_hash(b['annotations'].get('ostree.commit') or '—', 12)}` |")
+        W(f"| rpm-ostree 输入哈希 | `{_md_cell(clip_hash(a['annotations'].get('rpmostree.inputhash') or '—', 12))}` | `{_md_cell(clip_hash(b['annotations'].get('rpmostree.inputhash') or '—', 12))}` |")
+        W(f"| ostree 提交 | `{_md_cell(clip_hash(a['annotations'].get('ostree.commit') or '—', 12))}` | `{_md_cell(clip_hash(b['annotations'].get('ostree.commit') or '—', 12))}` |")
         W(f"| 镜像摘要 (manifest) | `{a['digest'][:19]}…` | `{b['digest'][:19]}…` |")
         W(f"| 镜像内软件包数 | {diff.get('count_a', '?')} | {diff.get('count_b', '?')} |")
     else:
@@ -3819,8 +3819,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W(f"| kernel (`ostree.linux` annotation, from the Fedora base) | {_md_cell(a['annotations'].get('ostree.linux', '?'))} | {_md_cell(b['annotations'].get('ostree.linux', '?'))} |")
         if any(kernel_evr):
             W(f"| `kernel` package (rpmdb, the kernel actually installed) | {_md_cell(kernel_evr[0] or '—')} | {_md_cell(kernel_evr[1] or '—')} |")
-        W(f"| rpm-ostree inputhash | `{clip_hash(a['annotations'].get('rpmostree.inputhash') or '—', 12)}` | `{clip_hash(b['annotations'].get('rpmostree.inputhash') or '—', 12)}` |")
-        W(f"| ostree.commit | `{clip_hash(a['annotations'].get('ostree.commit') or '—', 12)}` | `{clip_hash(b['annotations'].get('ostree.commit') or '—', 12)}` |")
+        W(f"| rpm-ostree inputhash | `{_md_cell(clip_hash(a['annotations'].get('rpmostree.inputhash') or '—', 12))}` | `{_md_cell(clip_hash(b['annotations'].get('rpmostree.inputhash') or '—', 12))}` |")
+        W(f"| ostree.commit | `{_md_cell(clip_hash(a['annotations'].get('ostree.commit') or '—', 12))}` | `{_md_cell(clip_hash(b['annotations'].get('ostree.commit') or '—', 12))}` |")
         W(f"| manifest digest | `{a['digest'][:19]}…` | `{b['digest'][:19]}…` |")
         W(f"| packages in image | {diff.get('count_a', '?')} | {diff.get('count_b', '?')} |")
     W("")

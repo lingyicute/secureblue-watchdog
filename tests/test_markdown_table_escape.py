@@ -53,5 +53,19 @@ class TestMarkdownTableEscape(unittest.TestCase):
         self.assertIn("| rpm-ostree inputhash | `—` | `—` |", md)
         self.assertNotIn("``", md)
 
+
+    def test_pipe_and_newline_in_inputhash_and_commit_cells_are_escaped(self):
+        a = {"ref": "a", "digest": "sha256:" + "1" * 64, "created": "2026-11-16T00:00:00Z",
+             "annotations": {"rpmostree.inputhash": "ab|cd\nef",
+                             "ostree.commit": "12|34\n56"}}
+        diff = {"added": [], "removed": [], "downgrades": [], "changed": [],
+                "count_a": 1, "count_b": 1}
+        md = S.render_markdown("s", a, a, diff, LD, S.verdict_of(diff, LD, {}), [])
+        for prefix in ("| rpm-ostree inputhash |", "| ostree.commit |",
+                       "| rpm-ostree 输入哈希 |", "| ostree 提交 |"):
+            rows = [ln for ln in md.splitlines() if ln.startswith(prefix)]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].replace(r"\|", "").count("|"), 4)
+
 if __name__ == "__main__":
     unittest.main()
