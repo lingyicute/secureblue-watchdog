@@ -27,3 +27,9 @@ class TestOutputPathConflicts(unittest.TestCase):
 
     def test_diff_formats_cannot_share_a_file(self):
         self._reject(["diff", "a", "b", "--markdown", "same", "--json-out", "./same"])
+
+    def test_diff_json_dash_cannot_share_redirected_stdout_file_with_markdown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "both.out"
+            with out.open("w", encoding="utf-8") as fh, patch.object(S.sys, "stdout", fh):
+                self._reject(["diff", "a", "b", "--markdown", str(out), "--json-out", "-"])

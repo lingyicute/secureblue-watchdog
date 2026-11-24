@@ -6236,6 +6236,7 @@ def add_common(p):
 def _check_output_paths(parser, args):
     """Fail before any network work if two outputs can overwrite each other."""
     paths = {}
+    extra_keys = []
     if args.cmd == "check":
         report = args.report or "report.md"
         paths = {"--report": report, "report JSON": report + ".json",
@@ -6247,7 +6248,14 @@ def _check_output_paths(parser, args):
                            "Markdown 与 JSON 不能同时写入标准输出"))
         paths = {"--markdown": args.markdown,
                  "--json-out": None if args.json_out == "-" else args.json_out}
+        if args.json_out == "-":
+            try:
+                st = os.fstat(sys.stdout.fileno())
+                extra_keys.append(("--json-out", ((st.st_dev, st.st_ino),)))
+            except (OSError, ValueError, AttributeError):
+                pass
     seen = {}
+    items = []
     for option, path in paths.items():
         if not path:
             continue
@@ -6257,6 +6265,9 @@ def _check_output_paths(parser, args):
             keys = (canonical, (st.st_dev, st.st_ino))
         except OSError:
             keys = (canonical,)
+        items.append((option, keys))
+    items.extend(extra_keys)
+    for option, keys in items:
         for key in keys:
             if key in seen:
                 other = seen[key]
