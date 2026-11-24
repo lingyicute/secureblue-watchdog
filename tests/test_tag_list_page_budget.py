@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import unittest
+from unittest.mock import patch
 
 from test_sbwatch import S
 
@@ -43,6 +44,21 @@ class TestTagListPageBudget(unittest.TestCase):
         self.assertEqual(len(tags), 13)
         self.assertEqual(tags[-1], "build13")
         self.assertNotIn("capped", log)
+
+    def test_incomplete_tag_discovery_is_included_in_history_report_warnings(self):
+        reg = S.Registry("ghcr.io/x/y")
+        reg._token = lambda: None
+        digest = "sha256:" + "a" * 64
+        cur = {"index_digest": digest, "digest": digest, "annotations": {},
+               "layers": [], "created": "2026-11-23T19:00:41Z"}
+        with patch.object(S, "_OPENER", _Pages(2)), contextlib.redirect_stderr(io.StringIO()):
+            tags = S.list_tags(reg, max_pages=1)
+        self.assertEqual(tags, ["build1"])
+        warnings = []
+        with patch.object(S, "list_tags", return_value=tags):
+            self.assertEqual(len(S.build_history(reg, cur=cur, warn=warnings)), 1)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("newest tags may be missing", warnings[0])
 
     def test_the_default_budget_leaves_years_of_headroom(self):
         self.assertGreaterEqual(S.TAG_LIST_MAX_PAGES, 50)

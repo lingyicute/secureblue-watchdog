@@ -4432,9 +4432,21 @@ def _stream_major(tag, cur: dict | None = None) -> str:
     return maj if ver.startswith(maj + ".") else ""
 
 
+class _TagList(list):
+    """Tag strings plus any evidence that discovery did not read every page."""
+
+    def __init__(self):
+        super().__init__()
+        self.warnings = []
+
+    def warn(self, msg):
+        self.warnings.append(msg)
+        log("  ! " + msg)
+
+
 def list_tags(reg: Registry, max_pages: int = TAG_LIST_MAX_PAGES) -> list:
     """All tags of the repo. ghcr returns them in push order; pages via Link header."""
-    out, url = [], f"https://{reg.host}/v2/{reg.repo}/tags/list?n=1000"
+    out, url = _TagList(), f"https://{reg.host}/v2/{reg.repo}/tags/list?n=1000"
     pages_done = 0
     for _ in range(max_pages):
         page = hdrs = None
@@ -4468,9 +4480,9 @@ def list_tags(reg: Registry, max_pages: int = TAG_LIST_MAX_PAGES) -> list:
                 if attempt == TAG_LIST_RETRIES - 1:
                     # silent truncation here would quietly shorten the build history
                     # and can make `check` pick a wrong baseline, so say so loudly
-                    log(T(f"  ! tag list stopped after {attempt + 1} tries at page "
+                    out.warn(T(f"tag list stopped after {attempt + 1} tries at page "
                           f"{pages_done + 1} ({e}) - history may be incomplete",
-                          f"  ！tag 列表在第 {pages_done + 1} 页重试 {attempt + 1} 次后中止（{e}）"
+                          f"tag 列表在第 {pages_done + 1} 页重试 {attempt + 1} 次后中止（{e}）"
                           f"——历史记录可能不完整"))
                 else:
                     time.sleep(1.5 * (attempt + 1))
@@ -4489,16 +4501,16 @@ def list_tags(reg: Registry, max_pages: int = TAG_LIST_MAX_PAGES) -> list:
             if (target.scheme, target.netloc.lower()) != ("https", reg.host.lower()):
                 raise ValueError("pagination left the registry origin")
         except ValueError:
-            log(T("  ! unsafe tag pagination link refused - history may be incomplete",
-                  "  ！已拒绝不安全的 tag 分页链接——历史记录可能不完整"))
+            out.warn(T("unsafe tag pagination link refused - history may be incomplete",
+                  "已拒绝不安全的 tag 分页链接——历史记录可能不完整"))
             break
         url = next_url
     else:
         # Every allowed page was read and the registry still offered another one.
         # ghcr lists tags in push order, so a capped walk loses the NEWEST builds.
-        log(T(f"  ! tag list capped at {max_pages} pages ({len(out)} tags) - the newest "
+        out.warn(T(f"tag list capped at {max_pages} pages ({len(out)} tags) - the newest "
               f"tags may be missing, history may be incomplete",
-              f"  ！tag 列表在第 {max_pages} 页（共 {len(out)} 个 tag）处被截断——"
+              f"tag 列表在第 {max_pages} 页（共 {len(out)} 个 tag）处被截断——"
               f"可能缺少最新的 tag，历史记录可能不完整"))
     return out
 
@@ -4521,6 +4533,8 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
     trips and, if the tag moved in between, anchored the history on another build.
     """
     tags = list_tags(reg)
+    if warn is not None:
+        warn.extend(getattr(tags, "warnings", ()))
     if cur is None:
         cur = resolve(reg, to)
     # does the watched image carry the chunkah layout this tool diffs by?
@@ -4539,8 +4553,11 @@ def build_history(reg: Registry, scan: int = 12, days: int = 7,
         if bt != watched_tag and bt.startswith(("br-", "pr-")) and not bt.endswith("-uki"):
             try:
                 branch_digests.add(reg.index_digest(bt))
-            except (Exception, RegistryError):
-                continue
+            except RegistryError as e:
+                if e.http_code != 404:
+                    probe_failures.append((bt, e.http_code or "network error"))
+            except Exception as e:
+                probe_failures.append((bt, type(e).__name__))
     sigs = [m.group(1) for m in (SIGTAG_RE.match(t) for t in tags) if m]
     recs: dict = {cur["index_digest"]: {
         "digest": cur["index_digest"], "platform_digest": cur.get("digest"),
