@@ -478,6 +478,9 @@ still available and maps to the saved platform; otherwise the resolved platform
 manifest is the top-level reference.
 Both `diff` and `check` exports include added and removed packages, old/new
 architectures, available advisory evidence, and any RPM inventory issues.
+For machine use, `changed[].old_nevra`, `changed[].new_nevra`, `added_nevra` and
+`removed_nevra` give the five identity fields, including an unchanged nonzero
+`epoch`. The `old`/`new` display strings and the name-only lists are retained.
 
 Notification levels describe eligibility, not observed delivery. The upstream
 script checks a per-user critical stamp before either update backend and also

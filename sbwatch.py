@@ -2425,6 +2425,12 @@ def _epoch(e: dict) -> str:
     return str(e.get("epoch") or "0")
 
 
+def _nevra(e: dict) -> dict:
+    """Exact package identity for JSON, independent of display formatting."""
+    return {**{k: e.get(k) for k in ("name", "version", "release", "arch")},
+            "epoch": _epoch(e)}
+
+
 def _evr_pair(old: dict, new: dict) -> tuple[str, str]:
     """(old_evr, new_evr), prefixed with their epochs when the epoch moved."""
     oe, ne = old["evr"], new["evr"]
@@ -2460,9 +2466,12 @@ def pkg_diff(pa: dict, pb: dict) -> dict:
         changed.append({"name": n, "old": x, "new": y, "src": y["src"],
                         "dir": ("downgrade" if d > 0 else "upgrade" if d < 0
                                 else "arch-change" if arch_changed else "rebuild")})
+    added, removed = sorted(keys_b - keys_a), sorted(keys_a - keys_b)
     return {
-        "added": sorted(keys_b - keys_a),
-        "removed": sorted(keys_a - keys_b),
+        "added": added,
+        "removed": removed,
+        "added_nevra": [_nevra(pb[n]) for n in added],
+        "removed_nevra": [_nevra(pa[n]) for n in removed],
         "changed": changed,
         "downgrades": [c for c in changed if c["dir"] == "downgrade"],
         "count_a": len(pa), "count_b": len(pb),
@@ -5469,6 +5478,7 @@ def _comparison_json(res: dict, from_label=None, to_label=None) -> dict:
         is_down = c.get("dir") == "downgrade"
         old, new = _evr_pair(c["old"], c["new"])
         changed.append({"name": c["name"], "old": old, "new": new, "src": c["src"],
+                        "old_nevra": _nevra(c["old"]), "new_nevra": _nevra(c["new"]),
                         "old_arch": c["old"].get("arch"), "new_arch": c["new"].get("arch"),
                         "dir": c["dir"], "security": False if is_down else bool(cls.get("security")),
                         "cves": [] if is_down else cls.get("cves", []),
@@ -5495,6 +5505,7 @@ def _comparison_json(res: dict, from_label=None, to_label=None) -> dict:
             "rpmdb_issues": d.get("rpmdb_issues"),
             "changelog_scan_incomplete": d.get("changelog_scan_incomplete", []),
             "changed": changed, "added": d.get("added", []), "removed": d.get("removed", []),
+            "added_nevra": d.get("added_nevra", []), "removed_nevra": d.get("removed_nevra", []),
             "silent_rebuilds": xc.get("silent_rebuilds", []),
             "behind_stable_security": res.get("backlog") or [],
             "backlog_coverage": res.get("backlog_coverage")}
