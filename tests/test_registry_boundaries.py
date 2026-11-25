@@ -1,5 +1,6 @@
 """Offline checks for registry credential and pagination boundaries."""
 import contextlib
+import email.message
 import io
 import json
 import unittest
@@ -112,6 +113,26 @@ class TestRegistryBoundaries(unittest.TestCase):
         with patch.object(reg, "_token", return_value=None), \
                 patch.object(S._OPENER, "open", side_effect=fake_open):
             self.assertEqual(list(S.list_tags(reg)), ["a", "b", "c"])
+
+    def test_list_tags_reads_all_link_headers_and_quoted_params(self):
+        reg = S.Registry("ghcr.io/x/y")
+        h1 = email.message.Message()
+        h1["Link"] = '</v2/x/y/tags/list?last=wrong>; title="; rel=next"; rel="prev"'
+        h1["Link"] = '</v2/x/y/tags/list?last=a>; title="page 2, next"; rel="next"'
+        pages = [(b'{"tags": ["a"]}', h1), (b'{"tags": ["b"]}', email.message.Message())]
+        seen = []
+
+        def fake_open(req, timeout=None):
+            seen.append(req.full_url)
+            body, headers = pages[len(seen) - 1]
+            resp = io.BytesIO(body)
+            resp.headers = headers
+            return resp
+
+        with patch.object(reg, "_token", return_value=None), \
+                patch.object(S._OPENER, "open", side_effect=fake_open):
+            self.assertEqual(list(S.list_tags(reg)), ["a", "b"])
+        self.assertEqual(seen[1], "https://ghcr.io/v2/x/y/tags/list?last=a")
 
 
 if __name__ == "__main__":

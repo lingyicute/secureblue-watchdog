@@ -4662,13 +4662,22 @@ def list_tags(reg: Registry, max_pages: int = TAG_LIST_MAX_PAGES) -> list:
         pages_done += 1
         out += page.get("tags", []) or []
         nxt = None
-        for link_m in re.finditer(r"<([^>]+)>((?:\s*;[^,<]*)*)", hdrs.get("Link") or ""):
-            rel_m = re.search(r';\s*rel\s*=\s*(?:"([^"]*)"|([^\s,;]+))', link_m.group(2), re.I)
-            if rel_m:
-                rels = (rel_m.group(1) if rel_m.group(1) is not None else rel_m.group(2)).lower().split()
-                if "next" in rels:
-                    nxt = link_m.group(1)
-                    break
+        all_links = hdrs.get_all("Link") if hasattr(hdrs, "get_all") else None
+        link_hdr = ", ".join(all_links) if all_links else ((hdrs.get("Link") if hdrs else "") or "")
+        for link_m in re.finditer(
+                r'<([^>]+)>((?:\s*;\s*[^",;<=\s]+(?:\s*=\s*(?:"(?:\\.|[^"\\])*"|[^",;<]*))?)*)',
+                link_hdr):
+            for param_m in re.finditer(
+                    r';\s*([A-Za-z0-9!#$&+\-.^_`|~]+)\s*=\s*(?:"((?:\\.|[^"\\])*)"|([^\s,;]+))',
+                    link_m.group(2)):
+                if param_m.group(1).lower() == "rel":
+                    rels = (param_m.group(2) if param_m.group(2) is not None
+                            else param_m.group(3)).lower().split()
+                    if "next" in rels:
+                        nxt = link_m.group(1)
+                        break
+            if nxt:
+                break
         if not nxt:
             break
         try:
