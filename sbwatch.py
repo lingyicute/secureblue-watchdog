@@ -5947,6 +5947,8 @@ def cmd_check(args):
             elif state_base_index and state_base_index != state_base_dig:
                 try:
                     saved_index = resolve(reg, state_base_index)
+                except NoArchManifest:
+                    pass
                 except RegistryError as e:
                     if e.http_code != 404:
                         raise
