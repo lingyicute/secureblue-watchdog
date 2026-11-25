@@ -137,5 +137,13 @@ class TestTokenRealm(unittest.TestCase):
         self.assertIn("https://auth.example/token?", seen[1])
         self.assertIn("service=reg.example", seen[1])
 
+    def test_none_headers_on_http_error_continue_unauthenticated(self):
+        err_resp = S.urllib.error.HTTPError("https://reg.example/v2/", 401, "Unauthorized", None, None)
+        reg = S.Registry("reg.example/ns/img")
+        with patch.object(S._OPENER, "open", side_effect=err_resp), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertIsNone(reg._token())
+
+
 if __name__ == "__main__":
     unittest.main()
