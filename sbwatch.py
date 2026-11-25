@@ -2088,7 +2088,7 @@ def _missing_entries(these: list, other: list) -> list:
 
 def _dist_tag(release) -> str:
     """`.fc45` out of an rpm release string, or "" when it carries none."""
-    m = re.search(r"\.fc\d+", release or "")
+    m = re.search(r"\.fc[0-9]+(?![A-Za-z0-9])", release or "")
     return m.group(0) if m else ""
 
 
@@ -2644,7 +2644,7 @@ def fedora_release(pkgs: dict, image_version: str = "") -> str:
     fed_counts: dict = {}
     all_counts: dict = {}
     for p in pkgs.values():
-        m = re.search(r"\.fc(\d+)", p.get("release") or "")
+        m = re.search(r"\.fc([0-9]+)(?![A-Za-z0-9])", p.get("release") or "")
         if not m:
             continue
         ver = m.group(1)
