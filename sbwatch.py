@@ -2881,6 +2881,17 @@ def secureblue_notification(diff: dict, groups: list | None = None) -> dict:
             "why": why, "why_zh": why_zh}
 
 
+def _already_had_aliases(group: dict) -> list:
+    """Old-build aliases that were not counted for any sibling in this group."""
+    if group.get("downgrade"):
+        return []
+    counted = set(group.get("aliases") or ()) | {
+        x.get("alias") for x in group.get("passed_over") or () if x.get("alias")}
+    return list(dict.fromkeys(
+        x["alias"] for x in group.get("already_had") or ()
+        if x.get("alias") and x["alias"] not in counted))
+
+
 def _reverted_aliases(group: dict) -> list:
     """Old-only and intermediate stable security builds lost by a rollback."""
     return list(dict.fromkeys(
@@ -3046,8 +3057,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     same_commit = bool(meta.get("commit_a")) and meta["commit_a"] == meta.get("commit_b")
     v["same_inputhash"] = same_input
     v["same_commit"] = same_commit
-    v["already_had"] = sorted({x["alias"] for g in groups if not g["downgrade"]
-                               for x in g.get("already_had", []) if x.get("alias")})
+    v["already_had"] = sorted({a for g in groups for a in _already_had_aliases(g)})
     # what each security finding rests on: an advisory rpm-ostree would show, a
     # Fedora erratum that only matched after stripping .secureblue.N, or just a
     # changelog CVE mention. The distinction used to be invisible outside the
@@ -4021,8 +4031,7 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W(f"| {_md_cell(g['src'])} | {_md_cell(fmt_pkgs(g, 'zh' if is_zh else 'en'))} | {_md_cell(g['old_evr'])} → {_md_cell(g['new_evr'])} |")
         W("")
 
-    g_had = [g for g in groups if not g["downgrade"] and any(
-        x.get("alias") for x in g.get("already_had") or ())]
+    g_had = [(g, aliases) for g in groups if (aliases := _already_had_aliases(g))]
     if g_had:
         if is_zh:
             W(f"## 本次更新之前你就已经拥有的勘误（{len(g_had)}）")
@@ -4030,10 +4039,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
             W("这些勘误对应的是你**原本就在运行**的版本，因此它们不构成升级理由，"
               "其严重度也**没有**被计入上面的结论。")
             W("")
-            for g in g_had:
-                al = clip_list(dict.fromkeys(x["alias"] for x in g["already_had"]
-                                             if x.get("alias")), 4,
-                               lang="zh", joiner="，")
+            for g, aliases in g_had:
+                al = clip_list(aliases, 4, lang="zh", joiner="，")
                 W(f"- `{g['src']}`（针对你原有的 {g['old_evr']}）: {al}")
         else:
             W(f"## Errata you already had before this update ({len(g_had)})")
@@ -4042,9 +4049,8 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
               "reason to update and their severity is deliberately **not** counted in the verdict "
               "above.")
             W("")
-            for g in g_had:
-                al = clip_list(dict.fromkeys(x["alias"] for x in g["already_had"]
-                                             if x.get("alias")), 4)
+            for g, aliases in g_had:
+                al = clip_list(aliases, 4)
                 # "staying at": the package is in this list because it moves
                 # away from that build, so the old label said the opposite
                 W(f"- `{g['src']}` (for {g['old_evr']}, the build you already had): {al}")

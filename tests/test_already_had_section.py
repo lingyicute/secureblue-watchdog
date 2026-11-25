@@ -50,6 +50,25 @@ class TestAlreadyHadSection(unittest.TestCase):
         self.assertNotIn("Errata you already had before this update", md)
         self.assertNotIn("本次更新之前你就已经拥有的勘误", md)
 
+    def test_erratum_passed_over_by_sibling_srpm_is_excluded_from_already_had(self):
+        ups = [{"alias": "FEDORA-2026-655049a906", "type": "security", "severity": "medium",
+                "status": "stable", "title": "", "notes": "", "cves": [], "bugs": [],
+                "date_approved": None, "nvrs": ["kernel-7.3.3-300.fc45"]}]
+        pa = {"kernel": dict(pkg("kernel", "7.3.3-300.secureblue.2.fc45"), vendor=""),
+              "kernel-tools": pkg("kernel-tools", "7.2.15-300.fc45", src="kernel")}
+        pb = {"kernel": dict(pkg("kernel", "7.3.4-300.secureblue.1.fc45"), vendor=""),
+              "kernel-tools": pkg("kernel-tools", "7.3.4-300.fc45", src="kernel")}
+        d = S.pkg_diff(pa, pb)
+        for c in d["changed"]:
+            c["cls"] = S.classify_change(c["old"], c["new"], "F45", _Bodhi(ups), baseline_release="F45")
+        g = S.group_by_src(d["changed"])
+        v = S.verdict_of(d, LD, {}, {}, groups=g)
+        md = S.render_markdown("s", IMG, IMG, d, LD, v, [], groups=g)
+        self.assertEqual(v["level"], "update-now")
+        self.assertEqual(v["already_had"], [])
+        self.assertNotIn("Errata you already had before this update", md)
+        self.assertNotIn("本次更新之前你就已经拥有的勘误", md)
+
 
 if __name__ == "__main__":
     unittest.main()
