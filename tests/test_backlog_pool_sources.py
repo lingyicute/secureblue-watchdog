@@ -13,6 +13,10 @@ class TestBacklogPoolSources(unittest.TestCase):
         self.assertIn("dnf5", S.IMPORTANT_SRC)
         self.assertIn("dnf5", S.BACKLOG_POOL)
 
+    def test_openssl3_is_tracked_as_sensitive_and_backlog_audited(self):
+        self.assertIn("openssl3", S.IMPORTANT_SRC)
+        self.assertIn("openssl3", S.BACKLOG_POOL)
+
 
 if __name__ == "__main__":
     unittest.main()

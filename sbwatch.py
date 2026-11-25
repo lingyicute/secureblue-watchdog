@@ -164,7 +164,7 @@ SEC_WORDS_RE = re.compile(
 # `thunderbird` are absent from some variants (secureblue drops sudo, ships
 # trivalent instead of firefox) but stay listed for the variants that have them.
 IMPORTANT_SRC = {
-    "kernel", "glibc", "openssl", "nss", "systemd", "sudo", "polkit", "rpm-ostree",
+    "kernel", "glibc", "openssl", "openssl3", "nss", "systemd", "sudo", "polkit", "rpm-ostree",
     "ostree", "container-selinux", "selinux-policy", "libcap", "pam", "shadow-utils",
     "openssh", "curl", "dnf", "dnf5", "rpm", "grub2", "shim", "mutter", "gnome-shell",
     "gupnp", "webkitgtk", "firefox", "thunderbird", "trivalent",
@@ -4287,7 +4287,7 @@ def render_markdown(subject, a, b, diff, ldiff, verdict, notes, xc=None, backlog
 # and is the only X server in the image. `python3` is matched version-tolerantly
 # via _src_matches_pool (the real source on F44 is `python3.14`).
 BACKLOG_POOL = {
-    "kernel", "glibc", "openssl", "nss", "systemd", "sudo", "polkit", "rpm-ostree",
+    "kernel", "glibc", "openssl", "openssl3", "nss", "systemd", "sudo", "polkit", "rpm-ostree",
     "ostree", "selinux-policy", "container-selinux", "pam", "shadow-utils", "openssh",
     "curl", "dnf5", "rpm", "grub2", "shim", "mutter", "gnome-shell", "webkitgtk", "firefox",
     "thunderbird",
