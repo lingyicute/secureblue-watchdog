@@ -3805,9 +3805,9 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W("| | 上一版 | 新版 |")
         W("|---|---|---|")
         W(f"| 对比引用 | `{_md_cell(shortref(a['ref']))}` | `{_md_cell(shortref(b['ref']))}` |")
-        W(f"| 镜像版本 | {_md_cell(a['annotations'].get('org.opencontainers.image.version', '?'))} | {_md_cell(b['annotations'].get('org.opencontainers.image.version', '?'))} |")
+        W(f"| 镜像版本 | {_md_cell(a['annotations'].get('org.opencontainers.image.version') or '?')} | {_md_cell(b['annotations'].get('org.opencontainers.image.version') or '?')} |")
         W(f"| 构建时间 (UTC) | {_md_cell(a.get('created') or '?')} | {_md_cell(b.get('created') or '?')} |")
-        W(f"| 内核（`ostree.linux` 注解，来自 Fedora 基础镜像） | {_md_cell(a['annotations'].get('ostree.linux', '?'))} | {_md_cell(b['annotations'].get('ostree.linux', '?'))} |")
+        W(f"| 内核（`ostree.linux` 注解，来自 Fedora 基础镜像） | {_md_cell(a['annotations'].get('ostree.linux') or '?')} | {_md_cell(b['annotations'].get('ostree.linux') or '?')} |")
         if any(kernel_evr):
             W(f"| `kernel` 软件包（rpmdb，实际安装的内核） | {_md_cell(kernel_evr[0] or '—')} | {_md_cell(kernel_evr[1] or '—')} |")
         W(f"| rpm-ostree 输入哈希 | `{_md_cell(clip_hash(a['annotations'].get('rpmostree.inputhash') or '—', 12))}` | `{_md_cell(clip_hash(b['annotations'].get('rpmostree.inputhash') or '—', 12))}` |")
@@ -3818,9 +3818,9 @@ def _render_markdown_lang(lang: str, subject, a, b, diff, ldiff, verdict, notes,
         W("| | previous | new |")
         W("|---|---|---|")
         W(f"| compared refs | `{_md_cell(shortref(a['ref']))}` | `{_md_cell(shortref(b['ref']))}` |")
-        W(f"| image version | {_md_cell(a['annotations'].get('org.opencontainers.image.version', '?'))} | {_md_cell(b['annotations'].get('org.opencontainers.image.version', '?'))} |")
+        W(f"| image version | {_md_cell(a['annotations'].get('org.opencontainers.image.version') or '?')} | {_md_cell(b['annotations'].get('org.opencontainers.image.version') or '?')} |")
         W(f"| built (UTC) | {_md_cell(a.get('created') or '?')} | {_md_cell(b.get('created') or '?')} |")
-        W(f"| kernel (`ostree.linux` annotation, from the Fedora base) | {_md_cell(a['annotations'].get('ostree.linux', '?'))} | {_md_cell(b['annotations'].get('ostree.linux', '?'))} |")
+        W(f"| kernel (`ostree.linux` annotation, from the Fedora base) | {_md_cell(a['annotations'].get('ostree.linux') or '?')} | {_md_cell(b['annotations'].get('ostree.linux') or '?')} |")
         if any(kernel_evr):
             W(f"| `kernel` package (rpmdb, the kernel actually installed) | {_md_cell(kernel_evr[0] or '—')} | {_md_cell(kernel_evr[1] or '—')} |")
         W(f"| rpm-ostree inputhash | `{_md_cell(clip_hash(a['annotations'].get('rpmostree.inputhash') or '—', 12))}` | `{_md_cell(clip_hash(b['annotations'].get('rpmostree.inputhash') or '—', 12))}` |")
@@ -5016,8 +5016,8 @@ def cmd_tags(args):
     print(f"{args.to} -> {cur.get('index_digest') or cur['digest']}")
     if cur.get("index_digest") and cur["index_digest"] != cur["digest"]:
         print(f"  platform manifest 平台 manifest: {cur['digest']}")
-    print(f"  version 版本: {cur['annotations'].get('org.opencontainers.image.version')}")
-    print(f"  created 构建时间: {cur.get('created')}   Fedora base kernel 基础内核 (ostree.linux): {cur['annotations'].get('ostree.linux')}")
+    print(f"  version 版本: {cur['annotations'].get('org.opencontainers.image.version') or '?'}")
+    print(f"  created 构建时间: {cur.get('created') or '?'}   Fedora base kernel 基础内核 (ostree.linux): {cur['annotations'].get('ostree.linux') or '?'}")
     print(f"  chunks 分块: {len(cur['layers'])}  total 总量: {human(sum(l['size'] for l in cur['layers']))}")
     print(f"\ndated tags, newest first (probing the last {args.days} days; a missing day "
           f"means no dated tag was found for that day): / 日期标签，从新到旧（探测最近 {args.days} 天；"
@@ -5060,9 +5060,9 @@ def cmd_layers(args):
     # "20260916 -> latest" contradicted itself.
     print(f"{args.image}: {a['ref']} -> {b['ref']}"
           + ("   (auto-swapped to older -> newer / 已自动交换为 旧 -> 新)" if swapped else ""))
-    print(f"  version 版本: {a['annotations'].get('org.opencontainers.image.version')}"
-          f" -> {b['annotations'].get('org.opencontainers.image.version')}")
-    print(f"  Fedora base kernel 基础内核 (ostree.linux):  {a['annotations'].get('ostree.linux')} -> {b['annotations'].get('ostree.linux')}")
+    print(f"  version 版本: {a['annotations'].get('org.opencontainers.image.version') or '?'}"
+          f" -> {b['annotations'].get('org.opencontainers.image.version') or '?'}")
+    print(f"  Fedora base kernel 基础内核 (ostree.linux):  {a['annotations'].get('ostree.linux') or '?'} -> {b['annotations'].get('ostree.linux') or '?'}")
     print(f"  chunks 分块:  {ld['chunks_a']} -> {ld['chunks_b']} | "
           f"{ld['chunks_changed']} changed 变化, {ld['chunks_reused']} reused 复用")
     print(f"  download 下载: {human(ld['download_bytes'])} ({ld['download_pct']}% of "
