@@ -4458,7 +4458,13 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
     cov["failed"] = audit_failed if isinstance(mem, dict) else bodhi.failed
     cov["skipped_queries"] = audit_skipped if isinstance(mem, dict) else bodhi.skipped
     trunc = getattr(bodhi, "truncated_src", None) or ()
-    cov["truncated"] = sorted(src for src in chosen if src in trunc)
+    if isinstance(mem, dict):
+        cov["truncated"] = sorted(
+            src for src in chosen
+            if (isinstance(mem.get(f"{src}-{rel}"), dict) and mem[f"{src}-{rel}"].get("truncated"))
+            or (f"{src}-{rel}" not in mem and src in trunc))
+    else:
+        cov["truncated"] = sorted(src for src in chosen if src in trunc)
     if getattr(bodhi, "time_limited", False):
         cov["time_limited"] = True
     return rows, cov

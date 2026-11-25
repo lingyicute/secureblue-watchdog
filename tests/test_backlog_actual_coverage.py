@@ -109,6 +109,15 @@ class TestBacklogActualCoverage(unittest.TestCase):
         self.assertIn("1 with truncated errata", line.en)
         self.assertIn("1 个勘误列表被截断", line.zh)
 
+    def test_truncation_on_another_release_does_not_taint_backlog_coverage(self):
+        bodhi = S.Bodhi(cache_dir=None, max_calls=5, sleep=0)
+        bodhi._mem["kernel-F45"] = {"total": 200, "truncated": True, "updates": [], "unqueried": None}
+        bodhi.truncated_src.add("kernel")
+        with patch.object(S._OPENER, "open", side_effect=_empty_page):
+            _rows, cov = S.security_backlog({"kernel": pkg("kernel", "7.2-1.fc44")}, "F44", bodhi)
+        self.assertEqual(cov["truncated"], [])
+        self.assertEqual(cov["checked"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
