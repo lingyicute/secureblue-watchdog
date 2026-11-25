@@ -5823,6 +5823,8 @@ def cmd_check(args):
     # Recheck older checkpoints with a reproducible baseline once; their prior
     # coverage could have been intentionally narrower than this invocation's.
     old_scope = state.get("analysis_scope", None if state.get("prev_digest") else scope)
+    state_dig = _clean_sha256_header(state.get("digest")) or state.get("digest")
+    state_prev = _clean_sha256_header(state.get("prev_digest")) or state.get("prev_digest")
     watched = {"watched_digest": cur["digest"], "watched_version": ver,
                "watched_index_digest": cur.get("index_digest") or cur["digest"]}
 
@@ -5842,7 +5844,7 @@ def cmd_check(args):
 
     # An explicit --a (the workflow's `from_tag`) asks for that comparison; "no
     # new build since the last look" does not answer it, so it must not skip it.
-    if (state.get("digest") == cur["digest"] and not args.force and not args.a
+    if (state_dig == cur["digest"] and not args.force and not args.a
             and old_scope == scope and state.get("last_verdict") != "unknown"
             and state.get("analysis_incomplete") is False):
         msg = T(f"no new build for {args.image}:{args.to} - still {ver} "
@@ -5900,14 +5902,14 @@ def cmd_check(args):
         pending = (state.get("last_verdict") == "unknown" or state.get("analysis_incomplete")
                    or (previous and "analysis_incomplete" not in state))
         if (pending and not previous and state.get("baseline_missing") is True
-                and state.get("digest") and state["digest"] != cur["digest"]):
+                and state.get("digest") and state_dig != cur["digest"]):
             # No comparison existed on the first observation. It is still a
             # valid observed image to compare with a later, distinct target;
             # unlike an incomplete comparison it has no older usable baseline.
             state_base_dig = state["digest"]
             state_base_index = state.get("index_digest")
             state_base_lbl = _state_label(state)
-        elif pending or state.get("digest") == cur["digest"]:
+        elif pending or state_dig == cur["digest"]:
             # An inconclusive target is not a checkpoint. If the tag returned to
             # the last usable baseline, compare it to itself, not to the failure.
             state_base_dig = previous
@@ -5915,7 +5917,7 @@ def cmd_check(args):
             if previous:
                 state_base_lbl = clip_text(state.get("prev_label") or previous,
                                             BASELINE_LABEL_CAP, lang="both")
-        elif state.get("digest") and state["digest"] != cur["digest"]:
+        elif state.get("digest") and state_dig != cur["digest"]:
             state_base_dig = state["digest"]
             state_base_index = state.get("index_digest")
             state_base_lbl = _state_label(state)
@@ -5941,7 +5943,7 @@ def cmd_check(args):
         try:
             state_base_index = _clean_sha256_header(state_base_index)
             if state_base_dig == cur["digest"]:
-                prev = cur
+                prev = {**cur, "ref": state_base_dig}
             elif state_base_index and state_base_index != state_base_dig:
                 try:
                     saved_index = resolve(reg, state_base_index)
@@ -6090,7 +6092,7 @@ def cmd_check(args):
                       "  inputhash 相同但 rpmdb chunk 不同 —— inputhash 继承自 Fedora 基础镜像，"
                       "看不到 secureblue 自己的重建，因此仍然拉取 rpmdb"))
 
-    if not args.a and prev["digest"] in (state.get("digest"), state.get("prev_digest")):
+    if not args.a and prev["digest"] in (state_dig, state_prev):
         # A stateful watch describes the actual movement of the tag, including a
         # rollback. Auto-orienting by build time would report the reverse upgrade
         # (and its CVE fixes) while saving the older target as the new state.
@@ -6110,9 +6112,9 @@ def cmd_check(args):
     # explicit --a, a forced re-check of `prev_digest`, or a baseline that had to
     # replace a pruned one - there it miscounted and misnamed what was compared.
     seen = (state.get("created") or "") \
-        if not args.a and not state_lost and prev["digest"] == state.get("digest") else ""
+        if not args.a and not state_lost and prev["digest"] == state_dig else ""
     if seen:
-        uniq, seen_pds = [], {cur["digest"], state.get("digest")}
+        uniq, seen_pds = [], {cur["digest"], state_dig}
         seen_ord = _image_order(state)
         cur_ord = _image_order(cur)
         for r in sorted(hist, key=lambda x: _image_order(x.get("image") or x)):
