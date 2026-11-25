@@ -153,6 +153,8 @@ MANIFEST_ACCEPT = ",".join([
 # `(?!\d)`: an id longer than seven digits must not be read as its first seven.
 # CVE Record Format: ASCII year, then 4–19 ASCII sequence digits.
 CVE_RE = re.compile(r"(?<![A-Za-z0-9])CVE[-_ \u2010-\u2013]?([0-9]{4})[-_\u2010-\u2013]([0-9]{4,19})(?!\d)", re.I)
+CVE_BRACE_RE = re.compile(
+    r"(?<![A-Za-z0-9])CVE[-_ \u2010-\u2013]?([0-9]{4})[-_\u2010-\u2013]\{([0-9,\s]+)\}", re.I)
 SEC_WORDS_RE = re.compile(
     r"(security fix|fix(es)? .{0,40}vulnerab|buffer overflow|use-after-free|"
     r"privilege escalation|out.of.bounds)", re.I)
@@ -178,7 +180,14 @@ IMPORTANT_SRC = {
 
 def find_cves(text) -> list:
     """Every CVE id mentioned in `text`, in the canonical CVE-YYYY-NNNN spelling."""
-    return [f"CVE-{year}-{num}" for year, num in CVE_RE.findall(text or "")]
+    s = text or ""
+    out = [f"CVE-{year}-{num}" for year, num in CVE_RE.findall(s)]
+    for year, body in CVE_BRACE_RE.findall(s):
+        for part in body.split(","):
+            num = part.strip()
+            if re.fullmatch(r"[0-9]{4,19}", num):
+                out.append(f"CVE-{year}-{num}")
+    return out
 
 
 def _src_matches_pool(src: str, pool) -> bool:

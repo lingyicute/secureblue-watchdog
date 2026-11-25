@@ -27,6 +27,13 @@ class TestCveIdBoundary(unittest.TestCase):
         self.assertEqual(S.find_cves("(CVE-2026-1234),CVE-2026-5678"),
                          ["CVE-2026-1234", "CVE-2026-5678"])
 
+    def test_brace_listed_cves_expand_valid_ascii_ids(self):
+        text = "- Rebuild for rust-openssl CVE-2026-{41676,41677, 41678}"
+        self.assertEqual(S.find_cves(text),
+                         ["CVE-2026-41676", "CVE-2026-41677", "CVE-2026-41678"])
+        self.assertEqual(S.find_cves("CVE-2026-{1234," + "9" * 20 + "}"), ["CVE-2026-1234"])
+        self.assertEqual(S.find_cves("nocve-2026-{1234,5678} CVE-2026-{１２３４,5678}"), [])
+
 
 if __name__ == "__main__":
     unittest.main()
