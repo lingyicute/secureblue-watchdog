@@ -2322,14 +2322,14 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None,
                               and (not old_third_party or old_norm)) else None)
                 if passed and u.get("type") == "security" and status in PUSHED_STATUSES:
                     info["passed_over"].append(
-                        {"alias": u["alias"], "severity": u.get("severity"),
+                        {"alias": u.get("alias"), "severity": u.get("severity"),
                          "nvr": passed})
                     info["security"] = True
                     add_advisory_cves(u)
                     info["severities"].append((u.get("severity") or "").lower())
                     info["sec_severities"].append((u.get("severity") or "").lower())
                     info["why"].append(
-                        f"erratum/勘误 {u['alias']}: type=security "
+                        f"erratum/勘误 {u.get('alias')}: type=security "
                         f"severity={u.get('severity')} status={status} (for {passed}, "
                         f"a build this update passes over / 本次更新越过的构建)")
                 continue
@@ -2341,15 +2341,15 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None,
             if status not in PUSHED_STATUSES:
                 # type=security but unpushed/testing/obsolete: report, don't escalate
                 info["not_pushed"].append(
-                    {"alias": u["alias"], "type": u.get("type"),
+                    {"alias": u.get("alias"), "type": u.get("type"),
                      "severity": u.get("severity"), "status": status})
                 info["why"].append(
-                    f"erratum/勘误 {u['alias']}: type={u.get('type')} status={status} "
+                    f"erratum/勘误 {u.get('alias')}: type={u.get('type')} status={status} "
                     f"(not stable / 非 stable 状态 - not counted)")
                 continue
             if hit_old:
                 info["already_had"].append(
-                    {"alias": u["alias"], "type": u.get("type"),
+                    {"alias": u.get("alias"), "type": u.get("type"),
                      "severity": u.get("severity"), "status": status,
                      "nvr": sorted(hit_old)[0],
                      "also_matches_target": bool(hit_attached or hit_corresponding)})
@@ -2360,7 +2360,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None,
             add_advisory_cves(u)
             sev_word = (u.get("severity") or "").lower()
             info["severities"].append(sev_word)
-            cand_err = {"alias": u["alias"], "type": u["type"],
+            cand_err = {"alias": u.get("alias"), "type": u.get("type"),
                         "severity": u.get("severity"), "status": status,
                         "approved": u.get("date_approved"),
                         "attached": attached,
@@ -2372,9 +2372,9 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None,
                 return (e["type"] == "security", bool(e["attached"]),
                         SEV_RANK.get((e.get("severity") or "").lower(), 0))
             if prev_err is None or _err_key(cand_err) > _err_key(prev_err):
-                info["bodhi_type"] = u["type"]
+                info["bodhi_type"] = u.get("type")
                 info["erratum"] = cand_err
-            if u["type"] == "security":
+            if u.get("type") == "security":
                 info["security"] = True
                 info["sec_severities"].append(sev_word)
                 # Recorded separately from `security`: secureblue's rule keys off
@@ -2394,7 +2394,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None,
                     if _sev_rank_for_upstream(cand) > _sev_rank_for_upstream(info["erratum_severity"]):
                         info["erratum_severity"] = cand
                     info["why"].append(
-                        f"erratum/勘误 {u['alias']}: type=security "
+                        f"erratum/勘误 {u.get('alias')}: type=security "
                         f"severity={u.get('severity')} status={status}")
                 else:
                     # e.g. secureblue's kernel: the Fedora erratum describes the
@@ -2403,7 +2403,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None,
                     # is NOT attached - the desktop will not see its severity.
                     info["advisory_corresponding"] = True
                     info["why"].append(
-                        f"erratum/勘误 {u['alias']}: type=security "
+                        f"erratum/勘误 {u.get('alias')}: type=security "
                         f"severity={u.get('severity')} status={status} "
                         f"(matched Fedora's {sorted(hit_corresponding)[0]} only after "
                         f"stripping the local release marker from {new['release']} - "
@@ -2413,7 +2413,7 @@ def classify_change(old: dict | None, new: dict, rel: str, bodhi: Bodhi | None,
                 # ids marks the package security-relevant below, so name it: the
                 # evidence cell of shadow-utils (bugfix, severity=high) was empty.
                 info["why"].append(
-                    f"erratum/勘误 {u['alias']}: type={u.get('type')} "
+                    f"erratum/勘误 {u.get('alias')}: type={u.get('type')} "
                     f"severity={u.get('severity')} status={status}")
     # A CVE carried by the new build's pushed erratum is not a dropped fix even if
     # the RPM changelog entry that used to mention it was trimmed or reworded.
@@ -4454,7 +4454,7 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
                     "have": with_epoch(_build_evr(p), have_epoch),
                     "want": with_epoch(f"{best['version']}-{best['release']}", want_epoch),
                     "have_epoch": have_epoch, "want_epoch": want_epoch,
-                    "alias": u["alias"], "notes": u.get("notes") or "",
+                    "alias": u.get("alias"), "notes": u.get("notes") or "",
                 }
                 advisory = {**build, "severity": u.get("severity"),
                             "cves": sorted(cves), "advisory_wide_cves": sorted(shared)}

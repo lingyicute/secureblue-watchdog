@@ -10,6 +10,8 @@ IMG = {"ref": "a", "digest": "sha256:" + "0" * 64, "annotations": {}, "created":
 
 
 class _Bodhi:
+    failed = skipped = 0
+
     def __init__(self, ups):
         self._ups = ups
 
@@ -50,6 +52,22 @@ class TestNullBodhiAlias(unittest.TestCase):
                 "status": "stable", "builds": [{"nvr": "foo-1.2-1.fc45"}]}]
         bodhi._fetch_page = lambda url, src, expected_page: ({"total": 1, "updates": raw}, raw)
         self.assertEqual(bodhi.updates_for_src("foo", "F45")[0]["alias"], "FEDORA-2026-fb")
+
+    def test_omitted_alias_and_type_keys_do_not_raise_keyerror(self):
+        old, new = pkg("curl", "8.9.0-1.fc45"), pkg("curl", "8.9.2-1.fc45")
+        bodhi = _Bodhi([
+            {"status": "stable", "severity": "high", "nvrs": ["curl-8.9.2-1.fc45"], "cves": []},
+            {"type": "security", "status": "stable", "severity": "medium",
+             "nvrs": ["curl-8.9.1-1.fc45"], "cves": []},
+            {"status": "testing", "severity": "low", "nvrs": ["curl-8.9.2-1.fc45"], "cves": []},
+            {"status": "stable", "severity": "low", "nvrs": ["curl-8.9.0-1.fc45"], "cves": []},
+        ])
+        cls = S.classify_change(old, new, "F45", bodhi)
+        self.assertTrue(cls["security"])
+        self.assertEqual(len(cls["passed_over"]), 1)
+        rows, _ = S.security_backlog({"curl": old}, "F45", bodhi)
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0]["alias"])
 
 
 if __name__ == "__main__":
