@@ -3400,7 +3400,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
                     (g["sec_sev_rank"] if "sec_sev_rank" in g else (
                         g["sev_rank"] if (g.get("has_security_erratum")
                                           or g.get("advisory_corresponding")
-                                          or g.get("passed_over")) else 0)) >= 3
+                                          or g.get("passed_over")) else 0)) >= v["severity_rank"]
                     for g in sec)
                 kind = "security erratum" if has_hi_sec else "non-security erratum"
                 bits.append(f"a released {kind} ranks {v['severity_rank']}/4 "
