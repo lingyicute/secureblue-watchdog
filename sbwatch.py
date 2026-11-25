@@ -444,8 +444,11 @@ class _CappedReader:
         self._sha = hashlib.sha256()          # of every byte handed out so far
 
     def peek(self, size: int) -> bytes:
-        if len(self._buf) < size:
-            self._buf += self._read(size - len(self._buf))
+        while len(self._buf) < size:
+            chunk = self._read(size - len(self._buf))
+            if not chunk:
+                break
+            self._buf += chunk
         return self._buf[:size]
 
     def _read(self, size: int) -> bytes:
