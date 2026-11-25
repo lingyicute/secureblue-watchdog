@@ -2962,9 +2962,10 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     down = [g for g in groups if g["downgrade"]]
     lost = [g for g in groups if g["dropped"]]
     # Same partition as the report's "Bumps in security-sensitive packages"
-    # section: a downgraded group belongs to the downgrade warning below, and
-    # calling it a "version bump" in the same headline contradicted that warning.
-    imp = [g for g in groups if g["important"] and not g["security"] and not g["downgrade"]]
+    # section: purely downgraded groups stay in the downgrade warning, while
+    # mixed-direction groups keep their upgraded sensitive binaries visible.
+    imp = [g for g in groups if g["important"] and not g["security"]
+           and any(p.get("dir") != "downgrade" for p in g["pkgs"])]
     shared_cves = {c for g in sec for c in g.get("advisory_wide_cves", ())}
     cves = sorted({c for g in sec for c in g["cves"]} | shared_cves)
     sev = max([g["sev_rank"] for g in sec] or [0])
@@ -3046,7 +3047,8 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
          "changed_pkg_count": n_bin, "security_src": [g["src"] for g in sec],
          "security_pkgs": sorted({p["name"] for g in sec for p in g["pkgs"]
                                   if p.get("dir") != "downgrade"}),
-         "important_pkgs": sorted({p["name"] for g in imp for p in g["pkgs"]}),
+         "important_pkgs": sorted({p["name"] for g in imp for p in g["pkgs"]
+                                   if p.get("dir") != "downgrade"}),
          "cves": cves, "advisory_wide_cves": sorted(shared_cves),
           "cves_dropped": sorted({c for g in lost for c in g["dropped"]}),
          "cves_reverted": sorted({c for g in lost for c in g.get("reverted") or ()}),

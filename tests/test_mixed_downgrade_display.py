@@ -23,7 +23,8 @@ class TestMixedDowngradeDisplay(unittest.TestCase):
     def test_headline_counts_and_names_only_downgraded_binaries(self):
         verdict, _ = self.result()
         self.assertIn("(1 binary) downgraded", verdict["headline"])
-        self.assertIn("(1 binary) bumped", verdict["headline"])
+        self.assertIn("version bump in security-sensitive packages: nss", verdict["headline"])
+        self.assertEqual(verdict["important_pkgs"], ["nss"])
         warning = verdict["headline"].split("WARNING:")[1]
         self.assertIn("nspr (4.39.0-10.fc45", warning)
         self.assertNotIn("nss (3.128.0-1.fc45", warning)
@@ -53,5 +54,7 @@ class TestMixedDowngradeDisplay(unittest.TestCase):
         image = {"ref": "test", "digest": "sha256:" + "a" * 64, "annotations": {}}
         en_routine = S.render_markdown("m", image, image, diff, layers, verdict, []).split("\n\n---\n\n")[1]
         sec = en_routine.split("## Routine bumps (1 source package(s), 1 binary)")[1].split("\n## ")[0]
+        self.assertIn("(1 binary) downgraded", verdict["headline"])
+        self.assertIn("(1 binary) bumped", verdict["headline"])
         self.assertIn("`foo-a`", sec)
         self.assertNotIn("`foo-b`", sec)
