@@ -4356,7 +4356,7 @@ def security_backlog(pkgs: dict, rel: str, bodhi: Bodhi,
         if not pool_entries:
             continue
         present.update(pool_entries)
-        if _is_third_party(p) and not re.search(r"\.secureblue\.\d+", p.get("release") or ""):
+        if _is_third_party(p) and not re.search(r"\.secureblue\.\d+", _build_evr(p)):
             continue
         eligible.update(pool_entries)
         want.setdefault(src, []).append((n, p))
