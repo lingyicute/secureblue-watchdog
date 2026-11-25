@@ -33,3 +33,14 @@ class TestOutputPathConflicts(unittest.TestCase):
             out = Path(tmp) / "both.out"
             with out.open("w", encoding="utf-8") as fh, patch.object(S.sys, "stdout", fh):
                 self._reject(["diff", "a", "b", "--markdown", str(out), "--json-out", "-"])
+
+    def test_stdout_report_cannot_share_redirected_file_with_json_output(self):
+        for argv_fn in (
+            lambda p: ["diff", "a", "b", "--json-out", str(p)],
+            lambda p: ["layers", "a", "b", "--json", str(p)],
+            lambda p: ["backlog", "latest", "--json-out", str(p)],
+        ):
+            with tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / "same.out"
+                with out.open("w", encoding="utf-8") as fh, patch.object(S.sys, "stdout", fh):
+                    self._reject(argv_fn(out))

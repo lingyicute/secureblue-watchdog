@@ -6278,6 +6278,15 @@ def _check_output_paths(parser, args):
     """Fail before any network work if two outputs can overwrite each other."""
     paths = {}
     extra_keys = []
+
+    def _stdout_key(label, *, regular_only=False):
+        try:
+            st = os.fstat(sys.stdout.fileno())
+            if not regular_only or stat.S_ISREG(st.st_mode):
+                extra_keys.append((label, ((st.st_dev, st.st_ino),)))
+        except (OSError, ValueError, AttributeError):
+            pass
+
     if args.cmd == "check":
         report = args.report or "report.md"
         paths = {"--report": report, "report JSON": report + ".json",
@@ -6290,11 +6299,15 @@ def _check_output_paths(parser, args):
         paths = {"--markdown": args.markdown,
                  "--json-out": None if args.json_out == "-" else args.json_out}
         if args.json_out == "-":
-            try:
-                st = os.fstat(sys.stdout.fileno())
-                extra_keys.append(("--json-out", ((st.st_dev, st.st_ino),)))
-            except (OSError, ValueError, AttributeError):
-                pass
+            _stdout_key("--json-out")
+        elif not args.markdown and args.json_out and not _json_to_stdout(args.json_out):
+            _stdout_key("stdout", regular_only=True)
+    elif args.cmd == "layers" and args.json and not _json_to_stdout(args.json):
+        paths = {"--json": args.json}
+        _stdout_key("stdout", regular_only=True)
+    elif args.cmd == "backlog" and args.json_out and not _json_to_stdout(args.json_out):
+        paths = {"--json-out": args.json_out}
+        _stdout_key("stdout", regular_only=True)
     seen = {}
     items = []
     for option, path in paths.items():
