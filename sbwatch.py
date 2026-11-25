@@ -1106,7 +1106,7 @@ class Registry:
             out["layers"].append({
                 "digest": ldig,
                 "size": sz,
-                "components": la.get("org.chunkah.component", "chunkah/unclaimed").split(),
+                "components": la.get("org.chunkah.component", "chunkah/unclaimed").split() or ["chunkah/unclaimed"],
                 "stability": stab,
             })
         return out
@@ -2943,9 +2943,9 @@ def _unowned_chunk_bytes(ldiff: dict) -> tuple[int, int]:
     total = shared = 0
     for ch in ldiff.get("changed_chunks") or []:
         comps = ch.get("components") or []
-        if any(_unowned(c) for c in comps):
+        if not comps or any(_unowned(c) for c in comps):
             total += ch["size"]
-            shared += not all(_unowned(c) for c in comps)
+            shared += bool(comps) and not all(_unowned(c) for c in comps)
     return total, shared
 
 

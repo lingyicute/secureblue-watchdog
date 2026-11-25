@@ -75,6 +75,24 @@ class TestUnownedBigfilesNote(unittest.TestCase):
         self.assertIn("含无归属组件的变化压缩层共 63.1 MiB", md)
         self.assertIn("这不是文件变化量。", md)
 
+    def test_empty_component_annotation_counts_as_unowned(self):
+        import io
+        import json
+
+        class _Resp(io.BytesIO):
+            headers = {"Content-Type": "application/vnd.oci.image.manifest.v1+json"}
+
+        reg = S.Registry("ghcr.io/x/y")
+        body = json.dumps({"layers": [{
+            "digest": "sha256:" + "a" * 64, "size": 2048,
+            "annotations": {"org.chunkah.component": "   "},
+        }]}).encode()
+        reg._open = lambda path, accept: _Resp(body)
+        resolved = reg.resolve("latest", light=True)
+        self.assertEqual(resolved["layers"][0]["components"], ["chunkah/unclaimed"])
+        empty_chunk = {"components": [], "size": 2048, "stability": 0.0}
+        self.assertEqual(S._unowned_chunk_bytes({"changed_chunks": [empty_chunk]}), (2048, 0))
+
 
 if __name__ == "__main__":
     unittest.main()
