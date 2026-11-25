@@ -1,5 +1,9 @@
 """An incomplete errata query is not evidence of an empty advisory list."""
+import contextlib
+import io
+import types
 import unittest
+from unittest.mock import patch
 from test_sbwatch import S, pkg
 from test_live_20261117 import FIXTURE
 
@@ -63,3 +67,39 @@ class TestPartialPopup(unittest.TestCase):
         self.assertEqual((result["level"], result["level_without_advisories"]),
                          ("normal", "normal"))
         self.assertEqual(result["max_advisory_severity"], "none")
+
+    def test_truncated_secureblue_kernel_does_not_unknown_popup_when_other_sources_complete(self):
+        pa = S.PackageTable({
+            "kernel": dict(pkg("kernel", "7.3.3-300.secureblue.1.fc45"), vendor=""),
+            "curl": pkg("curl", "8.20.0-1.fc45"),
+        })
+        pb = S.PackageTable({
+            "kernel": dict(pkg("kernel", "7.3.4-300.secureblue.1.fc45"), vendor=""),
+            "curl": pkg("curl", "8.21.0-1.fc45"),
+        })
+        img_a = {"ref": "a", "digest": "sha256:" + "1" * 64, "created": "2026-11-20T00:00:00Z",
+                 "annotations": {"org.opencontainers.image.version": "45.20261120.0"}, "layers": []}
+        img_b = {"ref": "b", "digest": "sha256:" + "2" * 64, "created": "2026-11-21T00:00:00Z",
+                 "annotations": {"org.opencontainers.image.version": "45.20261121.0"}, "layers": []}
+
+        class _PartialKernelBodhi(S.Bodhi):
+            def updates_for_src(self, src, rel):
+                if src == "kernel":
+                    self.truncated_src.add(src)
+                    self._mem[f"{src}-{rel}"] = {"total": 200, "truncated": True, "updates": [], "unqueried": None}
+                    return []
+                self._mem[f"{src}-{rel}"] = {"total": 0, "truncated": False, "updates": [], "unqueried": None}
+                return []
+
+        args = types.SimpleNamespace(
+            image="secureblue/x", arch="amd64", exact=1, keep_order=True, no_bodhi=False,
+            max_bodhi=10, bodhi_seconds=0, audit=False, cache_dir=None,
+            cosign_pub=None, require_cosign=False)
+        reg = types.SimpleNamespace(_token=lambda: None, host="ghcr.io", repo="secureblue/x")
+        with patch.object(S, "load_pkglist", side_effect=[pa, pb]), \
+                patch.object(S, "Bodhi", _PartialKernelBodhi), \
+                contextlib.redirect_stderr(io.StringIO()):
+            res = S.do_diff(args, "a", "b", images=(img_a, img_b), reg=reg)
+        self.assertTrue(res["diff"]["advisory_coverage_complete"])
+        self.assertEqual(res["verdict"]["secureblue_notification"]["level"], "normal")
+        self.assertEqual(res["bodhi_state"]["truncated"], ["kernel"])

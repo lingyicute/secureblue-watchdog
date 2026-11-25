@@ -2892,6 +2892,14 @@ def _already_had_aliases(group: dict) -> list:
         if x.get("alias") and x["alias"] not in counted))
 
 
+def _can_attach_advisory(change: dict) -> bool:
+    """Whether rpm-ostree can attach a Fedora Bodhi advisory to this modified package."""
+    new = change.get("new") or {}
+    return (change.get("dir") != "arch-change"
+            and not _is_third_party(new)
+            and not re.search(r"\.secureblue\.\d+", _build_evr(new)))
+
+
 def _reverted_aliases(group: dict) -> list:
     """Old-only and intermediate stable security builds lost by a rollback."""
     return list(dict.fromkeys(
@@ -3012,9 +3020,7 @@ def verdict_of(diff: dict, ldiff: dict, meta: dict, xc: dict | None = None,
     elif (not diff.get("advisory_coverage_complete", not any(
             (bodhi_state or {}).get(k) for k in ("failed", "skipped", "truncated", "disabled", "unavailable")))
           and not sbn.get("unconditional") and any(
-              c.get("dir") != "arch-change" and not _is_third_party(c.get("new") or {})
-              and not re.search(r"\.secureblue\.\d+", _build_evr(c.get("new") or {}))
-              for c in diff["changed"])):
+              _can_attach_advisory(c) for c in diff["changed"])):
         obs_max = sbn.get("max_advisory_severity")
         sbn = dict(sbn, advisory_coverage_complete=False,
                    observed_security_advisory_count=sbn.get("security_advisory_count"),
@@ -5557,7 +5563,15 @@ def do_diff(args, ref_a: str, ref_b: str, images: tuple | None = None,
     if bodhi is not None:
         # Old-scope rollback lookups are evidence about what the image left,
         # not inputs to the desktop's advisory check on the destination.
-        diff["advisory_coverage_complete"] = not (bodhi.failed or bodhi.skipped or bodhi.truncated_src)
+        mem = getattr(bodhi, "_mem", None)
+        eligible = [c for c in diff["changed"] if _can_attach_advisory(c)]
+        if isinstance(mem, dict) and all(isinstance(mem.get(f"{c['new']['src']}-{rel}"), dict) for c in eligible):
+            diff["advisory_coverage_complete"] = all(
+                not mem[f"{c['new']['src']}-{rel}"].get("unqueried")
+                and not mem[f"{c['new']['src']}-{rel}"].get("truncated")
+                for c in eligible)
+        else:
+            diff["advisory_coverage_complete"] = not (bodhi.failed or bodhi.skipped or bodhi.truncated_src)
         _add_rollback_baseline_errata(diff["changed"], baseline_release, rel, bodhi)
         bstate = {"failed": bodhi.failed, "skipped": bodhi.skipped,
                   "truncated": sorted(bodhi.truncated_src),
