@@ -410,7 +410,7 @@ CI 中由 `test` 作业运行；`watch` 作业**不**依赖 `test`（两者并�
 
 ## GitHub Action
 
-仓库自带 `.github/workflows/sbwatch.yml`。其内置计划是每小时 UTC 第 20 分钟（`20 * * * *`）；外部调度器也可通过 `workflow_dispatch` 额外触发，实际频率取决于外部配置：
+仓库自带 `.github/workflows/sbwatch.yml`。其配置了每小时 UTC 第 20 分钟（`20 * * * *`）的内置 cron，然而根据我的观察，最少也要过三四个小时才会运行一次，甚至有时候六七个小时都没运行一次。因此我做了 [worker-cron](https://github.com/lingyicute/worker-cron)，每半小时手动触发一次。
 
 - cache `~/.cache/sbwatch` (pkglist + Bodhi + state.json)，按 image+arch 分命名空间，
   其他 `--image` 拼写彼此隔离；prune 仅清理当前 Git 引用下本命名空间的缓存并保留最新创建的 7 份（防止 `state.json` 被 LRU 挤掉）；
