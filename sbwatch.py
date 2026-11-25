@@ -4540,7 +4540,7 @@ def cmd_backlog(args):
                 "  显示最新候选构建及其勘误编号；严重度取匹配勘误中的最高值"))
     for r in rows:
         print(f"  {r['name']:28} {r['have']:>26}  ->  {r['want']:<26} "
-              f"{(r['severity'] or '?'):9} {r['alias']}")
+              f"{(r['severity'] or '?'):9} {r.get('alias') or '—'}")
         head, more = _note_head(r["notes"])
         if head:
             _rest = f" (+{more} more line(s) / 另有 {more} 行)" if more else ""
