@@ -5340,7 +5340,15 @@ def load_pkglist(reg, img, ref, cache_dir, notes):
     # only ever true for one variant on one architecture.
     layers = img.get("layers") or []
     fetched = (rpmdb_chunk({"layers": layers}) or {}).get("size", 0)
-    avoided = sum(l["size"] for l in layers) - fetched
+    unique_total, seen_digests = 0, set()
+    for l in layers:
+        dig = l.get("digest")
+        if dig:
+            if dig in seen_digests:
+                continue
+            seen_digests.add(dig)
+        unique_total += l["size"]
+    avoided = max(0, unique_total - fetched)
     notes.append(T(f"package list of `{ref}` came from that image's `rpmdb.sqlite` chunk "
                    f"({human(fetched)} fetched, {human(avoided)} avoided)",
                    f"`{ref}` 的软件包列表来自该镜像的 `rpmdb.sqlite` chunk"
