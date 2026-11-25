@@ -105,3 +105,13 @@ class TestBacklogEpochProvenance(unittest.TestCase):
         self.assertEqual((row["alias"], row["severity"], row["notes"]),
                          ("FEDORA-2026-93eed17997", "urgent", ""))
         self.assertEqual([a["severity"] for a in row["advisories"]], ["urgent", "high"])
+
+    def test_oversized_and_non_rpm_bodhi_epochs_are_ignored_without_crash(self):
+        with _bodhi(_security("re2-20251105-19.fc45", "9" * 5000, "FEDORA-2026-big"),
+                    _security("re2-20251105-20.fc45", "0" * 5000 + "2", "FEDORA-2026-pad"),
+                    _security("re2-20251105-21.fc45", True, "FEDORA-2026-bool")):
+            ups = S.Bodhi(sleep=0).updates_for_src("re2", "F45")
+        by_alias = {u["alias"]: u["build_epochs"] for u in ups}
+        self.assertEqual(by_alias["FEDORA-2026-big"], {})
+        self.assertEqual(by_alias["FEDORA-2026-pad"], {"re2-20251105-20.fc45": "2"})
+        self.assertEqual(by_alias["FEDORA-2026-bool"], {})
